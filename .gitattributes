@@ -1,0 +1,9 @@
+# Normalise line endings: LF in the repository and in the working tree, so
+# Windows checkouts do not rewrite every file and produce noisy diffs.
+* text=auto eol=lf
+
+# Binary assets
+*.ico binary
+*.png binary
+*.jpg binary
+*.woff2 binary
