@@ -355,12 +355,28 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
       </Card>
 
       {error && (
-        <p
+        <div
           role="alert"
-          className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
+          className="bg-danger-subtle text-danger-subtle-foreground space-y-1 rounded-md px-3 py-2 text-sm"
         >
-          {error}
-        </p>
+          <p>{error}</p>
+          {/*
+            Every field error is listed here, not only the ones with an inline
+            slot. A validation failure on a field the form does not render an
+            error for is otherwise completely invisible — the submit button just
+            stops working, which is exactly the bug this replaced.
+          */}
+          {Object.keys(fieldErrors).length > 0 && (
+            <ul className="list-inside list-disc">
+              {Object.entries(fieldErrors).map(([field, message]) => (
+                <li key={field}>
+                  <span className="font-medium">{field.replace(/_/g, " ")}</span>
+                  : {message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       <Button type="submit" className="h-11 w-full" disabled={isPending}>

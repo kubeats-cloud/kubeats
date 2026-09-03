@@ -3,6 +3,13 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logError } from "@/lib/errors";
+import {
+  canonicalAreaName,
+  canonicalCityName,
+  canonicalStateName,
+  findExisting,
+  normalizeName,
+} from "@/lib/location-names";
 
 /**
  * The State -> City -> Area tree.
@@ -76,24 +83,57 @@ type Admin = ReturnType<typeof createAdminClient>;
 
 const UNIQUE_VIOLATION = "23505";
 
-async function ensureRow(
+export interface NamedRow {
+  id: string;
+  name: string;
+}
+
+/**
+ * Find-or-create, matched leniently and created canonically.
+ *
+ * The lookup compares against every existing row after aliasing and
+ * normalising, so "Bangalore" finds the seeded "Bengaluru" instead of adding a
+ * second city. Only a genuinely new place is inserted, and then under the
+ * canonical spelling.
+ *
+ * Returns the *stored* name, never the caller's. Handing back the raw input
+ * would let a caller display "Bangalore" against Bengaluru's id — and since
+ * institutes store city as free text, that spelling would be written straight
+ * back into the data the alias map exists to keep consistent.
+ */
+async function ensureNamed(
   db: Admin,
   table: "location_states" | "location_cities",
-  match: Record<string, string>,
-): Promise<string | null> {
-  const existing = await db
+  scope: Record<string, string>,
+  rawName: string,
+  canonicalise: (value: string) => string,
+): Promise<NamedRow | null> {
+  const canonical = canonicalise(rawName);
+
+  const existing = await db.from(table).select("id, name").match(scope);
+  if (existing.error) {
+    logError(`locations:${table}:read`, existing.error);
+    return null;
+  }
+
+  const match = findExisting(existing.data ?? [], canonical, canonicalise);
+  if (match) return { id: match.id, name: match.name };
+
+  const inserted = await db
     .from(table)
-    .select("id")
-    .match(match)
-    .maybeSingle();
-  if (existing.data?.id) return existing.data.id;
+    .insert({ ...scope, name: canonical })
+    .select("id, name")
+    .single();
+  if (!inserted.error) return inserted.data;
 
-  const inserted = await db.from(table).insert(match).select("id").single();
-  if (!inserted.error) return inserted.data.id;
-
+  // Someone inserted the same name between our read and write.
   if (inserted.error.code === UNIQUE_VIOLATION) {
-    const retry = await db.from(table).select("id").match(match).maybeSingle();
-    return retry.data?.id ?? null;
+    const retry = await db
+      .from(table)
+      .select("id, name")
+      .match({ ...scope, name: canonical })
+      .maybeSingle();
+    return retry.data ?? null;
   }
 
   logError(`locations:${table}`, inserted.error);
@@ -101,11 +141,17 @@ async function ensureRow(
 }
 
 export async function ensureState(db: Admin, name: string) {
-  return ensureRow(db, "location_states", { name });
+  return ensureNamed(db, "location_states", {}, name, canonicalStateName);
 }
 
 export async function ensureCity(db: Admin, stateId: string, name: string) {
-  return ensureRow(db, "location_cities", { state_id: stateId, name });
+  return ensureNamed(
+    db,
+    "location_cities",
+    { state_id: stateId },
+    name,
+    canonicalCityName,
+  );
 }
 
 /**
@@ -117,27 +163,49 @@ export async function ensureAreas(
   cityId: string,
   names: string[],
 ): Promise<AreaNode[]> {
-  const unique = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
-
-  if (unique.length > 0) {
-    const { error } = await db
-      .from("location_areas")
-      .upsert(
-        unique.map((name) => ({ city_id: cityId, name })),
-        { onConflict: "city_id,name", ignoreDuplicates: true },
-      );
-    if (error) logError("locations:areas", error);
-  }
-
-  const { data, error } = await db
+  const current = await db
     .from("location_areas")
     .select("id, name")
     .eq("city_id", cityId)
     .order("name");
 
-  if (error) {
-    logError("locations:areas:read", error);
+  if (current.error) {
+    logError("locations:areas:read", current.error);
     return [];
   }
-  return data ?? [];
+
+  // Case- and spacing-insensitive, so "MG Road" and "mg  road" stay one area —
+  // the same reasoning as cities, one level down.
+  const seen = new Set(
+    (current.data ?? []).map((a) => normalizeName(canonicalAreaName(a.name))),
+  );
+
+  const toInsert: { city_id: string; name: string }[] = [];
+  for (const raw of names) {
+    const name = canonicalAreaName(raw);
+    if (!name) continue;
+    const key = normalizeName(name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    toInsert.push({ city_id: cityId, name });
+  }
+
+  if (toInsert.length === 0) return current.data ?? [];
+
+  const { error } = await db
+    .from("location_areas")
+    .upsert(toInsert, { onConflict: "city_id,name", ignoreDuplicates: true });
+  if (error) logError("locations:areas", error);
+
+  const refreshed = await db
+    .from("location_areas")
+    .select("id, name")
+    .eq("city_id", cityId)
+    .order("name");
+
+  if (refreshed.error) {
+    logError("locations:areas:reread", refreshed.error);
+    return current.data ?? [];
+  }
+  return refreshed.data ?? [];
 }

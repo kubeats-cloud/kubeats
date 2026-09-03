@@ -99,8 +99,17 @@ export const instituteSchema = z.object({
 
   /** Ticks only — which streams exist. */
   class11: z.array(z.enum(STREAMS)).max(STREAMS.length),
-  /** Ticks plus an approximate head count per stream. */
-  class12: z.record(z.enum(STREAMS), z.number().int().min(0).max(100000)),
+  /**
+   * Ticks plus an approximate head count per stream.
+   *
+   * `partialRecord`, not `record`. In Zod 4 a record with an enum key schema is
+   * exhaustive — it demands an entry for every stream — so ticking only Science
+   * failed with errors on the two streams the rep deliberately left off.
+   */
+  class12: z.partialRecord(
+    z.enum(STREAMS),
+    z.number().int().min(0).max(100000),
+  ),
 });
 
 export type InstituteInput = z.infer<typeof instituteSchema>;

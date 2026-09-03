@@ -159,29 +159,32 @@ export async function GET(
   }
 
   // 3. Fold the answer into the locations tree so the picker can offer it.
-  const stateId = await ensureState(db, resolved.state);
-  if (!stateId) {
+  const state = await ensureState(db, resolved.state);
+  if (!state) {
     return fail("We could not save that location. Please choose it manually.");
   }
 
-  const cityId = await ensureCity(db, stateId, resolved.district);
-  if (!cityId) {
+  const city = await ensureCity(db, state.id, resolved.district);
+  if (!city) {
     return fail("We could not save that location. Please choose it manually.");
   }
 
   let areas: AreaNode[] = [];
   try {
-    areas = await ensureAreas(db, cityId, resolved.localities);
+    areas = await ensureAreas(db, city.id, resolved.localities);
   } catch (error) {
     logError("pincode:areas", error);
   }
 
+  // `state` and `city` carry the names as stored, not as India Post spelled
+  // them, so the form fills in and submits the spelling the rest of the data
+  // already uses.
   return NextResponse.json({
     ok: true as const,
     pincode: code,
     source,
-    state: { id: stateId, name: resolved.state },
-    city: { id: cityId, name: resolved.district },
+    state,
+    city,
     areas,
   });
 }

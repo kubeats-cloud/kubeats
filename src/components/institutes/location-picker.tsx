@@ -75,6 +75,23 @@ export function LocationPicker({
   const selectedCity = cities.find((c) => c.id === cityId);
   const areas = selectedCity?.areas ?? [];
 
+  /*
+   * Selection is derived, not reset.
+   *
+   * The obvious version cleared the city from the state select's
+   * onValueChange — "you picked a new state, so the old city is meaningless".
+   * That is wrong here: Radix re-emits onValueChange when a controlled value
+   * changes programmatically, so a PIN auto-fill arrived looking like a user
+   * action and wiped the city the lookup had just filled in. Guarding on the
+   * previous value does not help either, since the callback closes over the
+   * render before the update.
+   *
+   * So nothing is cleared. A city that does not belong to the selected state
+   * simply stops counting as selected, and the same for an area.
+   */
+  const effectiveCityId = selectedCity ? cityId : "";
+  const effectiveArea = areas.some((a) => a.name === area) ? area : "";
+
   /** Fold a PIN result into the tree we already hold, without a page reload. */
   function mergeLookup(result: PincodeSuccess) {
     setStates((current) => {
@@ -142,11 +159,11 @@ export function LocationPicker({
 
   function confirmNewArea() {
     const name = newArea.trim();
-    if (!name || !cityId) return;
+    if (!name || !effectiveCityId) return;
 
     setAreaError(null);
     startTransition(async () => {
-      const result = await addArea(cityId, name);
+      const result = await addArea(effectiveCityId, name);
       if (!result.ok) {
         setAreaError(result.message);
         return;
@@ -184,7 +201,7 @@ export function LocationPicker({
     <section className="space-y-4">
       <input type="hidden" name="state" value={selectedState?.name ?? ""} />
       <input type="hidden" name="city" value={selectedCity?.name ?? ""} />
-      <input type="hidden" name="area" value={area} />
+      <input type="hidden" name="area" value={effectiveArea} />
       <input type="hidden" name="pincode" value={pincode.trim()} />
 
       {/* PIN code — a shortcut, never a requirement. */}
@@ -241,9 +258,8 @@ export function LocationPicker({
           <Select
             value={stateId}
             onValueChange={(v) => {
+              if (!v) return;
               setStateId(v);
-              setCityId("");
-              setArea("");
               setAddingArea(false);
             }}
           >
@@ -266,11 +282,11 @@ export function LocationPicker({
         <div className="space-y-2">
           <Label>City</Label>
           <Select
-            value={cityId}
+            value={effectiveCityId}
             disabled={!stateId}
             onValueChange={(v) => {
+              if (!v) return;
               setCityId(v);
-              setArea("");
               setAddingArea(false);
             }}
           >
@@ -319,8 +335,8 @@ export function LocationPicker({
             </div>
           ) : (
             <Select
-              value={area}
-              disabled={!cityId}
+              value={effectiveArea}
+              disabled={!effectiveCityId}
               onValueChange={(v) => {
                 if (v === ADD_NEW) {
                   setAddingArea(true);
@@ -330,7 +346,7 @@ export function LocationPicker({
               }}
             >
               <SelectTrigger className="h-11 w-full">
-                <SelectValue placeholder={cityId ? "Select" : "Pick city first"} />
+                <SelectValue placeholder={effectiveCityId ? "Select" : "Pick city first"} />
               </SelectTrigger>
               <SelectContent>
                 {areas.map((a) => (
