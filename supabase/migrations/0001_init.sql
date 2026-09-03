@@ -25,39 +25,7 @@
 
 
 -- =============================================================================
--- 1. HELPERS
--- =============================================================================
-
--- Is the caller an admin?
---
--- SECURITY DEFINER is essential: this reads public.profiles, and the policies
--- ON public.profiles call this function. Without definer rights the two would
--- recurse. Because it bypasses RLS it must stay narrow — it answers exactly one
--- question and returns a boolean.
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-security definer
-set search_path = ''
-as $$
-  select exists (
-    select 1
-    from public.profiles p
-    where p.id = (select auth.uid())
-      and p.role = 'admin'
-  );
-$$;
-
-comment on function public.is_admin() is
-  'True when the current user has profiles.role = admin. SECURITY DEFINER to avoid RLS recursion on profiles.';
-
-revoke all on function public.is_admin() from public;
-grant execute on function public.is_admin() to authenticated;
-
-
--- =============================================================================
--- 2. TABLES
+-- 1. TABLES
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -349,6 +317,46 @@ create table if not exists public.weekly_targets (
     and olympiad >= 0 and application >= 0 and admission >= 0
   )
 );
+
+
+-- =============================================================================
+-- 2. HELPERS
+--
+-- These MUST come after the tables above. is_admin() is a LANGUAGE SQL
+-- function, and PostgreSQL parses and validates SQL function bodies at
+-- CREATE time (check_function_bodies is on by default). Defining it before
+-- public.profiles exists fails with:
+--   ERROR: 42P01: relation "public.profiles" does not exist
+-- PL/pgSQL bodies are not validated this way, which is why the trigger
+-- functions further down can reference tables freely.
+-- =============================================================================
+
+-- Is the caller an admin?
+--
+-- SECURITY DEFINER is essential: this reads public.profiles, and the policies
+-- ON public.profiles call this function. Without definer rights the two would
+-- recurse. Because it bypasses RLS it must stay narrow — it answers exactly one
+-- question and returns a boolean.
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.profiles p
+    where p.id = (select auth.uid())
+      and p.role = 'admin'
+  );
+$$;
+
+comment on function public.is_admin() is
+  'True when the current user has profiles.role = admin. SECURITY DEFINER to avoid RLS recursion on profiles.';
+
+revoke all on function public.is_admin() from public;
+grant execute on function public.is_admin() to authenticated;
 
 
 -- =============================================================================
