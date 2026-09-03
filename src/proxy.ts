@@ -36,6 +36,11 @@ export async function proxy(request: NextRequest) {
     return redirect;
   };
 
+  // API routes answer for themselves. Redirecting a fetch() to an HTML login
+  // page would hand the caller a 307 and a document where it expected JSON, so
+  // the session is still refreshed above but the route decides the response.
+  if (pathname.startsWith("/api/")) return response;
+
   if (!user && !isPublic(pathname)) {
     const intended = `${pathname}${search}`;
     const params =

@@ -34,6 +34,22 @@ Clean, modern, mobile-first utility app.
 - The six institute status badges and the target-progress bars are colour-coded
   per the semantic palette above.
 
+### Screen ownership
+
+Six screens, and no others: Dashboard, Institutes, Log Visit, Pending, Weekly,
+plus Settings for admins only.
+
+**The Dashboard owns the daily-plan create-and-track flow.** There is no Daily
+tab. On the Dashboard a rep adds today's planned visits (institute + purpose
+from the admin-managed purposes list), sees each entry's held / not-held state,
+and moves from an unheld entry into Log Visit.
+
+This is load-bearing, not a layout preference: the meeting gate (rule 2) checks
+a visit against that member's `daily_plans` rows for that date, so a meeting
+cannot be logged at all unless the Dashboard flow put it on the plan first.
+
+Weekly targets stay on their own Weekly tab.
+
 ### How that maps to the code
 
 Tokens live in `src/app/globals.css`. Use the semantic utilities rather than
