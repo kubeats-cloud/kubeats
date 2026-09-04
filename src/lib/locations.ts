@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { logError } from "@/lib/errors";
 import {
   canonicalAreaName,
@@ -79,7 +79,14 @@ export async function getLocationTree(): Promise<StateNode[]> {
  * result is treated as "someone else just made it" and re-read rather than
  * failing the request.
  */
-type Admin = ReturnType<typeof createAdminClient>;
+/**
+ * Either Supabase client fits here, and which one a caller passes is a
+ * deliberate choice. The PIN lookup passes the service-role client because a
+ * rep may trigger a state or city insert that RLS would refuse. The admin
+ * screens pass the admin's own session client, so the RLS policy keyed on
+ * is_admin() stays a second line of defence behind their own check.
+ */
+type Admin = SupabaseClient;
 
 const UNIQUE_VIOLATION = "23505";
 

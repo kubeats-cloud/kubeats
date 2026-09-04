@@ -47,5 +47,7 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  return { response, user };
+  // The client comes back too, so a caller can ask one more question — the
+  // signed-in user's role, say — on the same refreshed session.
+  return { response, user, supabase };
 }

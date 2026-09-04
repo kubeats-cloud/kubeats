@@ -4,10 +4,15 @@ import { updateSession } from "@/lib/supabase/proxy";
 /** Reachable without a session. Everything else requires one. */
 const PUBLIC_PATHS = ["/login"];
 
+/** Admin-only areas, turned away here so the refusal is a real HTTP redirect. */
+const ADMIN_PATHS = ["/settings"];
+
+function matches(pathname: string, paths: string[]): boolean {
+  return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
 function isPublic(pathname: string): boolean {
-  return PUBLIC_PATHS.some(
-    (path) => pathname === path || pathname.startsWith(`${path}/`),
-  );
+  return matches(pathname, PUBLIC_PATHS);
 }
 
 /**
@@ -20,7 +25,7 @@ function isPublic(pathname: string): boolean {
  * underneath everything, Row Level Security in Postgres.
  */
 export async function proxy(request: NextRequest) {
-  const { response, user } = await updateSession(request);
+  const { response, user, supabase } = await updateSession(request);
   const { pathname, search } = request.nextUrl;
 
   // Carry any cookies the refresh just set onto the redirect, or the rotated
@@ -50,6 +55,26 @@ export async function proxy(request: NextRequest) {
 
   if (user && isPublic(pathname)) {
     return redirectTo("/");
+  }
+
+  // Admin-only areas.
+  //
+  // The page checks this for itself as well, but by the time a dynamic page
+  // runs, the response has begun streaming: neither notFound() nor redirect()
+  // can still set a status, so Next answers 200 and steers the browser from
+  // inside the payload. No admin content is served either way, but "200 OK" on
+  // a refusal is a poor answer to give a security review. Here the session is
+  // already loaded, so one more query buys a genuine 307 — and it costs that
+  // query only on requests that ask for an admin path.
+  if (user && matches(pathname, ADMIN_PATHS)) {
+    const { data } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    // Least privilege: an unreadable profile is not an admin.
+    if (data?.role !== "admin") return redirectTo("/");
   }
 
   return response;
