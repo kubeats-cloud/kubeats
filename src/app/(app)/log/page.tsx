@@ -31,7 +31,7 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
     <>
       <PageHeader
         title="Log a visit"
-        description="Record what happened, with your location and an optional photo."
+        description="Record what happened. A photo is required; your location is added when it is available."
       />
       <LogVisitForm
         userId={user.id}
