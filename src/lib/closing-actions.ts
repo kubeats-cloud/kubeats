@@ -12,7 +12,7 @@ import {
   needsClosingReport,
 } from "@/lib/validation/closing-report";
 import { visitFieldErrors } from "@/lib/validation/visit";
-import { todayISO } from "@/lib/weeks";
+import { todayISO } from "@/lib/dates";
 
 /**
  * Filing the closing report.

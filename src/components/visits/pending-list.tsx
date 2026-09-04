@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatDate } from "@/lib/dates";
+import { formatDate, todayISO } from "@/lib/dates";
 import { CalendarIcon, ClockIcon, FileTextIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -38,13 +38,17 @@ export function PendingList({
     );
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Compared as plain YYYY-MM-DD strings, which sort correctly and cannot be
+  // dragged across a day boundary by whichever timezone the code is running in.
+  // The Date arithmetic this replaces read the due date as UTC midnight and
+  // "today" as the server's local midnight — two different calendars, and a
+  // loop that fell due at 05:30 IST rather than at midnight.
+  const today = todayISO();
 
   return (
     <ul className="space-y-3">
       {visits.map((visit) => {
-        const due = new Date(visit.expected_date ?? visit.date);
+        const due = visit.expected_date ?? visit.date;
         const overdue = due < today;
         const mine = visit.member === currentUserId;
 

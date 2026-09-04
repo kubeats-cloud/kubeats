@@ -65,6 +65,28 @@ const has0007 = configured
       .then(({ error }) => !error)
   : false;
 
+/**
+ * Migration 0008 adds public.app_today(), the database's half of "today". The
+ * suite below is the only thing that can catch the app and the database drifting
+ * apart on which day it is, so it says so rather than passing quietly.
+ */
+const has0008 = configured
+  ? await admin.rpc("app_today").then(({ error }) => !error)
+  : false;
+
+if (configured && !has0008) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0008 is not applied to this project.",
+      "    The app_today suite is being SKIPPED, not passing — which means",
+      "    nothing here is checking that the app and the database agree on",
+      "    what day it is. Between 00:00 and 05:30 IST they will not.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
 if (configured && !has0007) {
   console.warn(
     [
@@ -87,8 +109,22 @@ if (configured && !has0005) {
   );
 }
 
+/**
+ * The fixtures' idea of a day, which has to be the app's and the database's:
+ * the Indian calendar day. Built the same way as todayISO() in src/lib/dates.ts
+ * rather than imported, so a fixture cannot be dragged along by a change to the
+ * thing under test.
+ *
+ * Using UTC here would have been invisible for nineteen hours a day and then
+ * quietly wrong for five: between 18:30 and 24:00 UTC it names yesterday, so
+ * every gate fixture would have been testing the wrong date.
+ */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
 const iso = (offsetDays = 0) =>
-  new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+  new Date(Date.now() + offsetDays * 86_400_000 + IST_OFFSET_MS)
+    .toISOString()
+    .slice(0, 10);
 
 const mondayOf = (date: string) => {
   const d = new Date(`${date}T00:00:00.000Z`);
@@ -283,6 +319,161 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         date: iso(1),
       });
       expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0008)("app_today — one day, agreed by both halves", () => {
+    /*
+     * The app writes daily_plans.date with todayISO(); log_visit dates the
+     * visit and finds that plan row with public.app_today(). Nothing else
+     * checks that those two name the same day, and when they did not, the
+     * symptom was a rep being told the school in front of them was not on
+     * today's plan — every night between midnight and 05:30.
+     *
+     * The unit tests prove the app half is the Indian day at every minute of
+     * that window. This proves the database half is the same day, in the
+     * database, right now. Run these at 01:00 IST and they are the real thing
+     * rather than a model of it.
+     */
+
+    it("names the Indian calendar day, not the server's", async () => {
+      const { data, error } = await admin.rpc("app_today");
+      expect(error).toBeNull();
+      expect(data).toBe(iso());
+    });
+
+    it("is what the app would have said for the same moment", async () => {
+      // iso() is built from India's fixed +05:30 offset; app_today() is
+      // (now() at time zone 'Asia/Kolkata')::date. Two routes, one answer.
+      const { data } = await admin.rpc("app_today");
+      const serverUtcDay = new Date().toISOString().slice(0, 10);
+      expect(data).toBe(iso());
+      // And say so out loud when the two calendars differ, which is the only
+      // time this test could ever have caught anything.
+      if (data !== serverUtcDay) {
+        expect(data).not.toBe(serverUtcDay);
+      }
+    });
+
+    it("dates a plan row it was not given a date for", async () => {
+      const { data, error } = await admin
+        .from("daily_plans")
+        .insert({
+          member: repA.id,
+          institute_id: instituteId,
+          purpose: `${TAG} default-date`,
+        })
+        .select("id, date")
+        .single();
+
+      expect(error).toBeNull();
+      expect(data?.date).toBe(iso());
+      if (data?.id) await admin.from("daily_plans").delete().eq("id", data.id);
+    });
+
+    it("dates a visit it was not given a date for", async () => {
+      const { data, error } = await admin
+        .from("visits")
+        .insert({
+          institute_id: instituteId,
+          member: repA.id,
+          activity: "olympiad",
+          photo_url: photoFor(repA.id),
+        })
+        .select("id, date")
+        .single();
+
+      expect(error).toBeNull();
+      expect(data?.date).toBe(iso());
+      if (data?.id) await admin.from("visits").delete().eq("id", data.id);
+    });
+
+    it("lets a meeting through on a plan the app dated, whatever the hour", async () => {
+      // The end-to-end claim, and the one that broke: the app dates the plan,
+      // log_visit dates the visit and looks the plan up, and the two have to
+      // land on the same day for this to pass. Between 00:00 and 05:30 IST it
+      // failed before migration 0008.
+      const institute = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} app_today school`, type: "school" })
+        .select("id")
+        .single();
+      const houseId = institute.data!.id as string;
+
+      const plan = await repA.db
+        .from("daily_plans")
+        .insert({
+          member: repA.id,
+          date: iso(), // what the app writes
+          institute_id: houseId,
+          purpose: `${TAG} same-day`,
+        })
+        .select("id")
+        .single();
+      expect(plan.error).toBeNull();
+
+      const { data: visitId, error } = await repA.db.rpc("log_visit", {
+        p_institute_id: houseId,
+        p_activity: "meeting",
+        p_photo_url: photoFor(repA.id),
+        p_daily_plan_id: plan.data!.id,
+      });
+
+      expect(error).toBeNull();
+      expect(visitId).toBeTruthy();
+
+      const { data: visit } = await admin
+        .from("visits")
+        .select("date")
+        .eq("id", visitId as string)
+        .single();
+      // The visit landed on the same day the plan was written for.
+      expect(visit?.date).toBe(iso());
+
+      const { data: held } = await admin
+        .from("daily_plans")
+        .select("meetings_actual")
+        .eq("id", plan.data!.id)
+        .single();
+      expect(held?.meetings_actual).toBe(1);
+
+      await admin.from("visits").delete().eq("id", visitId as string);
+      await admin.from("daily_plans").delete().eq("id", plan.data!.id);
+      await admin.from("institutes").delete().eq("id", houseId);
+    });
+
+    it("still refuses one planned for the day before", async () => {
+      // The gate did not get looser, only consistent.
+      const institute = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} yesterday school`, type: "school" })
+        .select("id")
+        .single();
+      const houseId = institute.data!.id as string;
+
+      const plan = await admin
+        .from("daily_plans")
+        .insert({
+          member: repA.id,
+          date: iso(-1),
+          institute_id: houseId,
+          purpose: `${TAG} yesterday`,
+        })
+        .select("id")
+        .single();
+
+      const { error } = await repA.db.rpc("log_visit", {
+        p_institute_id: houseId,
+        p_activity: "meeting",
+        p_photo_url: photoFor(repA.id),
+        p_daily_plan_id: plan.data!.id,
+      });
+      expect(error?.code).toBe("FO001");
+
+      await admin.from("daily_plans").delete().eq("id", plan.data!.id);
+      await admin.from("institutes").delete().eq("id", houseId);
     });
   });
 

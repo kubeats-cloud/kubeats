@@ -8,6 +8,11 @@
  * only formatting for display keeps the grid stable wherever the app runs, and
  * matches `weekly_targets_week_starts_monday` in the database.
  *
+ * Which day it *is* is a different question, and not one this file answers:
+ * `todayISO()` comes from dates.ts, which reads the Indian calendar day. So the
+ * arithmetic below is timezone-free string maths, and the single point where
+ * "now" enters is the one the database agrees with.
+ *
  * Two different "ends" of a week, and the difference matters:
  *
  *   weekEnd()       Saturday. The reporting week a rep commits to, and the only
@@ -22,7 +27,7 @@
  * every date belongs to exactly one week, and none is orphaned.
  */
 
-import { formatDate, formatDayMonth } from "@/lib/dates";
+import { formatDate, formatDayMonth, todayISO } from "@/lib/dates";
 
 const DAY_MS = 86_400_000;
 
@@ -38,12 +43,6 @@ function parseISO(value: string): Date | null {
   if (Number.isNaN(date.getTime())) return null;
   // Rejects the likes of 2026-02-31, which Date would roll forward.
   return toISO(date) === value ? date : null;
-}
-
-/** Today, in the server's local calendar, as YYYY-MM-DD. */
-export function todayISO(): string {
-  const now = new Date();
-  return toISO(new Date(now.getTime() - now.getTimezoneOffset() * 60_000));
 }
 
 /** The Monday of the week containing `dateISO`. Defaults to this week. */

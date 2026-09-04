@@ -147,14 +147,25 @@ export function formatTime(value: string | Date | null | undefined): string {
 }
 
 /**
- * Today's calendar day in Asia/Kolkata, as YYYY-MM-DD.
+ * What this app means by "today": the calendar day in Asia/Kolkata.
  *
- * For the one case a *client* component needs a day during render. Reading the
- * day from the runtime's own clock is the same bug this file exists for: the
- * server says the 4th while a browser in India says the 5th, the two render
- * different text, and hydration fails.
+ * THIS DEFINITION IS SHARED WITH THE DATABASE. `public.app_today()` (migration
+ * 0008) is the same expression in SQL, and the two must never drift, because
+ * they meet: the app writes a plan row dated by this function, and `log_visit`
+ * dates the visit and checks the meeting gate with that one. If they disagree
+ * about the day, a rep is told the institute they are standing in front of is
+ * not on today's plan.
+ *
+ * Reading the day from the runtime's own clock is what made them disagree
+ * before. The server runs in UTC, so "today" turned over at 05:30 IST: a rep
+ * logging at 01:00 filed against yesterday, and an admin assigning at that hour
+ * was offered yesterday's date. Both ends now ask the same question — what day
+ * is it in India — and get the same answer.
+ *
+ * `now` is injectable so a test can ask what the answer would be at 00:30 IST
+ * without waiting until 00:30 IST.
  */
-export function todayInAppZone(now: Date = new Date()): string {
+export function todayISO(now: Date = new Date()): string {
   const { year, month, day } = fieldsOf(now);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${year}-${pad(month)}-${pad(day)}`;

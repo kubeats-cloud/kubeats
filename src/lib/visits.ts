@@ -2,13 +2,15 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
+import { todayISO } from "@/lib/dates";
 
-/** Today in the browser's/server's local calendar terms, as YYYY-MM-DD. */
-export function todayISO(): string {
-  const now = new Date();
-  const offsetMs = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
-}
+/*
+ * There used to be a second copy of todayISO() here, computing the day from the
+ * server's own calendar while weeks.ts computed it from its own. One definition
+ * of "today" is the most this app can safely have — see dates.ts, which is now
+ * the only place it is decided, and the database function it has to match.
+ */
+export { todayISO };
 
 export interface PickerInstitute {
   id: string;

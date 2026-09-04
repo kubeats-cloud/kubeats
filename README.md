@@ -92,6 +92,7 @@ Editor → New query → paste the whole file → Run). They are idempotent.
 | `0005_closing_report_and_assignment.sql` | The closing report's columns, `visit_people`, and admin-assigned plan entries. | Yes |
 | `0006_photo_required.sql` | Rule 12 — makes the visit photo mandatory and final: `log_visit()` raises `FO007`, the `visits_photo_required` CHECK refuses a direct insert, and the `visits_photo_final` trigger raises `FO008` on any later change to `photo_url`. | Yes |
 | `0007_place_cache.sql` | Caches reverse-geocoded area names for the photo stamp, so OpenStreetMap is asked once per neighbourhood. | Optional — without it the stamp still works, it just re-asks every time |
+| `0008_ist_calendar_day.sql` | Adds `public.app_today()` and makes "today" the Asia/Kolkata calendar day everywhere the database decides one — the `visits.date` and `daily_plans.date` defaults, and `log_visit()`. | Yes — without it the database and the app disagree about the day between 00:00 and 05:30 IST, and the meeting gate rejects meetings that were properly planned |
 
 > **0004 has two placeholders you must fill in — in the SQL editor only.**
 > Lines 51 and 52 take your project URL and your service_role key. Paste them
@@ -184,15 +185,35 @@ after local midnight, React refuses to hydrate the page, and the app is dead
 from 00:00 to 05:30 IST every night. That happened. `tests/unit/dates.test.ts`
 reloads the module under five timezones and fails if either half comes loose.
 
-One thing that is deliberately *not* fixed, and is worth a decision before the
-team grows: `todayISO()` reads the **server's** calendar, so the app's "today"
-turns over at 05:30 IST rather than at midnight. It is self-consistent — the
-same function decides which plan row a rep sees, which day a visit is filed
-against, and what the meeting gate checks — so nothing is broken. But a rep
-working at 01:00 files against yesterday, and an admin assigning a visit at
-that hour is offered yesterday's date by default. Moving it to the Indian day
-means moving the app and `current_date` in the database together, which is a
-change to a load-bearing rule rather than to a label.
+### Today
+
+"Today" is decided twice, once in each language, and the two answers have to
+match:
+
+| | |
+| --- | --- |
+| the app | `todayISO()` in `src/lib/dates.ts` |
+| the database | `public.app_today()` (migration 0008) |
+
+Both read the **Asia/Kolkata calendar day**, so the day turns over at midnight
+in India. It used to turn over at 05:30, because both sides read the server's
+own calendar and the server runs in UTC — a rep logging a visit at 01:00 filed
+it against yesterday, and an admin assigning one at that hour was offered
+yesterday by default.
+
+They meet in the meeting gate. The app writes `daily_plans.date` with its
+answer; `log_visit()` dates the visit and looks that plan row up with the
+other. **If the two ever disagree the app does not merely show a wrong date —
+a rep standing in front of a school is told it is not on today's plan.** That
+is what makes this a pair rather than two settings, and why moving a client to
+another country means editing `APP_TIME_ZONE` and re-running an edited 0008
+together. The `app_today` suite in `tests/integration/rules.test.ts` fails
+loudly if only one of them moves; it also skips loudly if 0008 has not been
+applied, because a green run would otherwise mean nothing was checking.
+
+Instants are a separate matter and were left alone. `created_at`,
+`submitted_at`, `closed_at` and the rest are moments, not calendar days, and
+`now()` is the right answer for all of them.
 
 ## Deployment
 
@@ -332,7 +353,7 @@ exist purely to fit:
 Those two together were the cheap wins, and they are spent. Neither is worth
 extending.
 
-**Where it stands: 2965 KiB against a 3072 KiB ceiling — 107 KiB, under 4%.**
+**Where it stands: 2949 KiB against a 3072 KiB ceiling — 123 KiB, under 5%.**
 
 Read that as a budget, not a comfort. It was 2831 KiB before the in-app camera
 and the area-name lookup; two ordinary features spent nearly two thirds of the

@@ -104,8 +104,8 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2965
-KiB** — under 4% spare. That is a deliberate choice, not an oversight, and the
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2949
+KiB** — under 5% spare. That is a deliberate choice, not an oversight, and the
 budget is real: measure before adding anything sizable.
 
 ```bash
@@ -185,9 +185,17 @@ already claimed the easy 0.9 MiB between them; see README for both.
   fails if either half is unpinned.
 - Not the same thing: `weeks.ts` still does its week *arithmetic* in UTC, so a
   stored `YYYY-MM-DD` cannot drift; it only borrows dates.ts for the spelling.
-  And `todayISO()` still reads the *server's* calendar, so "today" rolls over
-  at 05:30 IST rather than midnight — consistent between the app and the
-  meeting gate, but not the same as the rep's day. See the README note.
+- `todayISO()` in dates.ts is the app's single definition of "today", and the
+  database has the matching one in `public.app_today()` (migration 0008). Both
+  read the Asia/Kolkata calendar day, so the day turns over at midnight in
+  India rather than at 05:30. **They have to be changed together.** The app
+  writes `daily_plans.date` with one and `log_visit()` dates the visit and
+  looks that plan row up with the other; if they disagree, a rep standing in
+  front of a school is told it is not on today's plan. Migration 0008's header
+  says the same thing from the SQL side, and the `app_today` suite in
+  `tests/integration/rules.test.ts` fails loudly if only one of them moves.
+  There is exactly one `todayISO()` in `src/` — `visits.ts` re-exports it, and
+  a second copy is how the two halves drifted the first time.
 - Visit photos are deleted automatically after
   `public.visit_photo_retention_days()` days (migration 0003, scheduled in
   0004). The visit rows, coordinates and timestamps are kept forever, so a row

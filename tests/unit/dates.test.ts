@@ -4,7 +4,7 @@ import {
   formatDate,
   formatDateTime,
   formatTime,
-  todayInAppZone,
+  todayISO,
 } from "@/lib/dates";
 import { formatWeekRange } from "@/lib/weeks";
 import { dailyPlanSchema, dailyPlanSummary } from "@/lib/validation/visit";
@@ -112,7 +112,7 @@ describe("dates are formatted the same wherever the code runs", () => {
     const answers = new Set<string>();
     for (const tz of ZONES) {
       const dates = await datesModuleIn(tz);
-      answers.add(dates.todayInAppZone(midnightWindow));
+      answers.add(dates.todayISO(midnightWindow));
     }
     expect(answers.size).toBe(1);
     expect([...answers][0]).toBe("2026-09-05");
@@ -169,8 +169,8 @@ describe("dates are read in India", () => {
   });
 
   it("names today in Asia/Kolkata", () => {
-    expect(todayInAppZone(new Date("2026-09-04T18:29:59.000Z"))).toBe("2026-09-04");
-    expect(todayInAppZone(new Date("2026-09-04T18:30:01.000Z"))).toBe("2026-09-05");
+    expect(todayISO(new Date("2026-09-04T18:29:59.000Z"))).toBe("2026-09-04");
+    expect(todayISO(new Date("2026-09-04T18:30:01.000Z"))).toBe("2026-09-05");
   });
 });
 
@@ -251,5 +251,92 @@ describe("adding to today's plan explains what is missing", () => {
     expect(
       dailyPlanSummary({ institute_id: "one", purpose: "two" }),
     ).toBe("Pick an institute and a purpose before adding this to today's plan.");
+  });
+});
+
+/*
+ * "Today" is one decision made in two languages.
+ *
+ * The app writes daily_plans.date with todayISO(); log_visit dates the visit
+ * and looks up that plan row with public.app_today() (migration 0008). If the
+ * two ever name different days, a rep standing in front of a school is told it
+ * is not on today's plan — which is exactly what happened when the app read the
+ * Indian day and the database still read the server's.
+ *
+ * These tests model the SQL side independently. `(now() at time zone
+ * 'Asia/Kolkata')::date` is, arithmetically, "shift the instant by India's
+ * offset and take the calendar date" — and India has had a fixed +05:30 with no
+ * daylight saving since 1945, so a constant is exact rather than an
+ * approximation. todayISO() gets there a completely different way, through the
+ * runtime's timezone database. Agreement between the two is therefore worth
+ * something; it is not the same calculation checked against itself.
+ *
+ * The integration suite asserts the real function in a real Postgres agrees
+ * with this model. Together they cover the claim: app and database name the
+ * same day.
+ */
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/** `(now() at time zone 'Asia/Kolkata')::date`, worked out from the offset. */
+function sqlAppToday(instant: Date): string {
+  return new Date(instant.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+describe("the app and the database agree on what day it is", () => {
+  it("agrees at every minute of the window that used to be wrong", () => {
+    // 18:30 UTC is midnight in India; 00:00 UTC is 05:30 there. In between, the
+    // server's calendar said yesterday and a rep's phone said today. That is
+    // 330 minutes, and every one of them is checked.
+    const start = Date.UTC(2026, 8, 4, 18, 30, 0);
+    const mismatches: string[] = [];
+    for (let minute = 0; minute < 330; minute++) {
+      const instant = new Date(start + minute * 60_000);
+      const app = todayISO(instant);
+      const db = sqlAppToday(instant);
+      if (app !== db) mismatches.push(`${instant.toISOString()}: ${app} vs ${db}`);
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it("puts that whole window on the Indian day, not the server's", () => {
+    const oneAM = new Date("2026-09-04T19:30:00.000Z"); // 01:00 IST on the 5th
+    expect(todayISO(oneAM)).toBe("2026-09-05");
+    // What the server's own calendar would have said, and the bug in one line.
+    expect(oneAM.toISOString().slice(0, 10)).toBe("2026-09-04");
+  });
+
+  it("turns the day over at midnight in India, not at 05:30", () => {
+    expect(todayISO(new Date("2026-09-04T18:29:59.999Z"))).toBe("2026-09-04");
+    expect(todayISO(new Date("2026-09-04T18:30:00.000Z"))).toBe("2026-09-05");
+    // 05:30 IST — where the rollover used to be — is mid-morning of the same
+    // day now, and must not move it on again.
+    expect(todayISO(new Date("2026-09-05T00:00:00.000Z"))).toBe("2026-09-05");
+  });
+
+  it("agrees on a full year of instants, four times a day", () => {
+    // Cheap insurance against a leap day, a month end, or a year boundary
+    // pulling the two definitions apart.
+    const mismatches: string[] = [];
+    for (let day = 0; day < 366; day++) {
+      for (const hour of [0, 6, 18, 23]) {
+        const instant = new Date(Date.UTC(2026, 0, 1, hour, 45) + day * 86_400_000);
+        if (todayISO(instant) !== sqlAppToday(instant)) {
+          mismatches.push(instant.toISOString());
+        }
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it("does not depend on where the app itself is running", async () => {
+    const oneAM = new Date("2026-09-04T19:30:00.000Z");
+    const answers = new Set<string>();
+    for (const tz of ZONES) {
+      const dates = await datesModuleIn(tz);
+      answers.add(dates.todayISO(oneAM));
+    }
+    expect(answers.size).toBe(1);
+    expect([...answers][0]).toBe("2026-09-05");
   });
 });

@@ -108,10 +108,15 @@ Follow the order. Each step depends on the one before it.
 
 ### 1. Create the project and apply the migrations
 
-Run `0001` → `0002` → `0003` → `0004` → `0005` → `0006` in the SQL editor, exactly as
-`README.md` describes. The schema, RLS, triggers, indexes, the storage bucket
-and the seed data all come from these files — nothing else is needed to rebuild
-the structure.
+Run `0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` → `0008` in the
+SQL editor, exactly as `README.md` describes. In order, and all of them: `0006`
+and `0008` each replace `log_visit()` in full, so a run that stops early leaves
+the older definition in place — and stopping before `0008` leaves the database
+reading "today" from the server's calendar while the app reads India's, which
+breaks the meeting gate between 00:00 and 05:30 IST.
+
+The schema, RLS, triggers, indexes, the storage bucket and the seed data all
+come from these files — nothing else is needed to rebuild the structure.
 
 ### 2. Restore auth users — before any rows
 
@@ -240,7 +245,16 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/compat/plain-postgres-prelud
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0001_init.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0002_log_visit_rpc.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0003_photo_retention.sql
+# 0004 is skipped here — see below
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0005_closing_report_and_assignment.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0006_photo_required.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0007_place_cache.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0008_ist_calendar_day.sql
 ```
+
+`0004` is the only one that cannot run here: it needs pg_cron, pg_net and
+Vault. Everything else applies to a stock Postgres 17 unchanged — checked, not
+assumed.
 
 The prelude supplies what Supabase would have: the four roles, `auth.users`,
 `auth.uid()`, and the storage metadata tables the photo policies reference. It

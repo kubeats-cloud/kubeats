@@ -3,7 +3,8 @@ import { logError } from "@/lib/errors";
 import { signVisitPhotos } from "@/lib/photos";
 import type { VisitPhoto } from "@/lib/photos";
 import { activityLabelFor } from "@/lib/validation/visit";
-import { mondayOf, todayISO, weekCountEnd } from "@/lib/weeks";
+import { mondayOf, weekCountEnd } from "@/lib/weeks";
+import { todayISO } from "@/lib/dates";
 
 /**
  * The reading side of the admin workspace.
