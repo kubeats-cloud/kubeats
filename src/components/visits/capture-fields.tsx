@@ -14,11 +14,17 @@ import { preparePhoto } from "@/lib/photo";
 import { cn } from "@/lib/utils";
 
 /**
- * Rule 12 — geo-tag and optional photo, on every visit.
+ * Rule 12 — geo-tag and photo, on every visit.
  *
- * Both are deliberately non-blocking. A denied location permission or a failed
- * upload leaves a message and an empty hidden field; the visit still saves. A
- * rep standing in a basement staff room with no GPS lock must not be stuck.
+ * The two are deliberately not equal. The photograph is the evidence the visit
+ * happened, so it blocks: no photo, no save, enforced again in the shared
+ * schema and once more in the database. The location does not block — a denied
+ * permission leaves a message and an empty hidden field, because a rep standing
+ * in a basement staff room with no GPS lock must not be stuck.
+ *
+ * Capture stays as it is: `capture="environment"` hands a phone straight to its
+ * rear camera, and a desktop browser falls back to the file picker. There is no
+ * webcam path and there should not be one; this is a phone-first tool.
  */
 
 type GeoState =
@@ -113,7 +119,8 @@ export function CaptureFields({ userId }: { userId: string }) {
         console.error("[photo] upload failed", error.message);
         setPhoto({
           status: "failed",
-          message: "We could not upload that photo. You can save the visit without it.",
+          message:
+            "We could not upload that photo, and a photo is required. Please try again.",
         });
         return;
       }
@@ -130,7 +137,8 @@ export function CaptureFields({ userId }: { userId: string }) {
       console.error("[photo] preparation failed", error);
       setPhoto({
         status: "failed",
-        message: "We could not process that photo. You can save the visit without it.",
+        message:
+          "We could not process that photo, and a photo is required. Please try another.",
       });
     } finally {
       // Let the same file be chosen again after a failure.
@@ -204,7 +212,13 @@ export function CaptureFields({ userId }: { userId: string }) {
 
       {/* Photo ------------------------------------------------------------- */}
       <div className="space-y-2">
-        <Label htmlFor="visit-photo">Photo (optional)</Label>
+        <Label htmlFor="visit-photo">
+          Photo
+          <span className="text-danger" aria-hidden>
+            *
+          </span>
+          <span className="sr-only">(required)</span>
+        </Label>
 
         {photo.status !== "ready" && (
           <>
@@ -219,8 +233,8 @@ export function CaptureFields({ userId }: { userId: string }) {
               className="border-input file:bg-secondary file:text-secondary-foreground h-11 w-full rounded-md border px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:px-3 file:py-1 file:text-sm"
             />
             <p className="text-muted-foreground text-xs">
-              The location and time are stamped onto the picture before it is
-              uploaded.
+              Required. The location and time are stamped onto the picture
+              before it is uploaded.
             </p>
           </>
         )}

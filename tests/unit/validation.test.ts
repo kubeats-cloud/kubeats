@@ -17,7 +17,7 @@ const baseVisit = {
   expected_date: "",
   latitude: "",
   longitude: "",
-  photo_path: "",
+  photo_path: "9f8b7c6d-1e2f-4a3b-8c9d-0e1f2a3b4c5d/proof.jpg",
   notes: "",
   status_set_to: "",
   follow_up_date: "",
@@ -27,6 +27,35 @@ const baseVisit = {
 describe("visitSchema", () => {
   it("accepts a plain one-shot visit", () => {
     expect(visitSchema.safeParse(baseVisit).success).toBe(true);
+  });
+
+  it("refuses a visit with no photo (Rule 12)", () => {
+    const result = visitSchema.safeParse({ ...baseVisit, photo_path: "" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path[0] === "photo_path");
+      expect(issue?.message).toBe("A photo is required to log this visit.");
+    }
+  });
+
+  it("refuses a photo path that is only whitespace", () => {
+    expect(visitSchema.safeParse({ ...baseVisit, photo_path: "   " }).success).toBe(
+      false,
+    );
+  });
+
+  it("requires a photo on every activity, not just the ones with a report", () => {
+    for (const activity of ["session", "campus_visit", "olympiad", "application", "admission"]) {
+      const result = visitSchema.safeParse({
+        ...baseVisit,
+        activity,
+        photo_path: "",
+        // Keep the lifecycle activities otherwise valid, so the only thing
+        // wrong with them is the missing photo.
+        lifecycle_status: activity === "session" || activity === "campus_visit" ? "Done" : "",
+      });
+      expect(result.success, `${activity} should be refused without a photo`).toBe(false);
+    }
   });
 
   it("refuses a meeting with no plan entry behind it (Rule 2)", () => {

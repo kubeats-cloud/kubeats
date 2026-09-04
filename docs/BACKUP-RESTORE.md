@@ -108,7 +108,7 @@ Follow the order. Each step depends on the one before it.
 
 ### 1. Create the project and apply the migrations
 
-Run `0001` → `0002` → `0003` → `0004` in the SQL editor, exactly as
+Run `0001` → `0002` → `0003` → `0004` → `0005` → `0006` in the SQL editor, exactly as
 `README.md` describes. The schema, RLS, triggers, indexes, the storage bucket
 and the seed data all come from these files — nothing else is needed to rebuild
 the structure.
@@ -149,6 +149,17 @@ that look like a corrupt dump and are not.
 
 ```bash
 pg_restore -d "$NEW_DATABASE_URL" fieldops-data.dump
+```
+
+If the dump predates migration `0006`, it may contain visits with no
+`photo_url`. That migration's CHECK is added `NOT VALID`, so it does not reject
+rows already in the table — but it does reject them on the way *in*. Drop it for
+the restore and re-add it afterwards:
+
+```sql
+alter table public.visits drop constraint visits_photo_required;
+-- ... restore ...
+-- then re-run 0006_photo_required.sql
 ```
 
 or, from a `npm run backup` directory — point `.env.local` at the **new**

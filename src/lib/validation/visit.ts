@@ -112,7 +112,17 @@ export const visitSchema = z
     expected_date: optionalDate,
     latitude: optionalCoord(90),
     longitude: optionalCoord(180),
-    photo_path: optionalText(400),
+    /**
+     * Rule 12 — a visit is not evidence without its photograph, so this is the
+     * one part of "proof" that blocks. The location beside it still does not:
+     * a rep in a basement staff room with no GPS lock must not be stuck, but a
+     * rep who did not take a picture has not finished the visit.
+     */
+    photo_path: z
+      .string()
+      .trim()
+      .min(1, "A photo is required to log this visit.")
+      .max(400),
     notes: optionalText(2000),
     status_set_to: z
       .string()

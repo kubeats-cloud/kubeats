@@ -57,7 +57,7 @@ export async function submitClosingReport(
   // report. RLS would hide someone else's, but a sentence beats an empty result.
   const { data: visit, error: loadError } = await supabase
     .from("visits")
-    .select("id, member, activity, lifecycle_status")
+    .select("id, member, activity, lifecycle_status, photo_url")
     .eq("id", input.visit_id)
     .maybeSingle();
 
@@ -73,6 +73,20 @@ export async function submitClosingReport(
   }
   if (!needsClosingReport(visit.activity)) {
     return { error: "That kind of visit does not take a closing report.", fieldErrors: {} };
+  }
+
+  // Rule 12 — a visit is not complete without its photograph. In practice this
+  // never fires: the photo is taken when the visit is logged, and neither the
+  // form nor log_visit() will accept one without it. It stands for the row that
+  // predates that rule, or arrives from a restored backup — there is no photo
+  // field on this screen, so such a visit has to be re-logged rather than
+  // silently completed as evidence-free.
+  if (!visit.photo_url) {
+    return {
+      error:
+        "This visit has no photo, and a photo is required. Please log the visit again with one.",
+      fieldErrors: {},
+    };
   }
 
   // 1. Replace the people met.

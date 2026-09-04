@@ -34,6 +34,7 @@ const RPC_MESSAGES: Record<string, string> = {
   FO004: "Your session has expired. Please sign in again.",
   FO005: "That entry is no longer on today's plan. Add it again on the Dashboard.",
   FO006: "That institute no longer exists.",
+  FO007: "A photo is required to log this visit.",
 };
 
 async function requireUser() {

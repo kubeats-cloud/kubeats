@@ -115,8 +115,13 @@ Concretely, and true as of Phase 9:
 - A write that touches more than one table goes through a Postgres function so
   it is one transaction. Saving a visit is `public.log_visit()` (migration
   0002); it runs SECURITY INVOKER, so RLS and every trigger still apply. It
-  raises `FO001`-`FO006` for the cases a rep can cause, and `src/lib/visit-actions.ts`
+  raises `FO001`-`FO007` for the cases a rep can cause, and `src/lib/visit-actions.ts`
   maps those codes — never the message text — to sentences.
+- Every visit must carry a photo (Rule 12, migration 0006). The rule is stated
+  three times on purpose: the shared zod schema, `log_visit()` raising `FO007`,
+  and the `visits_photo_required` CHECK, which is the one that holds against a
+  direct insert. The geo-tag beside it is deliberately NOT required — a denied
+  GPS permission still saves, because a rep with no signal must not be stuck.
 - A locked week freezes the COMMITTED TARGETS, nothing else. The achieved
   column stays live: it is recomputed from `daily_plans` and `visits` on every
   read, so closing an old "Set" loop moves that row from Sessions Set to

@@ -38,6 +38,13 @@ const admin = configured
  */
 // A real select, not a HEAD: supabase-js leaves `error` unset on a HEAD
 // request for a table that does not exist, so the probe would say yes.
+/**
+ * Rule 12 — every visit carries a photo, so every fixture here does too.
+ * The path only has to be a non-empty string for the constraint; shaping it
+ * like a real one keeps these rows readable next to production data.
+ */
+const photoFor = (memberId: string) => `${memberId}/${crypto.randomUUID()}.jpg`;
+
 const has0005 = configured
   ? await admin
       .from("visit_people")
@@ -115,6 +122,13 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   let boss: Member;
   let instituteId: string;
 
+  /**
+   * Whether migration 0006 (Rule 12, the mandatory photo) is applied here.
+   * Probed rather than assumed: a project without it skips those two tests
+   * visibly instead of failing in a way that reads like a broken rule.
+   */
+  let has0006 = false;
+
   beforeAll(async () => {
     [repA, repB, boss] = await Promise.all([
       makeMember("rep", "rep-a"),
@@ -135,6 +149,26 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       .single();
     if (error) throw new Error(`institute: ${error.message}`);
     instituteId = data.id;
+
+    // Probe 0006 by doing the thing it forbids. If it is not applied the row
+    // is written, so it is removed again immediately.
+    const probe = await admin
+      .from("visits")
+      .insert({ institute_id: instituteId, member: repA.id, activity: "olympiad", date: iso() })
+      .select("id")
+      .maybeSingle();
+    has0006 = Boolean(probe.error);
+    if (probe.data?.id) await admin.from("visits").delete().eq("id", probe.data.id);
+    if (!has0006) {
+      console.warn(
+        [
+          "",
+          "  ! migration 0006 is not applied to this project.",
+          "    The mandatory-photo tests are being SKIPPED, not passing.",
+          "",
+        ].join(String.fromCharCode(10)),
+      );
+    }
   });
 
   afterAll(async () => {
@@ -175,6 +209,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { error } = await repA.db.from("visits").insert({
         institute_id: instituteId,
         member: repA.id,
+        photo_url: photoFor(repA.id),
         activity: "meeting",
         date: iso(),
       });
@@ -188,6 +223,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { error } = await admin.from("visits").insert({
         institute_id: instituteId,
         member: repA.id,
+        photo_url: photoFor(repA.id),
         activity: "meeting",
         date: iso(),
       });
@@ -207,6 +243,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { error } = await repA.db.from("visits").insert({
         institute_id: instituteId,
         member: repA.id,
+        photo_url: photoFor(repA.id),
         activity: "meeting",
         date: iso(),
       });
@@ -218,10 +255,76 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { error } = await repA.db.from("visits").insert({
         institute_id: instituteId,
         member: repA.id,
+        photo_url: photoFor(repA.id),
         activity: "meeting",
         date: iso(1),
       });
       expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe("Rule 12 — the visit photo is mandatory", () => {
+    it("refuses a direct insert with no photo, bypassing the form entirely", async (ctx) => {
+      if (!has0006) ctx.skip();
+      const { error } = await repA.db.from("visits").insert({
+        institute_id: instituteId,
+        member: repA.id,
+        activity: "olympiad",
+        date: iso(),
+      });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+      expect(error?.message).toMatch(/visits_photo_required/i);
+    });
+
+    it("refuses it for the service role too, so no key gets past it", async (ctx) => {
+      if (!has0006) ctx.skip();
+      const { error } = await admin.from("visits").insert({
+        institute_id: instituteId,
+        member: repA.id,
+        activity: "olympiad",
+        date: iso(),
+      });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses an empty string, which is not a photograph either", async (ctx) => {
+      if (!has0006) ctx.skip();
+      const { error } = await repA.db.from("visits").insert({
+        institute_id: instituteId,
+        member: repA.id,
+        activity: "olympiad",
+        date: iso(),
+        photo_url: "   ",
+      });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("raises FO007 from log_visit(), the code the app turns into a sentence", async (ctx) => {
+      if (!has0006) ctx.skip();
+      const { error } = await repA.db.rpc("log_visit", {
+        p_institute_id: instituteId,
+        p_activity: "olympiad",
+      });
+      expect(error?.code).toBe("FO007");
+    });
+
+    it("accepts the same visit once it carries a photo", async (ctx) => {
+      if (!has0006) ctx.skip();
+      const { data, error } = await repA.db
+        .from("visits")
+        .insert({
+          institute_id: instituteId,
+          member: repA.id,
+          activity: "olympiad",
+          date: iso(),
+          photo_url: photoFor(repA.id),
+        })
+        .select("id")
+        .single();
+      expect(error).toBeNull();
+      if (data?.id) await admin.from("visits").delete().eq("id", data.id);
     });
   });
 
@@ -341,6 +444,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { error } = await repB.db.from("visits").insert({
         institute_id: instituteId,
         member: repA.id,
+        photo_url: photoFor(repA.id),
         activity: "olympiad",
         date: iso(),
       });
@@ -396,6 +500,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .insert({
           institute_id: instituteId,
           member: repA.id,
+          photo_url: photoFor(repA.id),
           activity: "olympiad",
           date: iso(),
         })
@@ -645,11 +750,11 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .eq("institute_id", instituteId);
 
       await admin.from("visits").insert([
-        { institute_id: instituteId, member: repA.id, activity: "session", lifecycle_status: "Set", date: iso(), expected_date: iso(7) },
-        { institute_id: instituteId, member: repA.id, activity: "session", lifecycle_status: "Done", date: iso() },
-        { institute_id: instituteId, member: repA.id, activity: "olympiad", date: iso() },
+        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "session", lifecycle_status: "Set", date: iso(), expected_date: iso(7) },
+        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "session", lifecycle_status: "Done", date: iso() },
+        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "olympiad", date: iso() },
         // Dated well outside the week: must not be counted.
-        { institute_id: instituteId, member: repA.id, activity: "olympiad", date: iso(-40) },
+        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "olympiad", date: iso(-40) },
       ]);
     });
 
