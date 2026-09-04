@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { FormSection } from "@/components/form-section";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,7 +43,7 @@ import {
   hasManagement,
   hasSession,
 } from "@/lib/validation/closing-report";
-import { visitFieldErrors } from "@/lib/validation/visit";
+import { fieldLabel, visitFieldErrors } from "@/lib/validation/visit";
 import type { VisitReport } from "@/lib/closing-report";
 import { cn } from "@/lib/utils";
 
@@ -193,7 +193,7 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
             <ul className="list-inside list-disc">
               {Object.entries(fieldErrors).map(([key, message]) => (
                 <li key={key}>
-                  <span className="font-medium">{key.replace(/_/g, " ")}</span>: {message}
+                  <span className="font-medium">{fieldLabel(key)}</span>: {message}
                 </li>
               ))}
             </ul>
@@ -216,11 +216,10 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
       ) : (
         <>
           {/* 1. People met ---------------------------------------------- */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Who did you meet?</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <FormSection
+            title="Who did you meet?"
+            description="At least one name. This is who the relationship is with."
+          >
               {people.map((person, index) => (
                 <div
                   key={index}
@@ -361,19 +360,13 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                 Add another person
               </Button>
               {problem("people")}
-            </CardContent>
-          </Card>
+          </FormSection>
 
           {/* 2. What was actually done ---------------------------------- */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">What did you do?</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-muted-foreground text-sm">
-                Tick everything that happened. This is what the visit turned out
-                to be, which is not always what it was planned as.
-              </p>
+          <FormSection
+            title="What did you do?"
+            description="Tick everything that happened. This is what the visit turned out to be, which is not always what it was planned as."
+          >
               {ACTIVITIES_CONDUCTED.map((option) => (
                 <label
                   key={option}
@@ -387,16 +380,14 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                 </label>
               ))}
               {problem("activities_conducted")}
-            </CardContent>
-          </Card>
+          </FormSection>
 
           {/* 3. Session detail ------------------------------------------ */}
           {showSession && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">The session</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <FormSection
+              title="The session"
+              description="Only asked because you ticked a session above."
+            >
                 <div className="space-y-2">
                   <Label htmlFor="topic">Topic covered</Label>
                   <Input
@@ -529,16 +520,14 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                     onChange={(e) => set("student_questions")(e.target.value)}
                   />
                 </div>
-              </CardContent>
-            </Card>
+            </FormSection>
           )}
 
           {/* 4. Students ------------------------------------------------ */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">How did students respond?</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <FormSection
+            title="How did students respond?"
+            description="Optional, and only worth answering if students were there."
+          >
               <div className="space-y-2">
                 <Label>Overall response (optional)</Label>
                 <Select
@@ -582,16 +571,14 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                 <p className="text-muted-foreground text-xs">1 is cold, 5 is keen.</p>
                 {problem("student_interest")}
               </div>
-            </CardContent>
-          </Card>
+          </FormSection>
 
           {/* 5. Management ---------------------------------------------- */}
           {showManagement && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Management</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <FormSection
+              title="Management"
+              description="Only asked because you ticked a management meeting above."
+            >
                 <div className="space-y-2">
                   <Label>Their response</Label>
                   {MANAGEMENT_RESPONSES.map((option) => (
@@ -622,16 +609,14 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                   />
                   {problem("management_feedback")}
                 </div>
-              </CardContent>
-            </Card>
+            </FormSection>
           )}
 
           {/* 6. Outcome ------------------------------------------------- */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Outcome</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <FormSection
+            title="Outcome"
+            description="What was discussed, how it ended, and whether anything is owed."
+          >
               <div className="space-y-2">
                 <Label htmlFor="summary">What was discussed?</Label>
                 <Textarea
@@ -689,15 +674,13 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                   {problem("admissions_generated")}
                 </div>
               )}
-            </CardContent>
-          </Card>
+          </FormSection>
 
           {/* 7. Follow-up ----------------------------------------------- */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Anything to follow up?</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <FormSection
+            title="Anything to follow up?"
+            description="Say yes only if something is actually owed — it becomes a date you will be held to."
+          >
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -754,8 +737,7 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                   onChange={(e) => set("employee_remarks")(e.target.value)}
                 />
               </div>
-            </CardContent>
-          </Card>
+          </FormSection>
 
           <Button
             type="button"
@@ -797,19 +779,19 @@ function Review({
 }) {
   const line = (label: string, value: React.ReactNode) =>
     value ? (
-      <div className="flex items-start justify-between gap-4 py-2">
+      <div className="flex items-start justify-between gap-4 px-4 py-2.5">
         <dt className="text-muted-foreground shrink-0 text-sm">{label}</dt>
-        <dd className="text-right text-sm break-words">{value}</dd>
+        <dd className="text-right text-sm font-medium break-words">{value}</dd>
       </div>
     ) : null;
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Check this over</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <FormSection
+        title="Check this over"
+        description="This is what will be filed against the visit."
+      >
+        <div className="border-border overflow-hidden rounded-lg border">
           <dl className="divide-border divide-y">
             {line("Visit", `${activityLabelFor(visit.activity)} · ${new Date(visit.date).toLocaleDateString()}`)}
             {line("Institute", visit.institute?.name)}
@@ -871,13 +853,17 @@ function Review({
               ),
             )}
           </dl>
+        </div>
 
-          <div className="border-border mt-3 border-t pt-3">
-            <p className="text-muted-foreground text-xs">Summary</p>
-            <p className="mt-1 text-sm whitespace-pre-wrap">{field.discussion_summary}</p>
-          </div>
-        </CardContent>
-      </Card>
+        <div className="bg-secondary/50 rounded-lg p-4">
+          <p className="text-muted-foreground text-[11px] font-medium tracking-wide">
+            Summary
+          </p>
+          <p className="mt-1.5 text-sm leading-relaxed whitespace-pre-wrap">
+            {field.discussion_summary}
+          </p>
+        </div>
+      </FormSection>
 
       <p className="bg-warning-subtle text-warning-subtle-foreground flex items-start gap-2 rounded-md px-3 py-2 text-sm">
         <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" aria-hidden />

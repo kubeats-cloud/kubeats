@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeftIcon, HistoryIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { FormSection } from "@/components/form-section";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -72,11 +72,11 @@ export default async function InstituteDetailPage(
         )}
       </div>
 
-      <Card className="mb-4">
-        <CardHeader>
-          <CardTitle className="text-base">Details</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <FormSection
+        title="Details"
+        description="What was recorded when this institute was registered."
+        className="mb-4"
+      >
           <dl className="divide-border divide-y">
             <Row label="Address">
               {institute.address || <span className="text-muted-foreground">—</span>}
@@ -98,14 +98,13 @@ export default async function InstituteDetailPage(
               )}
             </Row>
           </dl>
-        </CardContent>
-      </Card>
+      </FormSection>
 
-      <Card className="mb-4">
-        <CardHeader>
-          <CardTitle className="text-base">Contacts</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <FormSection
+        title="Contacts"
+        description="Who to ask for, and who can decide."
+        className="mb-4"
+      >
           <dl className="divide-border divide-y">
             <Row label="Principal / owner">
               {institute.principal_name || (
@@ -134,14 +133,13 @@ export default async function InstituteDetailPage(
               <Phone number={institute.decision_maker_mobile} />
             </Row>
           </dl>
-        </CardContent>
-      </Card>
+      </FormSection>
 
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-base">Streams</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <FormSection
+        title="Streams"
+        description="Roughly how many students, by class."
+        className="mb-6"
+      >
           <dl className="divide-border divide-y">
             <Row label="Class 11">
               {institute.class11?.length ? (
@@ -161,8 +159,7 @@ export default async function InstituteDetailPage(
               <span className="font-semibold">{total}</span>
             </Row>
           </dl>
-        </CardContent>
-      </Card>
+      </FormSection>
 
       <SectionTitle>Visit history</SectionTitle>
       {!history.ok ? (

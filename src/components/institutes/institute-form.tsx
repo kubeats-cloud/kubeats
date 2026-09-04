@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import { XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { FormSection } from "@/components/form-section";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -93,11 +93,10 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
 
   return (
     <form action={formAction} onSubmit={handleSubmit} className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">The basics</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <FormSection
+        title="The basics"
+        description="What it is called and what kind of place it is."
+      >
           <div className="space-y-2">
             <Label htmlFor="name">Name</Label>
             <Input
@@ -141,23 +140,19 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
             />
             {fieldError("address")}
           </div>
-        </CardContent>
-      </Card>
+      </FormSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Location</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <FormSection
+        title="Location"
+        description="A PIN code fills the rest in; the pickers are there when it cannot."
+      >
           <LocationPicker tree={tree} fieldErrors={fieldErrors} />
-        </CardContent>
-      </Card>
+      </FormSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Boards</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <FormSection
+        title="Boards"
+        description="Which curricula they teach. Add one if it is missing."
+      >
           {boards.map((b) => (
             <input key={b} type="hidden" name="boards" value={b} />
           ))}
@@ -232,14 +227,12 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
             </div>
           )}
           {fieldError("boards")}
-        </CardContent>
-      </Card>
+      </FormSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Contacts</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <FormSection
+        title="Contacts"
+        description="Who to ask for, and who can actually decide."
+      >
           <div className="space-y-2">
             <Label htmlFor="principal_name">Principal / owner</Label>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -281,14 +274,12 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
             {fieldError("decision_maker_designation")}
             {fieldError("decision_maker_mobile")}
           </div>
-        </CardContent>
-      </Card>
+      </FormSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Streams</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
+      <FormSection
+        title="Streams"
+        description="Roughly how many students, so a session can be sized."
+      >
           {/* Rule 10: class 11 is ticks only. */}
           <fieldset>
             <legend className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
@@ -351,8 +342,7 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
             </div>
             {fieldError("class12")}
           </fieldset>
-        </CardContent>
-      </Card>
+      </FormSection>
 
       {error && (
         <div

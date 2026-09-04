@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ClockIcon, FileTextIcon } from "lucide-react";
+import { CalendarIcon, ClockIcon, FileTextIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/states";
@@ -48,11 +49,21 @@ export function PendingList({
 
         return (
           <li key={visit.id}>
-            <Card className="gap-0 p-4">
+            {/* An overdue loop earns a red edge, not a redesign: one strip of
+                colour is enough to find it while scrolling, and the card stays
+                the same shape as the ones that are merely scheduled. */}
+            <Card
+              className={cn(
+                "gap-0 p-5",
+                overdue && "border-l-danger rounded-l-sm border-l-2",
+              )}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate font-semibold">{visit.instituteName}</p>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="truncate text-[15px] leading-tight font-semibold tracking-tight">
+                    {visit.instituteName}
+                  </p>
+                  <p className="text-muted-foreground mt-1 text-xs">
                     {activityLabelFor(visit.activity)}
                     {!mine && visit.memberName ? ` · ${visit.memberName}` : ""}
                   </p>
@@ -62,15 +73,23 @@ export function PendingList({
                 </Badge>
               </div>
 
-              <p className="text-muted-foreground mt-2 text-xs">
+              <p
+                className={cn(
+                  "mt-3 flex items-center gap-1.5 text-xs",
+                  overdue ? "text-danger font-medium" : "text-muted-foreground",
+                )}
+              >
+                <CalendarIcon className="size-3.5" aria-hidden />
                 Expected {due.toLocaleDateString()}
               </p>
 
               {visit.notes && (
-                <p className="mt-2 line-clamp-2 text-sm">{visit.notes}</p>
+                <p className="text-muted-foreground mt-3 line-clamp-2 text-sm leading-relaxed">
+                  {visit.notes}
+                </p>
               )}
 
-              <div className="mt-3">
+              <div className="mt-4">
                 {mine ? (
                   <Button asChild className="h-11 w-full">
                     <Link href={`/pending/${visit.id}`}>

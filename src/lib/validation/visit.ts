@@ -236,6 +236,78 @@ export function dailyPlanFormDataToInput(formData: FormData) {
   return { institute_id: text("institute_id"), purpose: text("purpose") };
 }
 
+/**
+ * What to call a field when telling someone it is wrong.
+ *
+ * Zod reports the path it walked — "people.0.name", "activities_conducted" —
+ * which is the shape of the data, not the name of the thing on screen. Showing
+ * that to a rep at a school gate asks them to read a schema. This maps the few
+ * dozen paths these two forms can produce back to the words printed beside the
+ * field, and falls back to a de-underscored title case for anything new, so a
+ * field added later is untidy rather than broken.
+ */
+const FIELD_LABELS: Record<string, string> = {
+  // Person, within "Who did you meet?"
+  name: "name",
+  contact_type: "what they do",
+  designation: "designation",
+  contact_number: "mobile",
+  is_decision_maker: "decision maker",
+
+  // Log a visit
+  activity: "Activity",
+  institute_id: "Institute",
+  daily_plan_id: "Today’s plan",
+  lifecycle_status: "Set or Done",
+  expected_date: "Expected date",
+  photo_path: "Photo",
+  notes: "Notes",
+  status_set_to: "Institute status",
+  latitude: "Location",
+  longitude: "Location",
+
+  // Closing report
+  activities_conducted: "What you did",
+  session_topic: "Session topic",
+  session_class: "Class",
+  session_streams: "Streams",
+  students_attended: "Students attended",
+  session_duration_mins: "Session length",
+  other_faculty_present: "Other faculty",
+  other_faculty_count: "Faculty count",
+  session_participation: "Participation",
+  student_questions: "Student questions",
+  student_response: "Student response",
+  student_interest: "Interest level",
+  management_response: "Management response",
+  management_feedback: "What management said",
+  discussion_summary: "What was discussed",
+  visit_outcome: "How it ended",
+  applications_collected: "Applications collected",
+  admissions_generated: "Admissions",
+  follow_up_needed: "Follow-up",
+  follow_up_action: "Follow-up action",
+  follow_up_date: "Follow-up date",
+  follow_up_time: "Follow-up time",
+  employee_remarks: "Your remarks",
+};
+
+function titleCase(key: string): string {
+  const words = key.replace(/[._]/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+export function fieldLabel(key: string): string {
+  // "people.0.name" is one person's field, and a rep counts from one.
+  const person = /^people\.(\d+)\.(.+)$/.exec(key);
+  if (person) {
+    const which = Number(person[1]) + 1;
+    const part = FIELD_LABELS[person[2]] ?? person[2].replace(/_/g, " ");
+    return `Person ${which} — ${part}`;
+  }
+  return FIELD_LABELS[key] ?? titleCase(key);
+}
+
 /** Collapses zod issues into one message per field, for inline display. */
 export function visitFieldErrors(error: z.ZodError): Record<string, string> {
   const fieldErrors: Record<string, string> = {};

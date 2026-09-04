@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { visitSchema } from "@/lib/validation/visit";
+import { fieldLabel, visitSchema } from "@/lib/validation/visit";
 import { newMemberSchema } from "@/lib/validation/admin";
 import { weeklyTargetsSchema } from "@/lib/validation/weekly";
 
@@ -205,5 +205,34 @@ describe("newMemberSchema", () => {
     const result = newMemberSchema.safeParse({ ...valid, email: "Asha@Example.com" });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.email).toBe("asha@example.com");
+  });
+});
+
+describe("fieldLabel", () => {
+  it("names a person by their position, counting from one", () => {
+    expect(fieldLabel("people.0.name")).toBe("Person 1 — name");
+    expect(fieldLabel("people.2.contact_number")).toBe("Person 3 — mobile");
+  });
+
+  it("uses the words printed beside the field, not the column name", () => {
+    expect(fieldLabel("activities_conducted")).toBe("What you did");
+    expect(fieldLabel("discussion_summary")).toBe("What was discussed");
+    expect(fieldLabel("visit_outcome")).toBe("How it ended");
+    expect(fieldLabel("photo_path")).toBe("Photo");
+  });
+
+  it("never leaks a raw path to a rep", () => {
+    for (const key of [
+      "people.0.name",
+      "activities_conducted",
+      "management_feedback",
+      "follow_up_date",
+    ]) {
+      expect(fieldLabel(key)).not.toMatch(/[._]/);
+    }
+  });
+
+  it("degrades to something readable for a field it has not been told about", () => {
+    expect(fieldLabel("some_new_field")).toBe("Some new field");
   });
 });

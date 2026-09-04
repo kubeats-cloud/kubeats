@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { FormSection } from "@/components/form-section";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -24,6 +24,7 @@ import {
   followUpHidden,
   followUpRequired,
   hasLifecycle,
+  fieldLabel,
   visitFieldErrors,
   visitFormDataToInput,
   visitSchema,
@@ -128,11 +129,10 @@ export function LogVisitForm({
         value={hideFollowUp ? "" : followUpTime}
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">What happened?</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <FormSection
+        title="What happened?"
+        description="The activity, and which institute it was at."
+      >
           <div className="space-y-2">
             <Label>Activity</Label>
             <Select
@@ -269,23 +269,19 @@ export function LogVisitForm({
               {fieldError("expected_date")}
             </div>
           )}
-        </CardContent>
-      </Card>
+      </FormSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Proof</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <FormSection
+        title="Proof"
+        description="Where you were and a photograph, captured now rather than remembered later."
+      >
           <CaptureFields userId={userId} />
-        </CardContent>
-      </Card>
+      </FormSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Notes and status</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <FormSection
+        title="Notes and status"
+        description="Anything worth saying, and whether this changes where the institute stands."
+      >
           <div className="space-y-2">
             <Label htmlFor="notes">Notes</Label>
             <Textarea id="notes" name="notes" rows={3} maxLength={2000} />
@@ -348,8 +344,7 @@ export function LogVisitForm({
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+      </FormSection>
 
       {error && (
         <div
@@ -361,7 +356,7 @@ export function LogVisitForm({
             <ul className="list-inside list-disc">
               {Object.entries(fieldErrors).map(([field, message]) => (
                 <li key={field}>
-                  <span className="font-medium">{field.replace(/_/g, " ")}</span>
+                  <span className="font-medium">{fieldLabel(field)}</span>
                   : {message}
                 </li>
               ))}
