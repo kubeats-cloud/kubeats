@@ -8,9 +8,18 @@
  * only formatting for display keeps the grid stable wherever the app runs, and
  * matches `weekly_targets_week_starts_monday` in the database.
  *
- * Sunday is not part of the reporting week. It still exists in the calendar —
- * a visit could be logged on one — but it never falls inside a week window, so
- * the Saturday end date is a real boundary, not a display detail.
+ * Two different "ends" of a week, and the difference matters:
+ *
+ *   weekEnd()       Saturday. The reporting week a rep commits to, and the only
+ *                   one ever shown.
+ *   weekCountEnd()  Sunday. The window every "which week does this belong to"
+ *                   question uses.
+ *
+ * They differ because work does happen on Sundays — coaching centres open, and
+ * a rep catching up logs a visit. Counting strictly Monday to Saturday would
+ * drop that day out of every weekly total, permanently. So a Sunday folds into
+ * the week that has just ended, which is also what mondayOf() does with one:
+ * every date belongs to exactly one week, and none is orphaned.
  */
 
 const DAY_MS = 86_400_000;
@@ -44,10 +53,25 @@ export function mondayOf(dateISO: string = todayISO()): string {
   return toISO(new Date(date.getTime() - dayFromMonday * DAY_MS));
 }
 
-/** The Saturday that closes the week starting at `weekStart`. */
+/**
+ * The Saturday that closes the reporting week — the range a rep is shown.
+ * For deciding which week a date counts in, use weekCountEnd().
+ */
 export function weekEnd(weekStart: string): string {
   const monday = parseISO(weekStart) ?? parseISO(mondayOf())!;
   return toISO(new Date(monday.getTime() + 5 * DAY_MS));
+}
+
+/**
+ * The last day counted in this week: the Sunday after it.
+ *
+ * A Sunday belongs to the week that just ended, so it is the upper bound of
+ * every rollup query. Pair it with mondayOf(), which folds a Sunday back to the
+ * same Monday — together they guarantee each date lands in exactly one week.
+ */
+export function weekCountEnd(weekStart: string): string {
+  const monday = parseISO(weekStart) ?? parseISO(mondayOf())!;
+  return toISO(new Date(monday.getTime() + 6 * DAY_MS));
 }
 
 export function addWeeks(weekStart: string, count: number): string {
@@ -75,10 +99,10 @@ export function isFutureWeek(weekStart: string): boolean {
   return weekStart > mondayOf();
 }
 
-/** True when `dateISO` falls inside the Mon–Sat window. */
+/** True when `dateISO` counts towards this week — Monday through Sunday. */
 export function isInWeek(dateISO: string | null, weekStart: string): boolean {
   if (!dateISO) return false;
-  return dateISO >= weekStart && dateISO <= weekEnd(weekStart);
+  return dateISO >= weekStart && dateISO <= weekCountEnd(weekStart);
 }
 
 const DAY_MONTH = new Intl.DateTimeFormat("en-IN", {

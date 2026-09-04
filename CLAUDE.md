@@ -91,6 +91,17 @@ block in `globals.css` is the extension point if v2 wants it.
   0002); it runs SECURITY INVOKER, so RLS and every trigger still apply. It
   raises `FO001`-`FO006` for the cases a rep can cause, and `src/lib/visit-actions.ts`
   maps those codes — never the message text — to sentences.
+- A locked week freezes the COMMITTED TARGETS, nothing else. The achieved
+  column stays live: it is recomputed from `daily_plans` and `visits` on every
+  read, so closing an old "Set" loop moves that row from Sessions Set to
+  Sessions Done in the week it was originally logged — including in a week that
+  is already submitted. `locked` therefore means "this rep can no longer change
+  what they promised", not "these numbers are a frozen historical record".
+  Any later reporting that needs a fixed snapshot has to take one itself.
+- A week runs Monday to Saturday for reporting, but counts Monday through
+  Sunday: a Sunday's work folds into the week that just ended rather than
+  falling out of every total. `weekEnd()` is the Saturday shown to the rep;
+  `weekCountEnd()` is the Sunday every rollup query uses.
 - Visit photos are deleted automatically after
   `public.visit_photo_retention_days()` days (migration 0003, scheduled in
   0004). The visit rows, coordinates and timestamps are kept forever, so a row

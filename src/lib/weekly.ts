@@ -2,7 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
-import { weekEnd } from "@/lib/weeks";
+import { weekCountEnd } from "@/lib/weeks";
 import {
   METRICS,
   METRIC_KEYS,
@@ -14,9 +14,11 @@ import {
  * Reading the week: what was committed, and what actually happened.
  *
  * Rule 7 in one sentence: Meetings come from the daily plan, everything else
- * comes from the visits log. Both are counted over the Monday–Saturday window
- * by `date` — the day the work was logged — which is why a "Set" visit is dated
- * today rather than its expected date.
+ * comes from the visits log. Both are counted by `date` — the day the work was
+ * logged — which is why a "Set" visit is dated today rather than its expected
+ * date. The window runs Monday through Sunday even though the week is reported
+ * as Monday to Saturday, so a Sunday's work counts towards the week that has
+ * just ended instead of falling out of the figures altogether.
  *
  * Every read here is scoped by RLS: a rep's queries can only return their own
  * rows, an admin's return the whole team's. The member filters below are for
@@ -125,7 +127,9 @@ export async function getWeek(
   weekStart: string,
 ): Promise<{ ok: true; view: WeekView } | { ok: false }> {
   const supabase = await createClient();
-  const end = weekEnd(weekStart);
+  // Sunday counts towards the week that just ended, so the upper bound is the
+  // Sunday rather than the Saturday the rep is shown. See lib/weeks.ts.
+  const end = weekCountEnd(weekStart);
 
   const [targetsResult, plansResult, visitsResult] = await Promise.all([
     supabase
@@ -198,7 +202,9 @@ export async function getTeamWeek(
   weekStart: string,
 ): Promise<{ ok: true; members: TeamMemberWeek[] } | { ok: false }> {
   const supabase = await createClient();
-  const end = weekEnd(weekStart);
+  // Sunday counts towards the week that just ended, so the upper bound is the
+  // Sunday rather than the Saturday the rep is shown. See lib/weeks.ts.
+  const end = weekCountEnd(weekStart);
 
   const [profilesResult, targetsResult, plansResult, visitsResult] =
     await Promise.all([
