@@ -177,3 +177,30 @@ async function memberNames(ids: string[]): Promise<Map<string, string | null>> {
   }
   return new Map((data ?? []).map((p) => [p.id, p.name]));
 }
+
+/**
+ * Open loops per member — everything still at "Set", all-time rather than
+ * week-scoped, because an unclosed session from three weeks ago is exactly the
+ * one that needs chasing.
+ *
+ * RLS decides the scope: a rep's call returns only their own, an admin's
+ * returns the whole team's, which is what the team snapshot needs.
+ */
+export async function openLoopsByMember(): Promise<Map<string, number>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("visits")
+    .select("member")
+    .eq("lifecycle_status", "Set");
+
+  if (error) {
+    logError("visits:open-loops", error);
+    return new Map();
+  }
+
+  const counts = new Map<string, number>();
+  for (const row of data ?? []) {
+    counts.set(row.member, (counts.get(row.member) ?? 0) + 1);
+  }
+  return counts;
+}

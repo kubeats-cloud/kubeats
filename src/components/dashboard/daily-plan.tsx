@@ -76,12 +76,9 @@ export function DailyPlan({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">
-          Today&rsquo;s plan
-          <span className="text-muted-foreground ml-2 text-sm font-normal">
-            {held.length}/{entries.length} held
-          </span>
-        </CardTitle>
+        {/* The held/planned counts live in the snapshot tiles above; repeating
+            them here would only give them a chance to disagree. */}
+        <CardTitle className="text-base">Today&rsquo;s plan</CardTitle>
       </CardHeader>
 
       <CardContent className="space-y-4">
