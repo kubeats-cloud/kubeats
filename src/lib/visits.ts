@@ -51,6 +51,9 @@ export interface PlanEntry {
   purpose: string;
   meetings_actual: number | null;
   follow_up_date: string | null;
+  /** Set when an admin put this on the rep's plan rather than the rep. */
+  assignedBy: string | null;
+  assignedByName: string | null;
 }
 
 /**
@@ -66,7 +69,7 @@ export async function getTodayPlan(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("daily_plans")
-    .select("id, institute_id, purpose, meetings_actual, follow_up_date")
+    .select("id, institute_id, purpose, meetings_actual, follow_up_date, assigned_by")
     .eq("member", memberId)
     .eq("date", todayISO())
     .order("created_at", { ascending: false });
@@ -77,13 +80,18 @@ export async function getTodayPlan(
   }
 
   const rows = data ?? [];
-  const names = await instituteNames(rows.map((r) => r.institute_id));
+  const [names, assigners] = await Promise.all([
+    instituteNames(rows.map((r) => r.institute_id)),
+    memberNames(rows.map((r) => r.assigned_by).filter((id): id is string => Boolean(id))),
+  ]);
 
   return {
     ok: true,
-    entries: rows.map((r) => ({
+    entries: rows.map(({ assigned_by, ...r }) => ({
       ...r,
       instituteName: names.get(r.institute_id) ?? "Unknown institute",
+      assignedBy: assigned_by,
+      assignedByName: assigned_by ? (assigners.get(assigned_by) ?? null) : null,
     })),
   };
 }

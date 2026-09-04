@@ -84,14 +84,6 @@ const optionalText = (max: number) =>
     .transform((v) => (v === "" ? null : v))
     .nullable();
 
-const optionalCount = z
-  .string()
-  .trim()
-  .transform((v) => (v === "" ? null : Number(v)))
-  .nullable()
-  .refine((v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 100000), {
-    message: "Enter a whole number.",
-  });
 
 const optionalCoord = (limit: number) =>
   z
@@ -232,32 +224,6 @@ export function dailyPlanFormDataToInput(formData: FormData) {
     return typeof value === "string" ? value : "";
   };
   return { institute_id: text("institute_id"), purpose: text("purpose") };
-}
-
-/* ------------------------------------------------------------------ */
-/* Completing a pending session or campus visit                        */
-/* ------------------------------------------------------------------ */
-
-export const completionSchema = z.object({
-  visit_id: z.uuid(),
-  students_attended: optionalCount,
-  session_topic: optionalText(300),
-  other_faculty_present: optionalText(300),
-  other_faculty_count: optionalCount,
-});
-
-export function completionFormDataToInput(formData: FormData) {
-  const text = (key: string) => {
-    const value = formData.get(key);
-    return typeof value === "string" ? value : "";
-  };
-  return {
-    visit_id: text("visit_id"),
-    students_attended: text("students_attended"),
-    session_topic: text("session_topic"),
-    other_faculty_present: text("other_faculty_present"),
-    other_faculty_count: text("other_faculty_count"),
-  };
 }
 
 /** Collapses zod issues into one message per field, for inline display. */

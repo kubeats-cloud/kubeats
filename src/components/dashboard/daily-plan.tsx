@@ -155,25 +155,34 @@ export function DailyPlan({
                   <p className="text-muted-foreground truncate text-xs">
                     {entry.purpose}
                   </p>
+                  {entry.assignedBy && (
+                    <Badge variant="neutral" className="mt-1">
+                      Assigned by {entry.assignedByName ?? "an admin"}
+                    </Badge>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <Button asChild className="h-11">
                     <Link href={`/log?plan=${entry.id}`}>Log</Link>
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    aria-label={`Remove ${entry.instituteName} from today's plan`}
-                    className="size-11"
-                    disabled={removing}
-                    onClick={() =>
-                      startRemoving(async () => {
-                        await removeFromDailyPlan(entry.id);
-                      })
-                    }
-                  >
-                    <XIcon className="size-4" aria-hidden />
-                  </Button>
+                  {/* An assignment is not the rep's to dismiss — it came from
+                      an admin, and quietly deleting it would lose the ask. */}
+                  {!entry.assignedBy && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      aria-label={`Remove ${entry.instituteName} from today's plan`}
+                      className="size-11"
+                      disabled={removing}
+                      onClick={() =>
+                        startRemoving(async () => {
+                          await removeFromDailyPlan(entry.id);
+                        })
+                      }
+                    >
+                      <XIcon className="size-4" aria-hidden />
+                    </Button>
+                  )}
                 </div>
               </li>
             ))}
@@ -189,6 +198,9 @@ export function DailyPlan({
                   </p>
                   <p className="text-muted-foreground truncate text-xs">
                     {entry.purpose}
+                    {entry.assignedBy
+                      ? ` · assigned by ${entry.assignedByName ?? "an admin"}`
+                      : ""}
                   </p>
                 </div>
                 <Badge variant="success" className="shrink-0">

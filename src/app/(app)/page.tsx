@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/states";
 import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
+import { AssignVisit } from "@/components/dashboard/assign-visit";
 import { MetricList } from "@/components/weekly/metric-list";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import {
@@ -16,7 +17,8 @@ import {
   openLoopsByMember,
 } from "@/lib/visits";
 import { getTeamWeek, getWeek } from "@/lib/weekly";
-import { formatWeekRange, mondayOf } from "@/lib/weeks";
+import { listReps } from "@/lib/closing-report";
+import { formatWeekRange, mondayOf, todayISO } from "@/lib/weeks";
 
 export const metadata = { title: "Dashboard · Field Ops" };
 
@@ -27,13 +29,14 @@ export default async function DashboardPage() {
   const admin = isAdmin(user);
   const weekStart = mondayOf();
 
-  const [plan, institutes, purposes, openLoops, week, team] = await Promise.all([
+  const [plan, institutes, purposes, openLoops, week, team, reps] = await Promise.all([
     getTodayPlan(user.id),
     listInstitutesForPicker(),
     listPurposes(),
     openLoopsByMember(),
     getWeek(user.id, weekStart),
     admin ? getTeamWeek(weekStart) : Promise.resolve(null),
+    admin ? listReps() : Promise.resolve([]),
   ]);
 
   const entries = plan.ok ? plan.entries : [];
@@ -69,6 +72,14 @@ export default async function DashboardPage() {
 
       {admin ? (
         <>
+          <SectionTitle className="mt-8">Assign work</SectionTitle>
+          <AssignVisit
+            reps={reps.filter((rep) => rep.id !== user.id)}
+            institutes={institutes}
+            purposes={purposes}
+            today={todayISO()}
+          />
+
           <SectionTitle className="mt-8">
             The team this week
             <span className="text-muted-foreground ml-2 text-xs font-normal">

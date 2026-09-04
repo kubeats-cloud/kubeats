@@ -30,6 +30,33 @@ const admin = configured
   ? createClient(url!, serviceKey!, { auth: { persistSession: false } })
   : (null as unknown as SupabaseClient);
 
+/**
+ * Migration 0005 adds visit_people and the assignment columns. Until it has
+ * been applied to whichever project these tests point at, the two suites that
+ * cover it would fail for a reason that has nothing to do with the code — so
+ * they say why and skip instead.
+ */
+// A real select, not a HEAD: supabase-js leaves `error` unset on a HEAD
+// request for a table that does not exist, so the probe would say yes.
+const has0005 = configured
+  ? await admin
+      .from("visit_people")
+      .select("id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0005) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0005 is not applied to this project.",
+      "    The closing-report and assignment suites are being SKIPPED, not passing.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
 const iso = (offsetDays = 0) =>
   new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
 
@@ -355,6 +382,154 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .eq("member", repA.id);
 
       expect((data ?? []).length).toBeGreaterThan(0);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0005)("visit_people — the report's people follow their visit", () => {
+    let visitId: string;
+
+    beforeAll(async () => {
+      const { data, error } = await admin
+        .from("visits")
+        .insert({
+          institute_id: instituteId,
+          member: repA.id,
+          activity: "olympiad",
+          date: iso(),
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(`visit: ${error.message}`);
+      visitId = data.id;
+
+      const { error: peopleError } = await repA.db.from("visit_people").insert({
+        visit_id: visitId,
+        name: `${TAG} principal`,
+        contact_type: "Principal",
+        is_decision_maker: true,
+      });
+      expect(peopleError).toBeNull();
+    });
+
+    it("lets the owner read their own", async () => {
+      const { data } = await repA.db
+        .from("visit_people")
+        .select("id")
+        .eq("visit_id", visitId);
+      expect(data).toHaveLength(1);
+    });
+
+    it("hides them from another rep", async () => {
+      const { data } = await repB.db
+        .from("visit_people")
+        .select("id")
+        .eq("visit_id", visitId);
+      expect(data).toHaveLength(0);
+    });
+
+    it("shows them to an admin", async () => {
+      const { data } = await boss.db
+        .from("visit_people")
+        .select("id")
+        .eq("visit_id", visitId);
+      expect(data).toHaveLength(1);
+    });
+
+    it("stops another rep adding a person to someone else's visit", async () => {
+      const { error } = await repB.db.from("visit_people").insert({
+        visit_id: visitId,
+        name: `${TAG} intruder`,
+        contact_type: "Other",
+      });
+      expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+    });
+
+    it("stops an admin rewriting someone's account of who they met", async () => {
+      // An admin reads a report. They do not edit it — the account belongs to
+      // the person who was in the room.
+      const { data } = await boss.db
+        .from("visit_people")
+        .update({ name: `${TAG} edited` })
+        .eq("visit_id", visitId)
+        .select("id");
+      expect(data ?? []).toHaveLength(0);
+    });
+
+    it("cascades when the visit goes", async () => {
+      await admin.from("visits").delete().eq("id", visitId);
+      const { count } = await admin
+        .from("visit_people")
+        .select("id", { count: "exact", head: true })
+        .eq("visit_id", visitId);
+      expect(count).toBe(0);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0005)("admin-assigned visits", () => {
+    it("lets an admin put a visit on a rep's plan", async () => {
+      const { error } = await boss.db.from("daily_plans").insert({
+        member: repB.id,
+        date: iso(2),
+        institute_id: instituteId,
+        purpose: "Other",
+        assigned_by: boss.id,
+      });
+      expect(error).toBeNull();
+
+      const { data } = await admin
+        .from("daily_plans")
+        .select("assigned_by, assigned_at")
+        .eq("member", repB.id)
+        .eq("date", iso(2))
+        .single();
+      expect(data?.assigned_by).toBe(boss.id);
+      // Stamped by the trigger, not sent by the client.
+      expect(data?.assigned_at).not.toBeNull();
+    });
+
+    it("stops a rep putting a visit on someone else's plan", async () => {
+      const { error } = await repA.db.from("daily_plans").insert({
+        member: repB.id,
+        date: iso(3),
+        institute_id: instituteId,
+        purpose: "Other",
+      });
+      expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+    });
+
+    it("stops a rep signing their own entry as someone else's assignment", async () => {
+      const { error } = await repA.db.from("daily_plans").insert({
+        member: repA.id,
+        date: iso(4),
+        institute_id: instituteId,
+        purpose: "Other",
+        assigned_by: boss.id,
+      });
+      expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+    });
+
+    it("lets the assigned rep mark it held without losing who assigned it", async () => {
+      // The update a rep makes when they log the meeting. It must not read as
+      // an attempt to change the assignment.
+      const { error } = await repB.db
+        .from("daily_plans")
+        .update({ meetings_actual: 1 })
+        .eq("member", repB.id)
+        .eq("date", iso(2));
+      expect(error).toBeNull();
+
+      const { data } = await admin
+        .from("daily_plans")
+        .select("meetings_actual, assigned_by")
+        .eq("member", repB.id)
+        .eq("date", iso(2))
+        .single();
+      expect(data?.meetings_actual).toBe(1);
+      expect(data?.assigned_by).toBe(boss.id);
     });
   });
 

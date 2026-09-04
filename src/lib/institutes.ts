@@ -84,6 +84,16 @@ export interface VisitSummary {
   memberName: string | null;
   /** Null when the visit never had a photo; "expired" when the file is gone. */
   photo: VisitPhoto | null;
+  /** The closing report, when one has been filed. */
+  reportedAt: string | null;
+  activitiesConducted: string[] | null;
+  studentsAttended: number | null;
+  studentResponse: string | null;
+  managementResponse: string[] | null;
+  visitOutcome: string | null;
+  followUpAction: string | null;
+  followUpDate: string | null;
+  discussionSummary: string | null;
 }
 
 /**
@@ -101,7 +111,9 @@ export async function getInstituteVisits(
 
   const { data, error } = await supabase
     .from("visits")
-    .select("id, activity, lifecycle_status, date, notes, member, photo_url")
+    .select(
+      "id, activity, lifecycle_status, date, notes, member, photo_url, reported_at, activities_conducted, students_attended, student_response, management_response, visit_outcome, follow_up_action, follow_up_date, discussion_summary",
+    )
     .eq("institute_id", instituteId)
     .order("date", { ascending: false });
 
@@ -132,10 +144,24 @@ export async function getInstituteVisits(
 
   return {
     ok: true,
-    visits: rows.map(({ photo_url, ...r }) => ({
-      ...r,
+    visits: rows.map((r) => ({
+      id: r.id,
+      activity: r.activity,
+      lifecycle_status: r.lifecycle_status,
+      date: r.date,
+      notes: r.notes,
+      member: r.member,
       memberName: names.get(r.member) ?? null,
-      photo: photo_url ? (photos.get(photo_url) ?? { status: "expired" }) : null,
+      photo: r.photo_url ? (photos.get(r.photo_url) ?? { status: "expired" }) : null,
+      reportedAt: r.reported_at,
+      activitiesConducted: r.activities_conducted,
+      studentsAttended: r.students_attended,
+      studentResponse: r.student_response,
+      managementResponse: r.management_response,
+      visitOutcome: r.visit_outcome,
+      followUpAction: r.follow_up_action,
+      followUpDate: r.follow_up_date,
+      discussionSummary: r.discussion_summary,
     })),
   };
 }

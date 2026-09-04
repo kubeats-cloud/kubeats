@@ -179,7 +179,7 @@ export default async function InstituteDetailPage(
               key={visit.id}
               className="border-primary bg-card flex items-start justify-between gap-3 rounded-r-md border-l-2 px-3 py-2"
             >
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">
                   {activityLabel(visit.activity)}
                   {visit.lifecycle_status && (
@@ -193,6 +193,54 @@ export default async function InstituteDetailPage(
                   {visit.memberName ?? "Unknown"} ·{" "}
                   {new Date(visit.date).toLocaleDateString()}
                 </p>
+
+                {/* The closing report, in one line each, with the full account
+                    a tap away. A visit without one shows nothing extra. */}
+                {visit.reportedAt && (
+                  <div className="mt-2 space-y-1.5">
+                    {visit.activitiesConducted?.length ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {visit.activitiesConducted.map((item) => (
+                          <Badge key={item} variant="secondary">
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <p className="text-muted-foreground text-xs">
+                      {[
+                        visit.visitOutcome,
+                        visit.studentsAttended !== null
+                          ? `${visit.studentsAttended} students`
+                          : null,
+                        visit.studentResponse,
+                        visit.managementResponse?.length
+                          ? visit.managementResponse.join(", ")
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+
+                    {visit.followUpAction && (
+                      <p className="text-warning-subtle-foreground bg-warning-subtle inline-block rounded px-2 py-0.5 text-xs">
+                        Follow up: {visit.followUpAction}
+                        {visit.followUpDate
+                          ? ` by ${new Date(visit.followUpDate).toLocaleDateString()}`
+                          : ""}
+                      </p>
+                    )}
+
+                    {visit.discussionSummary && (
+                      <p className="line-clamp-2 text-sm">{visit.discussionSummary}</p>
+                    )}
+
+                    <Button asChild variant="outline" className="mt-1 h-9">
+                      <Link href={`/pending/${visit.id}`}>Open the full report</Link>
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {visit.photo && (

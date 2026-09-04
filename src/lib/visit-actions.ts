@@ -5,10 +5,13 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import { todayISO } from "@/lib/visits";
+import { requireAdmin } from "@/lib/admin";
+import {
+  assignVisitSchema,
+  needsClosingReport,
+} from "@/lib/validation/closing-report";
 import type { FormState } from "@/lib/visit-form-state";
 import {
-  completionFormDataToInput,
-  completionSchema,
   dailyPlanFormDataToInput,
   dailyPlanSchema,
   planIdSchema,
@@ -94,6 +97,69 @@ export async function addToDailyPlan(
   return { error: null, fieldErrors: {}, ok: true };
 }
 
+/**
+ * An admin putting a visit on someone else's plan.
+ *
+ * Deliberately the same row, the same table and the same meeting gate as a rep
+ * planning their own day — an assignment is not a separate concept, it is a
+ * plan entry someone else created. The only difference is assigned_by, which
+ * the trigger in migration 0005 insists is the caller.
+ *
+ * Admin-only here for the sake of a sentence; the RLS policy and that trigger
+ * are what actually stop a rep assigning work to anyone.
+ */
+export async function assignVisit(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return { error: gate.error, fieldErrors: {} };
+
+  const parsed = assignVisitSchema.safeParse({
+    member: String(formData.get("member") ?? ""),
+    institute_id: String(formData.get("institute_id") ?? ""),
+    purpose: String(formData.get("purpose") ?? ""),
+    date: String(formData.get("date") ?? ""),
+  });
+  if (!parsed.success) {
+    return {
+      error: "Please check the highlighted fields.",
+      fieldErrors: visitFieldErrors(parsed.error),
+    };
+  }
+  const input = parsed.data;
+
+  if (input.date < todayISO()) {
+    return { error: "You cannot assign a visit in the past.", fieldErrors: {} };
+  }
+
+  const { error } = await gate.supabase.from("daily_plans").upsert(
+    {
+      member: input.member,
+      date: input.date,
+      institute_id: input.institute_id,
+      purpose: input.purpose,
+      assigned_by: gate.user.id,
+    },
+    { onConflict: "member,date,institute_id" },
+  );
+
+  if (error) {
+    logError("plan:assign", error);
+    if (error.code === "42501") {
+      return { error: "Only an admin can assign a visit.", fieldErrors: {} };
+    }
+    return {
+      error: toFriendlyMessage(error, "We could not assign that visit."),
+      fieldErrors: {},
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/settings");
+  return { error: null, fieldErrors: {}, ok: true };
+}
+
 export async function removeFromDailyPlan(planId: string): Promise<FormState> {
   const { supabase, user } = await requireUser();
   if (!user) {
@@ -161,7 +227,7 @@ export async function createVisit(
   // way through leaves nothing behind. Its rule checks run inside that
   // transaction alongside the meeting-gate trigger — see
   // supabase/migrations/0002_log_visit_rpc.sql.
-  const { error } = await supabase.rpc("log_visit", {
+  const { data: newVisitId, error } = await supabase.rpc("log_visit", {
     p_institute_id: input.institute_id,
     p_activity: input.activity,
     p_lifecycle_status: input.lifecycle_status,
@@ -204,66 +270,14 @@ export async function createVisit(
   revalidatePath("/log");
   revalidatePath("/pending");
   revalidatePath(`/institutes/${input.institute_id}`);
+
+  // A meeting, session or campus visit that is already complete goes straight
+  // to its closing report — that is the only moment the rep still has the
+  // detail in their head. One logged as "Set" hasn't happened yet, so its
+  // report is filed later, from Pending, when they close it.
+  const stillToHappen = input.lifecycle_status === "Set";
+  if (needsClosingReport(input.activity) && !stillToHappen && typeof newVisitId === "string") {
+    redirect(`/pending/${newVisitId}`);
+  }
   redirect("/");
-}
-
-/* ------------------------------------------------------------------ */
-/* E. Closing a pending session or campus visit                        */
-/* ------------------------------------------------------------------ */
-
-export async function completeVisit(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const { supabase, user } = await requireUser();
-  if (!user) {
-    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
-  }
-
-  const parsed = completionSchema.safeParse(completionFormDataToInput(formData));
-  if (!parsed.success) {
-    return {
-      error: "Please check the highlighted fields.",
-      fieldErrors: visitFieldErrors(parsed.error),
-    };
-  }
-  const input = parsed.data;
-
-  // The RLS update policy is member = auth.uid(), so a rep can only close their
-  // own loop. Matching on member as well turns a policy rejection into a
-  // "nothing matched" we can explain.
-  const { data, error } = await supabase
-    .from("visits")
-    .update({
-      lifecycle_status: "Done",
-      closed_at: new Date().toISOString(),
-      students_attended: input.students_attended,
-      session_topic: input.session_topic,
-      other_faculty_present: input.other_faculty_present,
-      other_faculty_count: input.other_faculty_count,
-    })
-    .eq("id", input.visit_id)
-    .eq("member", user.id)
-    .eq("lifecycle_status", "Set")
-    .select("id");
-
-  if (error) {
-    logError("visit:complete", error);
-    return {
-      error: toFriendlyMessage(error, "We could not close this off. Please try again."),
-      fieldErrors: {},
-    };
-  }
-
-  if (!data || data.length === 0) {
-    return {
-      error:
-        "That entry could not be closed — it may already be done, or it belongs to another member.",
-      fieldErrors: {},
-    };
-  }
-
-  revalidatePath("/pending");
-  revalidatePath("/");
-  return { error: null, fieldErrors: {}, ok: true };
 }
