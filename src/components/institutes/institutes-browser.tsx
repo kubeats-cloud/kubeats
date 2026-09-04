@@ -101,7 +101,7 @@ export function InstitutesBrowser({ institutes }: { institutes: Institute[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="relative">
+      <div className="relative md:max-w-lg">
         <SearchIcon
           className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
           aria-hidden
@@ -115,7 +115,7 @@ export function InstitutesBrowser({ institutes }: { institutes: Institute[] }) {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2 md:max-w-2xl">
         <Select
           value={state}
           onValueChange={(v) => {
@@ -200,13 +200,105 @@ export function InstitutesBrowser({ institutes }: { institutes: Institute[] }) {
           description="Try clearing the search or widening the filters."
         />
       ) : (
-        <ul className="space-y-3">
-          {filtered.map((institute) => (
-            <li key={institute.id}>
-              <InstituteCard institute={institute} />
-            </li>
-          ))}
-        </ul>
+        <>
+          {/* Phone: cards, one per row, thumb-sized. */}
+          <ul className="space-y-3 md:hidden">
+            {filtered.map((institute) => (
+              <li key={institute.id}>
+                <InstituteCard institute={institute} />
+              </li>
+            ))}
+          </ul>
+
+          {/* Desktop: the registry as a register — scannable down a column. */}
+          <Card className="hidden gap-0 overflow-hidden p-0 shadow-xs md:block">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <caption className="sr-only">
+                  Registered institutes matching the current filters
+                </caption>
+                <thead>
+                  <tr className="border-border bg-secondary/40 text-muted-foreground border-b text-left">
+                    <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                      Institute
+                    </th>
+                    <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                      Location
+                    </th>
+                    <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                      Status
+                    </th>
+                    <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                      Key contact
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-5 py-2.5 text-right text-xs font-medium"
+                    >
+                      Streams
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-5 py-2.5 text-right text-xs font-medium"
+                    >
+                      Class 12
+                    </th>
+                    <th scope="col" className="w-10 px-2 py-2.5">
+                      <span className="sr-only">Open</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((institute) => {
+                    const streams = streamCount(institute.class11, institute.class12);
+                    const students = class12Total(institute.class12);
+                    return (
+                      <tr
+                        key={institute.id}
+                        className="border-border hover:bg-accent/50 border-b transition-colors last:border-0"
+                      >
+                        <td className="px-5 py-3">
+                          <Link
+                            href={`/institutes/${institute.id}`}
+                            className="focus-visible:ring-ring rounded-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
+                          >
+                            {institute.name}
+                          </Link>
+                          <p className="text-muted-foreground text-xs">
+                            {TYPE_LABELS[institute.type]}
+                          </p>
+                        </td>
+                        <td className="text-muted-foreground px-5 py-3">
+                          {[institute.area, institute.city, institute.state]
+                            .filter(Boolean)
+                            .join(", ") || "—"}
+                        </td>
+                        <td className="px-5 py-3">
+                          <InstituteStatusBadge status={institute.status} />
+                        </td>
+                        <td className="px-5 py-3">{keyContact(institute)}</td>
+                        <td className="px-5 py-3 text-right tabular-nums">{streams}</td>
+                        <td className="px-5 py-3 text-right tabular-nums">
+                          ~{students}
+                        </td>
+                        <td className="px-2 py-3">
+                          <Link
+                            href={`/institutes/${institute.id}`}
+                            tabIndex={-1}
+                            aria-hidden
+                            className="text-muted-foreground hover:text-foreground block"
+                          >
+                            <ChevronRightIcon className="size-4" aria-hidden />
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
       )}
     </div>
   );

@@ -38,10 +38,12 @@ const ICONS: Record<NavIconName, LucideIcon> = {
 export function BottomNav({ items }: { items: NavItem[] }) {
   const pathname = usePathname();
 
+  // `md:hidden`: below that width this is the navigation, above it the header
+  // carries the same items, so a wide screen never wears a phone's thumb bar.
   return (
     <nav
       aria-label="Primary"
-      className="border-border bg-card fixed inset-x-0 bottom-0 z-40 border-t pb-[env(safe-area-inset-bottom)]"
+      className="border-border bg-card fixed inset-x-0 bottom-0 z-40 border-t pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       <ul className="mx-auto flex w-full max-w-2xl items-stretch justify-around px-1">
         {items.map((item) => {

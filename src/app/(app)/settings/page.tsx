@@ -52,7 +52,9 @@ export default async function SettingsPage() {
       <TeamPanel members={members} />
 
       <SectionTitle className="mt-8">Shared lists</SectionTitle>
-      <div className="space-y-4">
+      {/* Side by side once there is room: two independent lists an admin edits
+          in either order, so stacking them on a monitor only adds scrolling. */}
+      <div className="space-y-4 md:grid md:grid-cols-2 md:items-start md:gap-5 md:space-y-0">
         <PurposesPanel purposes={purposes} />
         <LocationsPanel tree={tree} />
       </div>

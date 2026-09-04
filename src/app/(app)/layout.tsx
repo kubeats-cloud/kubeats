@@ -41,16 +41,33 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         name={user.name}
         role={user.role}
         showRole={user.profileStatus === "ready"}
+        items={items}
       />
 
       {notice && (
         <div className="bg-warning-subtle text-warning-subtle-foreground">
-          <p className="mx-auto w-full max-w-2xl px-5 py-2 text-xs">{notice}</p>
+          <p className="mx-auto w-full max-w-2xl px-5 py-2 text-xs md:max-w-6xl md:px-6">
+            {notice}
+          </p>
         </div>
       )}
 
-      {/* pb-28 keeps the last element clear of the fixed bottom bar. */}
-      <main className="mx-auto w-full max-w-2xl flex-1 px-5 pt-6 pb-28">
+      {/*
+        Two shapes, not one stretched. A rep's screens are a phone column and
+        stay one at any width; an admin's are worth the desk they are read at,
+        so the shell opens up at `md` and the wide screens fill it with columns
+        and tables. Form-shaped pages re-narrow themselves inside this.
+
+        pb-28 keeps the last element clear of the fixed bottom bar, which only
+        exists below `md`.
+      */}
+      <main
+        className={
+          isAdmin(user)
+            ? "mx-auto w-full max-w-2xl flex-1 px-5 pt-6 pb-28 md:max-w-6xl md:px-6 md:pt-8 md:pb-16"
+            : "mx-auto w-full max-w-2xl flex-1 px-5 pt-6 pb-28 md:pt-8 md:pb-16"
+        }
+      >
         {children}
       </main>
 

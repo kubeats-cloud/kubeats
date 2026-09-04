@@ -21,7 +21,7 @@ export function LoadingState({
       role="status"
       aria-live="polite"
       className={cn(
-        "text-muted-foreground flex flex-col items-center justify-center gap-3 px-5 py-16",
+        "text-muted-foreground flex flex-col items-center justify-center gap-3 px-5 py-20",
         className,
       )}
     >
@@ -47,18 +47,22 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "border-border bg-card flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-12 text-center",
+        "border-border bg-card flex flex-col items-center justify-center rounded-xl border border-dashed px-6 py-14 text-center",
         className,
       )}
     >
       {Icon && (
-        <Icon className="text-muted-foreground mb-1 size-6" aria-hidden />
+        <span className="bg-secondary text-muted-foreground mb-4 flex size-11 items-center justify-center rounded-full">
+          <Icon className="size-5" strokeWidth={1.75} aria-hidden />
+        </span>
       )}
-      <p className="text-sm font-medium">{title}</p>
+      <p className="text-[15px] font-semibold tracking-tight">{title}</p>
       {description && (
-        <p className="text-muted-foreground max-w-prose text-sm">{description}</p>
+        <p className="text-muted-foreground mt-1.5 max-w-[42ch] text-sm leading-relaxed">
+          {description}
+        </p>
       )}
-      {action && <div className="mt-3">{action}</div>}
+      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }
@@ -81,13 +85,13 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        "border-danger-subtle bg-danger-subtle text-danger-subtle-foreground flex flex-col items-center justify-center gap-2 rounded-lg border px-6 py-10 text-center",
+        "border-danger-subtle bg-danger-subtle text-danger-subtle-foreground flex flex-col items-center justify-center rounded-xl border px-6 py-10 text-center",
         className,
       )}
     >
-      <TriangleAlertIcon className="mb-1 size-6" aria-hidden />
-      <p className="text-sm font-semibold">{title}</p>
-      <p className="max-w-prose text-sm">{message}</p>
+      <TriangleAlertIcon className="mb-3 size-5" strokeWidth={1.75} aria-hidden />
+      <p className="text-[15px] font-semibold tracking-tight">{title}</p>
+      <p className="mt-1.5 max-w-[42ch] text-sm leading-relaxed">{message}</p>
       {onRetry && (
         <Button
           type="button"

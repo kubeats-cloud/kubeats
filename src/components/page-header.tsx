@@ -21,18 +21,22 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <header className={cn("mb-5", className)}>
+    <header className={cn("mb-6 md:mb-8", className)}>
       {eyebrow && (
-        <p className="text-primary text-xs font-semibold tracking-widest uppercase">
+        <p className="text-primary mb-1.5 text-[11px] font-semibold tracking-[0.12em] uppercase">
           {eyebrow}
         </p>
       )}
-      <div className="flex items-start justify-between gap-3">
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">{title}</h1>
-        {action && <div className="mt-1 shrink-0">{action}</div>}
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="text-[22px] leading-tight font-semibold tracking-tight text-balance md:text-[28px]">
+          {title}
+        </h1>
+        {action && <div className="shrink-0">{action}</div>}
       </div>
       {description && (
-        <p className="text-muted-foreground mt-1.5 text-sm">{description}</p>
+        <p className="text-muted-foreground mt-2 max-w-prose text-sm leading-relaxed">
+          {description}
+        </p>
       )}
     </header>
   );

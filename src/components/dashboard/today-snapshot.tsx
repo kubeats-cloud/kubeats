@@ -29,7 +29,7 @@ export function TodaySnapshot({
           : "text-danger";
 
   return (
-    <div className="mb-4 grid grid-cols-3 gap-3">
+    <div className="mb-5 grid grid-cols-3 gap-3 md:mb-6 md:max-w-2xl">
       <Tile label="Planned" value={planned} />
       <Tile label="Held" value={held} valueClassName={heldTone} />
       <Tile
@@ -55,10 +55,17 @@ function Tile({
 }) {
   const body = (
     <>
-      <p className={cn("text-2xl font-semibold tabular-nums", valueClassName)}>
+      <p
+        className={cn(
+          "text-[26px] leading-none font-semibold tracking-tight tabular-nums md:text-3xl",
+          valueClassName,
+        )}
+      >
         {value}
       </p>
-      <p className="text-muted-foreground mt-0.5 text-xs">{label}</p>
+      <p className="text-muted-foreground mt-2 text-[11px] font-medium tracking-wide">
+        {label}
+      </p>
     </>
   );
 
@@ -67,7 +74,7 @@ function Tile({
       <Card className="gap-0 p-0">
         <Link
           href={href}
-          className="hover:bg-accent flex min-h-16 flex-col justify-center rounded-lg px-3 py-3 text-center transition-colors"
+          className="hover:bg-accent flex min-h-[76px] flex-col justify-center rounded-xl px-3 py-4 text-center transition-colors"
         >
           {body}
         </Link>
@@ -76,7 +83,7 @@ function Tile({
   }
 
   return (
-    <Card className="min-h-16 justify-center gap-0 px-3 py-3 text-center">
+    <Card className="min-h-[76px] justify-center gap-0 px-3 py-4 text-center">
       {body}
     </Card>
   );

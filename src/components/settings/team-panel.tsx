@@ -74,11 +74,13 @@ export function TeamPanel({ members }: { members: TeamMember[] }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <ul className="space-y-2">
+        {/* Phone: cards. Desktop: a table, because an admin reading this is
+            comparing a column of people, not scrolling one. */}
+        <ul className="space-y-2 md:hidden">
           {members.map((member) => (
             <li
               key={member.id}
-              className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+              className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{member.name}</p>
@@ -88,13 +90,53 @@ export function TeamPanel({ members }: { members: TeamMember[] }) {
               </div>
               <Badge
                 variant={member.role === "admin" ? "neutral" : "success"}
-                className="shrink-0"
+                className="shrink-0 capitalize"
               >
                 {member.role}
               </Badge>
             </li>
           ))}
         </ul>
+
+        <div className="border-border hidden overflow-hidden rounded-md border md:block">
+          <table className="w-full border-collapse text-sm">
+            <caption className="sr-only">Everyone with an account</caption>
+            <thead>
+              <tr className="border-border bg-secondary/50 text-muted-foreground border-b text-left">
+                <th scope="col" className="px-4 py-2 text-xs font-medium">
+                  Name
+                </th>
+                <th scope="col" className="px-4 py-2 text-xs font-medium">
+                  Email
+                </th>
+                <th scope="col" className="px-4 py-2 text-right text-xs font-medium">
+                  Role
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {members.map((member) => (
+                <tr
+                  key={member.id}
+                  className="border-border hover:bg-accent/50 border-b transition-colors last:border-0"
+                >
+                  <td className="px-4 py-2.5 font-medium">{member.name}</td>
+                  <td className="text-muted-foreground px-4 py-2.5">
+                    {member.email ?? "email unavailable"}
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <Badge
+                      variant={member.role === "admin" ? "neutral" : "success"}
+                      className="capitalize"
+                    >
+                      {member.role}
+                    </Badge>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         {serverState.created && (
           <div
