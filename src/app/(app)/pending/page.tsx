@@ -1,18 +1,36 @@
-import { ClockIcon } from "lucide-react";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
-import { EmptyState } from "@/components/states";
+import { ErrorState } from "@/components/states";
+import { PendingList } from "@/components/visits/pending-list";
+import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getPendingVisits } from "@/lib/visits";
 
 export const metadata = { title: "Pending · Field Ops" };
 
-export default function Page() {
+export default async function PendingPage() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
+  // Scope comes from RLS, not from here: a rep's query returns their own rows,
+  // an admin's returns the team's.
+  const result = await getPendingVisits();
+
   return (
     <>
-      <PageHeader title="Pending" description="Sessions and campus visits that are set but not yet done." />
-      <EmptyState
-        icon={ClockIcon}
-        title="No open loops"
-        description="Anything you schedule will wait here until you close it off."
+      <PageHeader
+        title="Pending"
+        description={
+          isAdmin(user)
+            ? "Sessions and campus visits the team has set but not yet closed."
+            : "Sessions and campus visits you have set but not yet closed."
+        }
       />
+
+      {result.ok ? (
+        <PendingList visits={result.visits} currentUserId={user.id} />
+      ) : (
+        <ErrorState message="We could not load your open loops. Please try again in a moment." />
+      )}
     </>
   );
 }

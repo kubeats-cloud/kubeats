@@ -1,18 +1,44 @@
-import { LayoutDashboardIcon } from "lucide-react";
+import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
-import { EmptyState } from "@/components/states";
+import { SectionTitle } from "@/components/section-title";
+import { ErrorState } from "@/components/states";
+import { DailyPlan } from "@/components/dashboard/daily-plan";
+import { getCurrentUser } from "@/lib/auth";
+import {
+  getTodayPlan,
+  listInstitutesForPicker,
+  listPurposes,
+} from "@/lib/visits";
 
 export const metadata = { title: "Dashboard · Field Ops" };
 
-export default function Page() {
+export default async function DashboardPage() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+
+  const [plan, institutes, purposes] = await Promise.all([
+    getTodayPlan(user.id),
+    listInstitutesForPicker(),
+    listPurposes(),
+  ]);
+
   return (
     <>
-      <PageHeader title="Dashboard" description="Today at a glance, and how the week is tracking." />
-      <EmptyState
-        icon={LayoutDashboardIcon}
-        title="Nothing to show yet"
-        description="Today's plan, open loops and weekly progress will appear here once the screens are built."
+      <PageHeader
+        title={`Hello, ${user.name.split(" ")[0]}`}
+        description="Plan today's visits here, then log them as they happen."
       />
+
+      <SectionTitle>Today</SectionTitle>
+      {plan.ok ? (
+        <DailyPlan
+          institutes={institutes}
+          purposes={purposes}
+          entries={plan.entries}
+        />
+      ) : (
+        <ErrorState message="We could not load today's plan. Please try again in a moment." />
+      )}
     </>
   );
 }

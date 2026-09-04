@@ -1,0 +1,179 @@
+import "server-only";
+
+import { createClient } from "@/lib/supabase/server";
+import { logError } from "@/lib/errors";
+
+/** Today in the browser's/server's local calendar terms, as YYYY-MM-DD. */
+export function todayISO(): string {
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+export interface PickerInstitute {
+  id: string;
+  name: string;
+  city: string | null;
+}
+
+export async function listInstitutesForPicker(): Promise<PickerInstitute[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("institutes")
+    .select("id, name, city")
+    .order("name");
+
+  if (error) {
+    logError("visits:institutes", error);
+    return [];
+  }
+  return data ?? [];
+}
+
+export async function listPurposes(): Promise<string[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("purposes")
+    .select("label")
+    .order("label");
+
+  if (error) {
+    logError("visits:purposes", error);
+    return [];
+  }
+  return (data ?? []).map((p) => p.label);
+}
+
+export interface PlanEntry {
+  id: string;
+  institute_id: string;
+  instituteName: string;
+  purpose: string;
+  meetings_actual: number | null;
+  follow_up_date: string | null;
+}
+
+/**
+ * Today's plan for the signed-in rep.
+ *
+ * RLS restricts daily_plans to the caller's own rows, so this needs no explicit
+ * member filter — but one is applied anyway, since an admin would otherwise see
+ * the whole team's plan on their own Dashboard.
+ */
+export async function getTodayPlan(
+  memberId: string,
+): Promise<{ ok: true; entries: PlanEntry[] } | { ok: false }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("daily_plans")
+    .select("id, institute_id, purpose, meetings_actual, follow_up_date")
+    .eq("member", memberId)
+    .eq("date", todayISO())
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    logError("visits:today-plan", error);
+    return { ok: false };
+  }
+
+  const rows = data ?? [];
+  const names = await instituteNames(rows.map((r) => r.institute_id));
+
+  return {
+    ok: true,
+    entries: rows.map((r) => ({
+      ...r,
+      instituteName: names.get(r.institute_id) ?? "Unknown institute",
+    })),
+  };
+}
+
+export interface PendingVisit {
+  id: string;
+  activity: string;
+  institute_id: string;
+  instituteName: string;
+  date: string;
+  expected_date: string | null;
+  member: string;
+  memberName: string | null;
+  notes: string | null;
+}
+
+/**
+ * Everything still sitting at "Set" (rule 3), oldest first so the longest-open
+ * loop is at the top.
+ *
+ * Scoped by RLS: a rep sees their own, an admin sees the whole team's.
+ */
+export async function getPendingVisits(): Promise<
+  { ok: true; visits: PendingVisit[] } | { ok: false }
+> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("visits")
+    .select("id, activity, institute_id, date, expected_date, member, notes")
+    .eq("lifecycle_status", "Set")
+    // Soonest due first, which is what the rep has to act on. `date` is only a
+    // tiebreak now that it records when the visit was logged, not when it is due.
+    .order("expected_date", { ascending: true, nullsFirst: false })
+    .order("date", { ascending: true });
+
+  if (error) {
+    logError("visits:pending", error);
+    return { ok: false };
+  }
+
+  const rows = data ?? [];
+  const [names, members] = await Promise.all([
+    instituteNames(rows.map((r) => r.institute_id)),
+    memberNames(rows.map((r) => r.member)),
+  ]);
+
+  return {
+    ok: true,
+    visits: rows.map((r) => ({
+      ...r,
+      instituteName: names.get(r.institute_id) ?? "Unknown institute",
+      memberName: members.get(r.member) ?? null,
+    })),
+  };
+}
+
+/* Lookups kept separate rather than embedded, so nothing depends on PostgREST
+ * inferring the right relationship. */
+
+async function instituteNames(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("institutes")
+    .select("id, name")
+    .in("id", unique);
+
+  if (error) {
+    logError("visits:institute-names", error);
+    return new Map();
+  }
+  return new Map((data ?? []).map((i) => [i.id, i.name]));
+}
+
+async function memberNames(ids: string[]): Promise<Map<string, string | null>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return new Map();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, name")
+    .in("id", unique);
+
+  if (error) {
+    // Names are decoration; the list is still useful without them.
+    logError("visits:member-names", error);
+    return new Map();
+  }
+  return new Map((data ?? []).map((p) => [p.id, p.name]));
+}
