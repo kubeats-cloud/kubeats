@@ -102,6 +102,21 @@ Concretely, and true as of Phase 9:
 - `NEXT_PUBLIC_*` values are inlined at build time, so moving projects means a
   rebuild, not just a restart. That is a deployment fact, not a code smell.
 
+## Deployment ceiling
+
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2984
+KiB** — under 3% spare. That is a deliberate choice, not an oversight, and the
+budget is real: measure before adding anything sizable.
+
+```bash
+npm run build && npx wrangler deploy --dry-run --outdir /tmp/out   # "Total Upload:"
+```
+
+Over the line, the build still passes and the **deploy** fails. The answer is
+the Workers Paid plan ($5/mo, 10 MiB), which is a plan change and nothing else —
+not more trimming. `minify` in `wrangler.jsonc` and `scripts/trim-worker.mjs`
+already claimed the easy 0.9 MiB between them; see README for both.
+
 ## Engineering notes
 
 - Next.js 16: `cookies()` is async-only, and middleware is now `proxy.ts`

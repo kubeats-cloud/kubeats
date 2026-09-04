@@ -309,11 +309,28 @@ exist purely to fit:
   calls. Worth 0.53 MiB. The script explains itself, and stops the build rather
   than silently doing nothing if the adapter changes.
 
-That lands at **2.75 MiB, about 8% under the limit**. It is not much headroom:
-a large new dependency reachable from a server component could put it back over,
-and the fix at that point is the Workers Paid plan, not more trimming. Neither
-of the two measures above is worth extending — they were the cheap wins, and
-they are spent.
+Those two together were the cheap wins, and they are spent. Neither is worth
+extending.
+
+**Where it stands: 2984 KiB against a 3072 KiB ceiling — 87 KiB, under 3%.**
+
+Read that as a budget, not a comfort. It was 2831 KiB before the in-app camera
+and the area-name lookup; two ordinary features spent nearly two thirds of the
+remaining room. Treat the number as a release gate:
+
+| Measured | Do |
+| --- | --- |
+| under ~2900 KiB | carry on |
+| 2900–3072 KiB | you are in the last 5%; size every new dependency before adding it |
+| over 3072 KiB | **do not push** — the build passes and the *deploy* fails |
+
+**The intended fix for an overrun is the Workers Paid plan ($5/mo, 10 MiB
+ceiling), not more trimming.** Staying on free is a deliberate choice and a
+cheap one to reverse: it is a plan change, no code and no redeploy beyond the
+next one. Any sizable new feature — a rich text editor, a charting library, a
+PDF generator, anything pulling a large dependency into a server component —
+should be assumed to need it. Check first, upgrade, then build; discovering it
+from a failed deploy is the expensive way round.
 
 Check before deploying:
 
