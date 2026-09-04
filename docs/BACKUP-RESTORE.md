@@ -205,6 +205,11 @@ SUPABASE_SERVICE_ROLE_KEY=<new service_role key>
 bundle at build time, so restarting with new variables is not enough — the old
 URL would still be in the JavaScript.
 
+On Cloudflare, set `SUPABASE_SERVICE_ROLE_KEY` as an encrypted **Secret** and
+the two `NEXT_PUBLIC_*` ones as plain **Variables**. A plaintext Variable is
+printed into the build log; the `NEXT_PUBLIC_*` pair are public by design and
+have to be plain, because a Secret is not available to the build.
+
 Then set **Authentication → URL Configuration → Site URL** to the app's origin,
 and check `/api/health` returns `{"status":"ok"}`.
 

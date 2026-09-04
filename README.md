@@ -208,6 +208,43 @@ Secret rather than a plaintext Variable.** Workers Builds prints plaintext
 variables into the build log. Nothing secret belongs in `wrangler.jsonc`, which
 is committed.
 
+The two `NEXT_PUBLIC_*` values stay plain Variables, and *will* appear in the
+build log. That is correct and harmless: they are inlined into the browser
+bundle anyway, the anon key is protected by RLS, and a Secret would not be
+available to the build.
+
+A Secret is runtime-only, which this app is fine with. Nothing is prerendered,
+so the build never reads the service-role key — CI proves it by building with
+the variable deliberately unset. At runtime the adapter copies the Worker's
+bindings into `process.env`, so `serverEnv()` finds it. `/api/health` uses the
+service-role client, so a green health check *is* the proof the Secret is wired
+up.
+
+#### Plan: Cloudflare free, on purpose
+
+We are on the free plan knowingly, not by oversight. The Worker deploys at
+2.75 MiB against the 3 MiB ceiling — about 8% of headroom (see below).
+
+**If it bites, upgrade to Workers Paid ($5/mo) and the ceiling becomes 10 MiB.**
+That is the intended fix, and it is instant: no code change, no redeploy needed
+beyond the next one. Do not spend an afternoon shaving bytes first.
+
+#### Security note, 2026-09-04
+
+`SUPABASE_SERVICE_ROLE_KEY` was set as a plaintext Variable for the first
+Cloudflare deploy, and Workers Builds printed its value into that build log.
+
+It was **not rolled**, deliberately. The exposure was to a private build log in
+the project owner's own Cloudflare account; the key has never been in git
+(verified against every object in the repository's history, not just the working
+tree) and the GitHub repo is private. The cause was fixed instead: the Variable
+was deleted and the key re-added as an encrypted Secret.
+
+Recorded here so the decision is not mistaken later for something nobody
+noticed. If Cloudflare account access ever widens beyond the people who should
+hold that key, roll it — Supabase → Project Settings → API → service_role →
+regenerate, then update the Cloudflare Secret and `.env.local`.
+
 #### The 3 MiB ceiling
 
 A Worker must be under **3 MiB compressed** on the free plan (10 MiB on Paid).
@@ -225,7 +262,9 @@ exist purely to fit:
 
 That lands at **2.75 MiB, about 8% under the limit**. It is not much headroom:
 a large new dependency reachable from a server component could put it back over,
-and the fix at that point is the Workers Paid plan, not more trimming.
+and the fix at that point is the Workers Paid plan, not more trimming. Neither
+of the two measures above is worth extending — they were the cheap wins, and
+they are spent.
 
 Check before deploying:
 
