@@ -203,22 +203,68 @@ Two files hold everything platform-specific: `wrangler.jsonc` (Worker name,
 compatibility flags, the assets binding) and `open-next.config.ts`. Moving to a
 Node host means deleting them and running `build:next` instead.
 
-**Set the variables in the dashboard, and make `SUPABASE_SERVICE_ROLE_KEY` a
-Secret rather than a plaintext Variable.** Workers Builds prints plaintext
-variables into the build log. Nothing secret belongs in `wrangler.jsonc`, which
-is committed.
+#### Where each variable goes — the two places are not interchangeable
 
-The two `NEXT_PUBLIC_*` values stay plain Variables, and *will* appear in the
-build log. That is correct and harmless: they are inlined into the browser
-bundle anyway, the anon key is protected by RLS, and a Secret would not be
-available to the build.
+Cloudflare has **build** variables (Workers Builds settings, present while the
+code is compiled) and **runtime** bindings (the Worker's own Variables and
+Secrets). This app needs one of each, and putting either in the wrong place
+produces a Worker that deploys cleanly and then 500s on every request.
 
-A Secret is runtime-only, which this app is fine with. Nothing is prerendered,
-so the build never reads the service-role key — CI proves it by building with
-the variable deliberately unset. At runtime the adapter copies the Worker's
+| Variable | Where | Why |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | **Build** variable | Baked into the browser bundle at compile time |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Build** variable | Same |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Secret** (runtime) | Never inlined; read per request |
+
+**The `NEXT_PUBLIC_*` pair must exist at build time, and changing them requires
+a rebuild — not a restart.** They are public by design (the anon key is
+protected by RLS) and they will appear in the build log, which is fine. What is
+not fine is setting them only as runtime Variables: the browser bundle is
+compiled without them, so `createBrowserClient()` receives `undefined` and
+sign-in breaks even though pages render.
+
+Verified against the built output rather than assumed. Built *with* them, the
+value appears as a literal in both the browser chunks and `publicEnv()` in the
+server bundle. Built *without* them, the browser chunks contain neither the
+value nor a `process.env` read — it is simply gone — while the server bundle
+keeps `process.env.NEXT_PUBLIC_SUPABASE_URL` as a runtime read. So a
+runtime-only setup half-works, which is worse than failing outright.
+
+`SUPABASE_SERVICE_ROLE_KEY` goes the other way: runtime-only is correct.
+Nothing is prerendered, so the build never reads it — CI proves it by building
+with the variable deliberately unset. At runtime the adapter copies the Worker's
 bindings into `process.env`, so `serverEnv()` finds it. `/api/health` uses the
 service-role client, so a green health check *is* the proof the Secret is wired
 up.
+
+**Secrets survive a deploy; plaintext `vars` are reconciled against the config
+file.** `wrangler.jsonc` declares no `vars` — deliberately, since it is
+committed — so do not rely on plaintext Variables added by hand in the Worker's
+settings surviving the next deployment. Build variables are a separate setting
+and are not affected.
+
+**If every route returns "Internal error", including `/api/health`,** this is
+almost always the cause. The Worker log shows it exactly:
+
+```
+Error in routingHandler [EnvError]: Missing public environment variables:
+  - NEXT_PUBLIC_SUPABASE_URL is not set
+  - NEXT_PUBLIC_SUPABASE_ANON_KEY is not set
+```
+
+It is thrown from the middleware, which builds the CSP from `publicEnv()`
+before any route runs — hence *every* path failing, health check included. Read
+the live log with `npx wrangler tail kubeats --format pretty` (after
+`npx wrangler login`).
+
+#### Never deploy a locally-built artifact
+
+The adapter embeds the contents of `.env*` into the Worker bundle so the values
+survive into the runtime. A `npm run build` on a developer machine therefore
+bakes the **real service-role key** from `.env.local` into
+`.open-next/worker.js` in plaintext. `.open-next/` is git-ignored so it cannot
+be committed, but do not upload, share or hand over that directory. Cloudflare's
+builder has no `.env.local`, so what it produces is clean.
 
 #### Plan: Cloudflare free, on purpose
 
