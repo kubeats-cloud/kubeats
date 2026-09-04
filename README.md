@@ -203,6 +203,38 @@ Two files hold everything platform-specific: `wrangler.jsonc` (Worker name,
 compatibility flags, the assets binding) and `open-next.config.ts`. Moving to a
 Node host means deleting them and running `build:next` instead.
 
+**Set the variables in the dashboard, and make `SUPABASE_SERVICE_ROLE_KEY` a
+Secret rather than a plaintext Variable.** Workers Builds prints plaintext
+variables into the build log. Nothing secret belongs in `wrangler.jsonc`, which
+is committed.
+
+#### The 3 MiB ceiling
+
+A Worker must be under **3 MiB compressed** on the free plan (10 MiB on Paid).
+An untouched build of this app is 3.67 MiB, so two things in the deploy path
+exist purely to fit:
+
+- `"minify": true` in `wrangler.jsonc`. The adapter does not minify its own
+  output — it string-patches it afterwards — and Wrangler does not minify by
+  default, so nothing else would. Worth 0.39 MiB.
+- `scripts/trim-worker.mjs`, run at the end of `npm run build`. It drops
+  @vercel/og's `resvg.wasm` and `yoga.wasm` from the middleware bundle, which
+  the adapter pulls in unconditionally for an image renderer this app never
+  calls. Worth 0.53 MiB. The script explains itself, and stops the build rather
+  than silently doing nothing if the adapter changes.
+
+That lands at **2.75 MiB, about 8% under the limit**. It is not much headroom:
+a large new dependency reachable from a server component could put it back over,
+and the fix at that point is the Workers Paid plan, not more trimming.
+
+Check before deploying:
+
+```bash
+npm run build && npx wrangler deploy --dry-run --outdir /tmp/out
+```
+
+The `Total Upload:` line reports the compressed size.
+
 ### Deploying somewhere that isn't Cloudflare
 
 Set the host's build command to `npm run build:next` and its start command to

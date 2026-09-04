@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "opennextjs-cloudflare build",
+    "build": "opennextjs-cloudflare build && node scripts/trim-worker.mjs",
     "build:next": "next build",
     "start": "next start",
     "lint": "eslint",

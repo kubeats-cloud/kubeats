@@ -31,8 +31,23 @@
 
   "observability": {
     "enabled": true
-  }
+  },
 
+  // The adapter deliberately does not minify its own output, so that it can
+  // apply string-replacement patches to it (see build.js: `options.minify =
+  // false`). By the time Wrangler bundles, every patch is applied, so this is
+  // the safe place to do it: 17.13 MiB raw / 3.67 MiB compressed becomes
+  // 11.58 / 3.28, against a 3 MiB compressed limit on the free plan.
+  "minify": true
+
+  // NO ENVIRONMENT VARIABLES LIVE IN THIS FILE. There is no `vars` block and
+  // there must never be one: this file is committed, and Workers Builds prints
+  // plaintext `vars` into the build log. The three variables are set in the
+  // Cloudflare dashboard, and SUPABASE_SERVICE_ROLE_KEY is set as a *Secret*
+  // (encrypted, never printed, not readable back) rather than a Variable.
+  // Locally they come from .env.local, and .dev.vars for `wrangler dev`; both
+  // are git-ignored.
+  //
   // Deliberately absent:
   //   r2_buckets + WORKER_SELF_REFERENCE — the incremental cache, which this
   //     app has no use for while every route is dynamic.
