@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Field Ops — routine data backup.
+ * KUbeats — routine data backup.
  *
  *     npm run backup                    # into ./backups/<timestamp>/
  *     npm run backup -- --out /path     # somewhere else

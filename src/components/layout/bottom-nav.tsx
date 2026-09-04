@@ -54,13 +54,22 @@ export function BottomNav({ items }: { items: NavItem[] }) {
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex min-h-[56px] min-w-[44px] flex-col items-center justify-center gap-1 rounded-md px-1 py-2 transition-colors",
+                  "relative flex min-h-[56px] min-w-[44px] flex-col items-center justify-center gap-1 rounded-md px-1 py-2 transition-colors",
                   "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
                   active
                     ? "text-primary"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
+                {/* The flame marks where you are, above the icon so it reads
+                    as a tab indicator rather than decoration. */}
+                <span
+                  aria-hidden
+                  className={cn(
+                    "brand-rule absolute inset-x-3 top-0 h-[3px] rounded-full transition-opacity",
+                    active ? "opacity-100" : "opacity-0",
+                  )}
+                />
                 <Icon className="size-5 shrink-0" aria-hidden />
                 <span className="text-[11px] leading-none font-medium">
                   {item.label}

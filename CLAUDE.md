@@ -1,8 +1,8 @@
 @AGENTS.md
 
-# Field Ops
+# KUbeats
 
-Mobile-first field reporting for an education sales team. Reps log activity
+"For a smarter KU." Mobile-first field reporting for an education sales team. Reps log activity
 against registered institutes; admins oversee the whole team.
 
 ## The prototype is a behaviour reference, not a visual one

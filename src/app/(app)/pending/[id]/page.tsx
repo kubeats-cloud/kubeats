@@ -11,7 +11,7 @@ import { getVisitReport } from "@/lib/closing-report";
 import { activityLabelFor } from "@/lib/validation/visit";
 import { needsClosingReport } from "@/lib/validation/closing-report";
 
-export const metadata = { title: "Closing report · Field Ops" };
+export const metadata = { title: "Closing report" };
 
 /**
  * A visit's closing report — the Pending screen's detail view, the same way

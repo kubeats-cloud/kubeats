@@ -11,66 +11,96 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Field Ops design tokens.
+ * KUbeats design tokens — "For a smarter KU".
  *
- * White surfaces on a light slate ground, one indigo brand colour, slate
- * neutrals. Status colour is semantic and used consistently everywhere —
- * institute status badges, target progress bars, open loops:
+ * Two palettes that must never be mistaken for each other.
  *
- *   success  green   done / achieved
- *   warning  amber   scheduled / in progress
- *   danger   red     pending / overdue
- *   neutral  slate   no status yet
+ * BRAND is the flame: deep red -> orange -> golden yellow, vivid, and used only
+ * as a gradient on brand surfaces — the app bar, the login screen, primary
+ * buttons, the active tab, section accents. It is the identity, and it carries
+ * no meaning about a visit.
  *
- * Each status has a solid pair (bold fills, progress bars) and a `subtle` pair
- * (tinted badge backgrounds with accessible dark text).
+ * STATUS is signalling, and it is deliberately quieter and cooler so a rep can
+ * tell an alert from a logo at a glance:
+ *
+ *   success  green, cool-leaning   done / achieved
+ *   warning  ochre, desaturated    scheduled / in progress
+ *   danger   deep brick red        overdue / behind
+ *   neutral  cool grey             no status yet
+ *
+ * The separation is carried by three things at once, because one alone would
+ * not survive a glance on a phone in daylight: hue (status greens and greys are
+ * cool, the flame is warm), chroma (status is muted, the flame is saturated),
+ * and form (status is always a flat fill, the flame is always a gradient).
+ *
+ * Danger is the subtle case: it shares a hue family with the flame's red end.
+ * It is set much darker and less saturated than any flame stop, so "overdue"
+ * reads as a warning rather than as branding. Each status also has a `subtle`
+ * pair — a tinted background with accessible dark text — which is what badges
+ * use, and which no brand surface ever uses.
  */
 :root {
   --radius: 0.625rem;
 
-  /* Surfaces */
-  --background: oklch(98.4% 0.003 247.858); /* slate-50  */
-  --foreground: oklch(20.8% 0.042 265.755); /* slate-900 */
-  --card: oklch(100% 0 0); /* white */
-  --card-foreground: oklch(20.8% 0.042 265.755);
+  /* Surfaces — crisp near-black on white, with a breath of warmth in the grey */
+  --background: oklch(98.6% 0.003 70); /* very light warm grey */
+  --foreground: oklch(19% 0.008 45); /* near-black */
+  --card: oklch(100% 0 0);
+  --card-foreground: var(--foreground);
   --popover: oklch(100% 0 0);
-  --popover-foreground: oklch(20.8% 0.042 265.755);
+  --popover-foreground: var(--foreground);
 
-  /* Brand */
-  --primary: oklch(51.1% 0.262 276.966); /* indigo-600 */
+  /* Brand — the flame.
+   *
+   * The three stops are the logo's own gradient. `--primary` is the red end,
+   * dark enough to carry white text at AA; the golden stop never sits under
+   * text, only under the mark and in accents. */
+  --brand-from: oklch(46% 0.186 29); /* deep flame red — dark enough for white text */
+  --brand-via: oklch(62% 0.192 45); /* orange */
+  --brand-to: oklch(86% 0.166 92); /* golden yellow */
+  /* The furthest the flame may travel underneath white LABEL text.
+   *
+   * Measured, not guessed. The full orange stop renders around 3.7:1 against
+   * white — fine for an icon, short of the 4.5:1 a button's label needs. This
+   * stop is written in hex on purpose: the oklch value that looked right on
+   * paper fell outside the sRGB gamut, and the browser mapped it to something
+   * lighter, which is how a "dark enough" colour quietly became 3.4:1. */
+  --brand-mid: #b4471b;
+
+  --primary: oklch(50% 0.198 30);
   --primary-foreground: oklch(100% 0 0);
 
-  /* Slate neutrals */
-  --secondary: oklch(96.8% 0.007 247.896); /* slate-100 */
-  --secondary-foreground: oklch(20.8% 0.042 265.755);
-  --muted: oklch(96.8% 0.007 247.896);
-  --muted-foreground: oklch(55.4% 0.046 257.417); /* slate-500 */
-  --accent: oklch(96.8% 0.007 247.896);
-  --accent-foreground: oklch(20.8% 0.042 265.755);
-  --border: oklch(92.9% 0.013 255.508); /* slate-200 */
-  --input: oklch(92.9% 0.013 255.508);
-  --ring: oklch(51.1% 0.262 276.966); /* indigo-600 */
+  /* Warm neutrals, so the greys sit with the flame rather than against it */
+  --secondary: oklch(96.6% 0.005 70);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(96.6% 0.005 70);
+  --muted-foreground: oklch(50.5% 0.014 60);
+  --accent: oklch(96.6% 0.005 70);
+  --accent-foreground: var(--foreground);
+  --border: oklch(92.2% 0.005 70);
+  --input: oklch(92.2% 0.005 70);
+  --ring: var(--primary);
 
-  /* Semantic status */
-  --success: oklch(62.7% 0.194 149.214); /* green-600 */
+  /* Semantic status — cooler and quieter than the brand, on purpose */
+  --success: oklch(52% 0.128 156); /* deep green */
   --success-foreground: oklch(100% 0 0);
-  --success-subtle: oklch(96.2% 0.044 156.743); /* green-100 */
-  --success-subtle-foreground: oklch(44.8% 0.119 151.328); /* green-800 */
+  --success-subtle: oklch(95.5% 0.038 157);
+  --success-subtle-foreground: oklch(40% 0.098 156);
 
-  --warning: oklch(66.6% 0.179 58.318); /* amber-600 */
+  --warning: oklch(60% 0.104 78); /* muted ochre, not flame orange */
   --warning-foreground: oklch(100% 0 0);
-  --warning-subtle: oklch(96.2% 0.059 95.617); /* amber-100 */
-  --warning-subtle-foreground: oklch(47.3% 0.137 46.201); /* amber-800 */
+  --warning-subtle: oklch(95.5% 0.037 85);
+  --warning-subtle-foreground: oklch(41% 0.083 70);
 
-  --danger: oklch(57.7% 0.245 27.325); /* red-600 */
+  --danger: oklch(40% 0.148 18); /* deep crimson — darker and cooler than the flame */
   --danger-foreground: oklch(100% 0 0);
-  --danger-subtle: oklch(93.6% 0.032 17.717); /* red-100 */
-  --danger-subtle-foreground: oklch(44.4% 0.177 26.899); /* red-800 */
+  --danger-subtle: oklch(94.5% 0.028 20);
+  --danger-subtle-foreground: oklch(35% 0.132 18);
 
-  --neutral: oklch(55.4% 0.046 257.417); /* slate-500 */
+  --neutral: oklch(52% 0.021 250); /* cool grey */
   --neutral-foreground: oklch(100% 0 0);
-  --neutral-subtle: oklch(96.8% 0.007 247.896); /* slate-100 */
-  --neutral-subtle-foreground: oklch(37.2% 0.044 257.287); /* slate-700 */
+  --neutral-subtle: oklch(96.2% 0.006 250);
+  --neutral-subtle-foreground: oklch(38% 0.021 252);
 
   /* shadcn's destructive is our danger, so its built-in variants match. */
   --destructive: var(--danger);
@@ -104,6 +134,9 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-brand-from: var(--brand-from);
+  --color-brand-via: var(--brand-via);
+  --color-brand-to: var(--brand-to);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -155,6 +188,42 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer components {
+  /*
+   * The flame, in one place. Every brand surface uses this rather than
+   * repeating the stops, so retuning the identity is a single edit.
+   */
+  .brand-gradient {
+    background-image: linear-gradient(
+      105deg,
+      var(--brand-from) 0%,
+      var(--brand-from) 24%,
+      var(--brand-via) 68%,
+      var(--brand-to) 135%
+    );
+  }
+
+  /* The same flame with the golden end held back, so white text stays legible
+   * across the whole button. Used for primary actions. */
+  .brand-gradient-strong {
+    background-image: linear-gradient(
+      105deg,
+      var(--brand-from) 0%,
+      var(--brand-mid) 100%
+    );
+  }
+
+  /* A thin flame rule, for section accents and the header's lower edge. */
+  .brand-rule {
+    background-image: linear-gradient(
+      90deg,
+      var(--brand-from),
+      var(--brand-via) 50%,
+      var(--brand-to)
+    );
+  }
 }
 
 @layer base {

@@ -1,6 +1,6 @@
-# Field Ops
+# KUbeats
 
-Mobile-first field reporting for an education sales team. Reps log activity
+**For a smarter KU.** Mobile-first field reporting for an education sales team. Reps log activity
 against registered institutes — meetings, sessions, campus visits, olympiad
 registrations, application forms, admissions — and commit to weekly targets.
 Admins oversee the team, manage the shared lists, and create accounts.

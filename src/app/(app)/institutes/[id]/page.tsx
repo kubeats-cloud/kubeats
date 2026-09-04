@@ -13,7 +13,7 @@ import { getInstitute, getInstituteVisits } from "@/lib/institutes";
 import { activityLabel } from "@/lib/activities";
 import { class12Total, STREAMS, TYPE_LABELS } from "@/lib/validation/institute";
 
-export const metadata = { title: "Institute · Field Ops" };
+export const metadata = { title: "Institute" };
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (

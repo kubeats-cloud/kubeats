@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { InstituteForm } from "@/components/institutes/institute-form";
 import { getLocationTree } from "@/lib/locations";
 
-export const metadata = { title: "Register institute · Field Ops" };
+export const metadata = { title: "Register institute" };
 
 export default async function NewInstitutePage() {
   const tree = await getLocationTree();

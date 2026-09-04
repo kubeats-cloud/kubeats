@@ -132,7 +132,13 @@ export const config = {
     /*
      * Everything except Next's own assets and static files — those never need
      * a session refresh and would only add latency.
+     *
+     * manifest.webmanifest is on that list for a reason worth remembering: the
+     * browser fetches it without credentials, so the signed-out redirect caught
+     * it and handed back the login page's HTML. Chrome then reported
+     * "Manifest: Line 1, column 1, Syntax error", which says nothing at all
+     * about the actual cause.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
   ],
 };

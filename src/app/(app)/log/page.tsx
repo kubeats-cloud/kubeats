@@ -7,7 +7,7 @@ import {
   listInstitutesForPicker,
 } from "@/lib/visits";
 
-export const metadata = { title: "Log Visit · Field Ops" };
+export const metadata = { title: "Log Visit" };
 
 export default async function LogVisitPage(props: PageProps<"/log">) {
   const user = await getCurrentUser();

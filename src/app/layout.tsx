@@ -10,15 +10,21 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Field Ops",
-  description: "Field reporting for the education sales team.",
+  // A tab that says "Institutes · KUbeats" tells you where you are in a row of
+  // twenty tabs; a bare app name does not.
+  title: { default: "KUbeats — For a smarter KU", template: "%s · KUbeats" },
+  description:
+    "KUbeats — field reporting for the education sales team. For a smarter KU.",
+  applicationName: "KUbeats",
+  appleWebApp: { capable: true, title: "KUbeats", statusBarStyle: "default" },
 };
 
 // Mobile-first: reps use this on a phone, in the field.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#f8fafc",
+  // The flame's red end, so the phone's browser chrome matches the app bar.
+  themeColor: "#c0341c",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

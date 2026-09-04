@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
@@ -26,10 +27,21 @@ export default async function LoginPage(props: PageProps<"/login">) {
   return (
     <main className="flex flex-1 items-center justify-center px-5 py-10">
       <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <p className="text-primary text-xs font-semibold tracking-widest uppercase">
-            Field Ops
-          </p>
+        {/* The supplied lockup, used whole — this is the one screen with room
+            to give it. The white ground has been keyed out, or it would show as
+            a white rectangle against the app's warm off-white. The artwork
+            carries the tagline itself, so it is not repeated underneath; the
+            alt text says it for anyone who cannot see the mark. */}
+        <div className="mb-7 flex flex-col items-center text-center">
+          <Image
+            src="/brand/kubeats-logo-transparent.png"
+            alt="KUbeats — For a smarter KU"
+            width={1004}
+            height={747}
+            priority
+            className="h-auto w-56 max-w-full"
+          />
+          <span aria-hidden className="brand-rule mt-5 h-1 w-24 rounded-full" />
         </div>
 
         <Card>

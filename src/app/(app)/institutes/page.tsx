@@ -6,7 +6,7 @@ import { ErrorState } from "@/components/states";
 import { InstitutesBrowser } from "@/components/institutes/institutes-browser";
 import { listInstitutes } from "@/lib/institutes";
 
-export const metadata = { title: "Institutes · Field Ops" };
+export const metadata = { title: "Institutes" };
 
 export default async function InstitutesPage() {
   const result = await listInstitutes();

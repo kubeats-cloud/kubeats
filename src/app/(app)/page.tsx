@@ -20,7 +20,7 @@ import { getTeamWeek, getWeek } from "@/lib/weekly";
 import { listReps } from "@/lib/closing-report";
 import { formatWeekRange, mondayOf, todayISO } from "@/lib/weeks";
 
-export const metadata = { title: "Dashboard · Field Ops" };
+export const metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();

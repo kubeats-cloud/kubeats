@@ -13,7 +13,7 @@ import { getWeek, memberName } from "@/lib/weekly";
 import { completionPercent } from "@/lib/validation/weekly";
 import { normaliseWeekParam } from "@/lib/weeks";
 
-export const metadata = { title: "Weekly · Field Ops" };
+export const metadata = { title: "Weekly" };
 
 const first = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : undefined;

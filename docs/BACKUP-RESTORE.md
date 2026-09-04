@@ -1,4 +1,4 @@
-# Backing up and moving Field Ops
+# Backing up and moving KUbeats
 
 Everything you need to take a copy of this system, and to stand it up somewhere
 else — a new Supabase project, a client's self-hosted Supabase, or a plain
@@ -54,7 +54,7 @@ willing to defend in a conversation about data protection.
 Windows Task Scheduler, daily at 01:00:
 
 ```
-schtasks /create /tn "Field Ops backup" /tr "cmd /c cd /d D:\field-ops && npm run backup" /sc daily /st 01:00
+schtasks /create /tn "KUbeats backup" /tr "cmd /c cd /d D:\field-ops && npm run backup" /sc daily /st 01:00
 ```
 
 Linux or macOS, in `crontab -e`:

@@ -14,7 +14,7 @@ import {
 } from "@/lib/admin";
 import { getLocationTree } from "@/lib/locations";
 
-export const metadata = { title: "Settings · Field Ops" };
+export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const user = await getCurrentUser();

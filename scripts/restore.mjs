@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Field Ops — restore a backup into a Supabase project.
+ * KUbeats — restore a backup into a Supabase project.
  *
  *     npm run restore -- --from backups/<timestamp>
  *     npm run restore -- --from <dir> --dry-run     # say what would happen

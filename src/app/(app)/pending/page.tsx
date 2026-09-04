@@ -5,7 +5,7 @@ import { PendingList } from "@/components/visits/pending-list";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getPendingVisits } from "@/lib/visits";
 
-export const metadata = { title: "Pending · Field Ops" };
+export const metadata = { title: "Pending" };
 
 export default async function PendingPage() {
   const user = await getCurrentUser();
