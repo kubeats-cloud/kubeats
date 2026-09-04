@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageColumn } from "@/components/layout/page-column";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { InstituteForm } from "@/components/institutes/institute-form";
@@ -10,7 +11,7 @@ export default async function NewInstitutePage() {
   const tree = await getLocationTree();
 
   return (
-    <>
+    <PageColumn>
       <PageHeader
         title="Register institute"
         description="Rule 1: an institute has to exist here before anything can be logged against it."
@@ -21,6 +22,6 @@ export default async function NewInstitutePage() {
         }
       />
       <InstituteForm tree={tree} />
-    </>
+    </PageColumn>
   );
 }

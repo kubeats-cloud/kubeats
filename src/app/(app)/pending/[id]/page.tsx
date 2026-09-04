@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageColumn } from "@/components/layout/page-column";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeftIcon, CheckCircle2Icon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
@@ -50,7 +51,7 @@ export default async function ClosingReportPage(
     .join(" · ");
 
   return (
-    <>
+    <PageColumn>
       <PageHeader
         eyebrow={filed ? "Filed report" : "Closing report"}
         title={heading}
@@ -102,6 +103,6 @@ export default async function ClosingReportPage(
           <ReportView report={report} />
         </>
       )}
-    </>
+    </PageColumn>
   );
 }

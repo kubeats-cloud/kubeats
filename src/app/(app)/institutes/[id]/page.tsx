@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageColumn } from "@/components/layout/page-column";
 import { notFound } from "next/navigation";
 import { ArrowLeftIcon, HistoryIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +46,7 @@ export default async function InstituteDetailPage(
   const total = class12Total(institute.class12);
 
   return (
-    <>
+    <PageColumn>
       <PageHeader
         title={institute.name}
         description={[institute.area, institute.city, institute.state]
@@ -253,6 +254,6 @@ export default async function InstituteDetailPage(
           ))}
         </ul>
       )}
-    </>
+    </PageColumn>
   );
 }

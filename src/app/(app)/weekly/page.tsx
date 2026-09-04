@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageColumn } from "@/components/layout/page-column";
 import { redirect } from "next/navigation";
 import { ArrowLeftIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
@@ -51,7 +52,7 @@ export default async function WeeklyPage(props: PageProps<"/weekly">) {
   const percent = completionPercent(achieved, record.targets);
 
   return (
-    <>
+    <PageColumn>
       <PageHeader
         eyebrow={viewingOther ? "Team member" : undefined}
         title={viewingOther ? displayName : "Weekly"}
@@ -117,6 +118,6 @@ export default async function WeeklyPage(props: PageProps<"/weekly">) {
           reopenedAt={record.reopened_at}
         />
       )}
-    </>
+    </PageColumn>
   );
 }

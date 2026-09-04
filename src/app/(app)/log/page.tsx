@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { PageColumn } from "@/components/layout/page-column";
 import { PageHeader } from "@/components/page-header";
 import { LogVisitForm } from "@/components/visits/log-visit-form";
 import { getCurrentUser } from "@/lib/auth";
@@ -28,7 +29,7 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
     : [];
 
   return (
-    <>
+    <PageColumn>
       <PageHeader
         title="Log a visit"
         description="Record what happened. A photo is required; your location is added when it is available."
@@ -43,6 +44,6 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
             : undefined
         }
       />
-    </>
+    </PageColumn>
   );
 }
