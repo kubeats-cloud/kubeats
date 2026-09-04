@@ -20,6 +20,7 @@ import type { PickerInstitute, PlanEntry } from "@/lib/visits";
 import {
   dailyPlanFormDataToInput,
   dailyPlanSchema,
+  dailyPlanSummary,
   visitFieldErrors,
 } from "@/lib/validation/visit";
 
@@ -48,7 +49,34 @@ export function DailyPlan({
   const [purpose, setPurpose] = useState("");
   const [removing, startRemoving] = useTransition();
 
-  const error = state.error ?? clientState.error;
+  // One attempt is being explained at a time, and the summary has to come from
+  // the same attempt as the inline messages under the fields. Reading
+  // `state.error ?? clientState.error` across two objects can pair a server
+  // summary with stale client field errors, which is how a form starts
+  // contradicting itself.
+  const shown = state.error ? state : clientState;
+
+  // A complaint about a field the rep has since answered is worse than no
+  // complaint at all — it marks a filled-in field red and makes them press the
+  // button again just to learn they had already fixed it. So a field-level
+  // message lives exactly as long as the field is still empty, whether the
+  // complaint came from the check below or from the server, and the summary is
+  // recomputed from whatever is genuinely still missing. Errors that belong to
+  // no field — an expired session, a database that would not take the row —
+  // pass through untouched, because nothing the rep types clears those.
+  const answered: Record<string, boolean> = {
+    institute_id: instituteId !== "",
+    purpose: purpose !== "",
+  };
+  const fieldErrors = Object.fromEntries(
+    Object.entries(shown.fieldErrors).filter(([key]) => !answered[key]),
+  );
+  const stillMissing = Object.keys(fieldErrors).length;
+  const error = Object.keys(shown.fieldErrors).length
+    ? stillMissing
+      ? dailyPlanSummary(fieldErrors)
+      : null
+    : shown.error;
   const held = entries.filter((entry) => entry.meetings_actual !== null);
   const open = entries.filter((entry) => entry.meetings_actual === null);
 
@@ -57,11 +85,12 @@ export function DailyPlan({
       dailyPlanFormDataToInput(new FormData(event.currentTarget)),
     );
     if (!parsed.success) {
+      // Stops the server action as well: React skips a form action when the
+      // submit event has been prevented. Nothing is added, and now the rep is
+      // told why rather than watching the button do nothing.
       event.preventDefault();
-      setClientState({
-        error: "Pick an institute and a purpose.",
-        fieldErrors: visitFieldErrors(parsed.error),
-      });
+      const problems = visitFieldErrors(parsed.error);
+      setClientState({ error: dailyPlanSummary(problems), fieldErrors: problems });
       return;
     }
     setClientState(EMPTY_STATE);
@@ -87,32 +116,52 @@ export function DailyPlan({
             <input type="hidden" name="institute_id" value={instituteId} />
             <input type="hidden" name="purpose" value={purpose} />
 
-            <Select value={instituteId} onValueChange={setInstituteId}>
-              <SelectTrigger className="h-11 w-full" aria-label="Institute">
-                <SelectValue placeholder="Institute" />
-              </SelectTrigger>
-              <SelectContent>
-                {institutes.map((institute) => (
-                  <SelectItem key={institute.id} value={institute.id}>
-                    {institute.name}
-                    {institute.city ? ` · ${institute.city}` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1.5">
+              <Select value={instituteId} onValueChange={setInstituteId}>
+                <SelectTrigger
+                  className="h-11 w-full"
+                  aria-label="Institute"
+                  aria-invalid={fieldErrors.institute_id ? true : undefined}
+                  aria-describedby={
+                    fieldErrors.institute_id ? "plan-institute-error" : undefined
+                  }
+                >
+                  <SelectValue placeholder="Institute" />
+                </SelectTrigger>
+                <SelectContent>
+                  {institutes.map((institute) => (
+                    <SelectItem key={institute.id} value={institute.id}>
+                      {institute.name}
+                      {institute.city ? ` · ${institute.city}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldError id="plan-institute-error" message={fieldErrors.institute_id} />
+            </div>
 
-            <Select value={purpose} onValueChange={setPurpose}>
-              <SelectTrigger className="h-11 w-full" aria-label="Purpose">
-                <SelectValue placeholder="Purpose of the visit" />
-              </SelectTrigger>
-              <SelectContent>
-                {purposes.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1.5">
+              <Select value={purpose} onValueChange={setPurpose}>
+                <SelectTrigger
+                  className="h-11 w-full"
+                  aria-label="Purpose"
+                  aria-invalid={fieldErrors.purpose ? true : undefined}
+                  aria-describedby={
+                    fieldErrors.purpose ? "plan-purpose-error" : undefined
+                  }
+                >
+                  <SelectValue placeholder="Purpose of the visit" />
+                </SelectTrigger>
+                <SelectContent>
+                  {purposes.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldError id="plan-purpose-error" message={fieldErrors.purpose} />
+            </div>
 
             <Button type="submit" className="h-11 w-full" disabled={isPending}>
               <PlusIcon className="size-4" aria-hidden />
@@ -213,5 +262,14 @@ export function DailyPlan({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} className="text-danger text-xs">
+      {message}
+    </p>
   );
 }

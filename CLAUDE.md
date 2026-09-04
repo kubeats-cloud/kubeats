@@ -104,8 +104,8 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2984
-KiB** — under 3% spare. That is a deliberate choice, not an oversight, and the
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2965
+KiB** — under 4% spare. That is a deliberate choice, not an oversight, and the
 budget is real: measure before adding anything sizable.
 
 ```bash
@@ -172,6 +172,22 @@ already claimed the easy 0.9 MiB between them; see README for both.
   Sunday: a Sunday's work folds into the week that just ended rather than
   falling out of every total. `weekEnd()` is the Saturday shown to the rep;
   `weekCountEnd()` is the Sunday every rollup query uses.
+- Every date and time on a screen goes through `src/lib/dates.ts`, and nothing
+  else may format one. Both the timezone (Asia/Kolkata) and the wording are
+  fixed there, because a rendered date that depends on where the code runs is
+  not a cosmetic bug: the server renders in UTC, an Indian browser renders in
+  UTC+5:30, and once past local midnight the two disagree about the day, React
+  refuses to hydrate (#418) and the app freezes until 05:30 IST. The month
+  names are a table in that file rather than a locale lookup on purpose — CLDR
+  revises abbreviations (en-GB's September became "Sept" in 2022), so asking a
+  locale for the word makes the output depend on which ICU each end happens to
+  ship. `tests/unit/dates.test.ts` reloads the module under five timezones and
+  fails if either half is unpinned.
+- Not the same thing: `weeks.ts` still does its week *arithmetic* in UTC, so a
+  stored `YYYY-MM-DD` cannot drift; it only borrows dates.ts for the spelling.
+  And `todayISO()` still reads the *server's* calendar, so "today" rolls over
+  at 05:30 IST rather than midnight — consistent between the app and the
+  meeting gate, but not the same as the rep's day. See the README note.
 - Visit photos are deleted automatically after
   `public.visit_photo_retention_days()` days (migration 0003, scheduled in
   0004). The visit rows, coordinates and timestamps are kept forever, so a row

@@ -10,6 +10,8 @@
  * legible enough to read a school gate and its signage.
  */
 
+import { formatDateTime } from "@/lib/dates";
+
 const MAX_DIMENSION = 1000;
 const QUALITY = 0.5;
 
@@ -93,7 +95,7 @@ export async function preparePhoto(
     "KUbeats",
     formatCoords(stamp),
     ...(place ? [place] : []),
-    stamp.takenAt.toLocaleString(),
+    formatDateTime(stamp.takenAt),
   ];
 
   const pad = Math.max(8, Math.round(width * 0.025));

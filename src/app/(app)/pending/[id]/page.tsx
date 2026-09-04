@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { PageColumn } from "@/components/layout/page-column";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeftIcon, CheckCircle2Icon } from "lucide-react";
@@ -44,7 +45,7 @@ export default async function ClosingReportPage(
   const heading = report.institute?.name ?? "Visit";
   const subtitle = [
     activityLabelFor(report.activity),
-    new Date(report.date).toLocaleDateString(),
+    formatDate(report.date),
     !mine ? report.memberName : null,
   ]
     .filter(Boolean)
@@ -92,7 +93,7 @@ export default async function ClosingReportPage(
           {filed && (
             <p className="bg-success-subtle text-success-subtle-foreground mb-4 flex items-center gap-2 rounded-md px-3 py-2 text-sm">
               <CheckCircle2Icon className="size-4 shrink-0" aria-hidden />
-              Filed {new Date(report.reported_at!).toLocaleString()}
+              Filed {formatDateTime(report.reported_at)}
             </p>
           )}
           {!filed && (

@@ -6,6 +6,7 @@ import { SectionTitle } from "@/components/section-title";
 import { ErrorState } from "@/components/states";
 import { PhotoFlushPanel } from "@/components/settings/photo-flush-panel";
 import { countStoredPhotos, getPhotoRetentionDays, requireAdmin } from "@/lib/admin";
+import { todayInAppZone } from "@/lib/dates";
 
 export const metadata = { title: "Data" };
 
@@ -41,7 +42,11 @@ export default async function DataPage() {
       />
 
       <SectionTitle>Photo storage</SectionTitle>
-      <PhotoFlushPanel storedPhotos={storedPhotos} retentionDays={retentionDays} />
+      <PhotoFlushPanel
+        storedPhotos={storedPhotos}
+        retentionDays={retentionDays}
+        today={todayInAppZone()}
+      />
 
       <SectionTitle className="mt-8">Backups</SectionTitle>
       <Card>

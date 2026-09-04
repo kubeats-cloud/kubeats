@@ -16,6 +16,7 @@ import { SectionTitle } from "@/components/section-title";
 import { EmptyState } from "@/components/states";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import type { Overview as OverviewData } from "@/lib/admin-workspace";
+import { formatDate } from "@/lib/dates";
 
 /**
  * The supervisor's landing screen.
@@ -93,7 +94,7 @@ export function AdminOverview({ data }: { data: OverviewData }) {
                       {visit.instituteName}
                     </Link>
                     <p className="text-muted-foreground mt-0.5 truncate text-xs">
-                      {visit.memberName} · {visit.date} · {visit.activityLabel}
+                      {visit.memberName} · {formatDate(visit.date)} · {visit.activityLabel}
                     </p>
                   </div>
                   <Badge

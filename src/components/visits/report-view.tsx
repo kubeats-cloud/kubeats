@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/dates";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import { activityLabelFor } from "@/lib/validation/visit";
@@ -51,7 +52,7 @@ export function ReportView({ report }: { report: VisitReport }) {
         <CardContent>
           <dl className="divide-border divide-y">
             {row("Activity", activityLabelFor(report.activity))}
-            {row("Date", new Date(report.date).toLocaleDateString())}
+            {row("Date", formatDate(report.date))}
             {row("Rep", report.memberName)}
             {row("Institute", report.institute?.name)}
             {row(
@@ -73,7 +74,7 @@ export function ReportView({ report }: { report: VisitReport }) {
                 <span className="flex justify-end">
                   <VisitPhotoThumb
                     photo={report.photo}
-                    caption={`${activityLabelFor(report.activity)} on ${new Date(report.date).toLocaleDateString()}`}
+                    caption={`${activityLabelFor(report.activity)} on ${formatDate(report.date)}`}
                   />
                 </span>
               ) : (
@@ -113,7 +114,7 @@ export function ReportView({ report }: { report: VisitReport }) {
             {row(
               "Follow-up",
               report.follow_up_action
-                ? `${report.follow_up_action}${report.follow_up_date ? ` — by ${new Date(report.follow_up_date).toLocaleDateString()}` : ""}`
+                ? `${report.follow_up_action}${report.follow_up_date ? ` — by ${formatDate(report.follow_up_date)}` : ""}`
                 : null,
             )}
           </dl>

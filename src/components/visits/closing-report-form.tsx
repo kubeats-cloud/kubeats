@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { formatDate } from "@/lib/dates";
 import {
   CheckCircle2Icon,
   PencilIcon,
@@ -793,7 +794,7 @@ function Review({
       >
         <div className="border-border overflow-hidden rounded-lg border">
           <dl className="divide-border divide-y">
-            {line("Visit", `${activityLabelFor(visit.activity)} · ${new Date(visit.date).toLocaleDateString()}`)}
+            {line("Visit", `${activityLabelFor(visit.activity)} · ${formatDate(visit.date)}`)}
             {line("Institute", visit.institute?.name)}
             {line(
               "Activities",
@@ -845,7 +846,7 @@ function Review({
                 <span className="flex justify-end">
                   <VisitPhotoThumb
                     photo={visit.photo}
-                    caption={`${activityLabelFor(visit.activity)} on ${new Date(visit.date).toLocaleDateString()}`}
+                    caption={`${activityLabelFor(visit.activity)} on ${formatDate(visit.date)}`}
                   />
                 </span>
               ) : (

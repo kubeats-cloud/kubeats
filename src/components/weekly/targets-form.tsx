@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { LockIcon, TriangleAlertIcon, UnlockIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,7 +97,7 @@ export function TargetsForm({
         >
           <LockIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
           <span>
-            Submitted{submittedAt ? ` ${new Date(submittedAt).toLocaleString()}` : ""}.
+            Submitted{submittedAt ? ` ${formatDateTime(submittedAt)}` : ""}.
             This commitment is locked and cannot be edited. Ask an admin if it
             needs to change.
           </span>
@@ -111,7 +112,7 @@ export function TargetsForm({
           <UnlockIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
           <span>
             An admin reopened this week on{" "}
-            {new Date(reopenedAt).toLocaleDateString()}. Revise the numbers and
+            {formatDate(reopenedAt)}. Revise the numbers and
             submit again.
           </span>
         </p>

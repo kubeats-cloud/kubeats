@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { formatDate } from "@/lib/dates";
 import { ImageOffIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,9 +32,12 @@ import { FLUSH_PRESETS } from "@/lib/validation/admin";
 export function PhotoFlushPanel({
   storedPhotos,
   retentionDays,
+  today,
 }: {
   storedPhotos: number | null;
   retentionDays: number;
+  /** Today in Asia/Kolkata, resolved on the server. See cutoffFor below. */
+  today: string;
 }) {
   const [state, formAction, isPending] = useActionState(
     flushPhotos,
@@ -42,7 +46,7 @@ export function PhotoFlushPanel({
   const [preset, setPreset] = useState<string>(FLUSH_PRESETS[0].key);
   const [customDate, setCustomDate] = useState("");
 
-  const cutoff = cutoffFor(preset, customDate);
+  const cutoff = cutoffFor(preset, customDate, today);
   // A confirmation is only good for the cutoff it was counted against.
   const confirmed =
     state.count !== undefined && state.cutoff === cutoff && state.count > 0;
@@ -99,7 +103,7 @@ export function PhotoFlushPanel({
 
           {cutoff && (
             <p className="text-muted-foreground text-xs">
-              Cutoff: visits dated {new Date(`${cutoff}T00:00:00`).toLocaleDateString()}{" "}
+              Cutoff: visits dated {formatDate(cutoff)}{" "}
               or earlier.
             </p>
           )}
@@ -185,13 +189,21 @@ export function PhotoFlushPanel({
   );
 }
 
-/** Presets are relative to today; "custom" is whatever the admin picked. */
-function cutoffFor(preset: string, customDate: string): string {
+/**
+ * Presets are relative to today; "custom" is whatever the admin picked.
+ *
+ * `today` is handed down from the server instead of being read from the
+ * browser's clock, because this value is rendered — into the hidden field and
+ * into the confirmation line. A server that thinks it is the 4th and a browser
+ * that thinks it is the 5th would disagree about the text and hydration would
+ * fail. See dates.ts for the whole story.
+ */
+function cutoffFor(preset: string, customDate: string, today: string): string {
   if (preset === "custom") return customDate;
   const days = Number(preset);
   if (!Number.isFinite(days)) return "";
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  local.setUTCDate(local.getUTCDate() - days);
-  return local.toISOString().slice(0, 10);
+  const day = new Date(`${today}T00:00:00.000Z`);
+  if (Number.isNaN(day.getTime())) return "";
+  day.setUTCDate(day.getUTCDate() - days);
+  return day.toISOString().slice(0, 10);
 }

@@ -221,9 +221,35 @@ export function visitFormDataToInput(formData: FormData) {
 /* ------------------------------------------------------------------ */
 
 export const dailyPlanSchema = z.object({
-  institute_id: z.uuid("Select an institute."),
-  purpose: z.string().trim().min(1, "Select a purpose.").max(120),
+  // Both messages are written to stand on their own under the field they
+  // belong to, because that is where a rep reads them. "Select an institute."
+  // beside a control already labelled Institute says nothing the rep did not
+  // already know; naming what kind of institute does.
+  institute_id: z.uuid("Pick a registered institute for this planned visit."),
+  purpose: z
+    .string()
+    .trim()
+    .min(1, "Choose what this visit is for.")
+    .max(120, "That purpose is too long."),
 });
+
+/**
+ * The one-line summary shown above the "Add to today's plan" button.
+ *
+ * Shared so the client's own check and the server action say the same words
+ * for the same mistake — a rep who submits with JavaScript still warming up
+ * should not get a different sentence from the one they would have got a
+ * second later.
+ *
+ * With a single problem it repeats that problem rather than saying "check the
+ * highlighted fields": on a form this short, sending someone hunting for a
+ * highlight when there is exactly one thing to fix is worse than saying it.
+ */
+export function dailyPlanSummary(fieldErrors: Record<string, string>): string {
+  const messages = Object.values(fieldErrors);
+  if (messages.length === 1) return messages[0];
+  return "Pick an institute and a purpose before adding this to today's plan.";
+}
 
 /** Ids arriving from the browser are still input, and still get checked. */
 export const planIdSchema = z.uuid("That entry could not be identified.");

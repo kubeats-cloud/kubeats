@@ -14,6 +14,7 @@ import type { FormState } from "@/lib/visit-form-state";
 import {
   dailyPlanFormDataToInput,
   dailyPlanSchema,
+  dailyPlanSummary,
   planIdSchema,
   visitFieldErrors,
   visitFormDataToInput,
@@ -70,10 +71,8 @@ export async function addToDailyPlan(
 
   const parsed = dailyPlanSchema.safeParse(dailyPlanFormDataToInput(formData));
   if (!parsed.success) {
-    return {
-      error: "Please check the highlighted fields.",
-      fieldErrors: visitFieldErrors(parsed.error),
-    };
+    const fieldErrors = visitFieldErrors(parsed.error);
+    return { error: dailyPlanSummary(fieldErrors), fieldErrors };
   }
 
   const { error } = await supabase.from("daily_plans").upsert(

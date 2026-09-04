@@ -20,6 +20,7 @@ import { EmptyState } from "@/components/states";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import { ACTIVITIES } from "@/lib/validation/visit";
 import type { VisitRow } from "@/lib/admin-workspace";
+import { formatDate } from "@/lib/dates";
 
 /**
  * Review — the screen an admin spends their time on.
@@ -212,7 +213,7 @@ export function VisitReview({
                         {visit.instituteName}
                       </Link>
                       <p className="text-muted-foreground mt-0.5 text-xs">
-                        {visit.memberName} · {visit.date}
+                        {visit.memberName} · {formatDate(visit.date)}
                       </p>
                     </div>
                     {visit.photo && (
@@ -278,7 +279,7 @@ export function VisitReview({
                         )}
                       </td>
                       <td className="px-5 py-3 whitespace-nowrap tabular-nums">
-                        {visit.date}
+                        {formatDate(visit.date)}
                       </td>
                       <td className="px-5 py-3">{visit.memberName}</td>
                       <td className="px-5 py-3">

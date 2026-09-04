@@ -174,6 +174,26 @@ Server actions all follow the same shape: check the session, parse with the
 shared schema, do the work, map a known error code to a sentence, and never let
 a database message reach the browser.
 
+### Dates
+
+Everything shown to a person is formatted by `src/lib/dates.ts`, which fixes
+both the timezone (Asia/Kolkata) and the wording. Nothing else in `src/` may
+format a date. This is not house style: the server runs in UTC and a rep's
+phone runs in UTC+5:30, so a date left to the runtime disagrees with itself
+after local midnight, React refuses to hydrate the page, and the app is dead
+from 00:00 to 05:30 IST every night. That happened. `tests/unit/dates.test.ts`
+reloads the module under five timezones and fails if either half comes loose.
+
+One thing that is deliberately *not* fixed, and is worth a decision before the
+team grows: `todayISO()` reads the **server's** calendar, so the app's "today"
+turns over at 05:30 IST rather than at midnight. It is self-consistent — the
+same function decides which plan row a rep sees, which day a visit is filed
+against, and what the meeting gate checks — so nothing is broken. But a rep
+working at 01:00 files against yesterday, and an admin assigning a visit at
+that hour is offered yesterday's date by default. Moving it to the Indian day
+means moving the app and `current_date` in the database together, which is a
+change to a load-bearing rule rather than to a label.
+
 ## Deployment
 
 Any host that runs a Node server works. Cloudflare Workers is what this repo is
@@ -312,7 +332,7 @@ exist purely to fit:
 Those two together were the cheap wins, and they are spent. Neither is worth
 extending.
 
-**Where it stands: 2984 KiB against a 3072 KiB ceiling — 87 KiB, under 3%.**
+**Where it stands: 2965 KiB against a 3072 KiB ceiling — 107 KiB, under 4%.**
 
 Read that as a budget, not a comfort. It was 2831 KiB before the in-app camera
 and the area-name lookup; two ordinary features spent nearly two thirds of the

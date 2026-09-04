@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { formatDate } from "@/lib/dates";
 import { PageColumn } from "@/components/layout/page-column";
 import { notFound } from "next/navigation";
 import { ArrowLeftIcon, HistoryIcon } from "lucide-react";
@@ -67,7 +68,7 @@ export default async function InstituteDetailPage(
         <Badge variant="secondary">{TYPE_LABELS[institute.type]}</Badge>
         {institute.status_updated_at && (
           <span className="text-muted-foreground text-xs">
-            updated {new Date(institute.status_updated_at).toLocaleDateString()}
+            updated {formatDate(institute.status_updated_at)}
           </span>
         )}
       </div>
@@ -189,7 +190,7 @@ export default async function InstituteDetailPage(
                 </p>
                 <p className="text-muted-foreground text-xs">
                   {visit.memberName ?? "Unknown"} ·{" "}
-                  {new Date(visit.date).toLocaleDateString()}
+                  {formatDate(visit.date)}
                 </p>
 
                 {/* The closing report, in one line each, with the full account
@@ -225,7 +226,7 @@ export default async function InstituteDetailPage(
                       <p className="text-warning-subtle-foreground bg-warning-subtle inline-block rounded px-2 py-0.5 text-xs">
                         Follow up: {visit.followUpAction}
                         {visit.followUpDate
-                          ? ` by ${new Date(visit.followUpDate).toLocaleDateString()}`
+                          ? ` by ${formatDate(visit.followUpDate)}`
                           : ""}
                       </p>
                     )}
@@ -244,7 +245,7 @@ export default async function InstituteDetailPage(
               {visit.photo && (
                 <VisitPhotoThumb
                   photo={visit.photo}
-                  caption={`${activityLabel(visit.activity)} on ${new Date(visit.date).toLocaleDateString()}`}
+                  caption={`${activityLabel(visit.activity)} on ${formatDate(visit.date)}`}
                 />
               )}
             </li>

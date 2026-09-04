@@ -22,6 +22,8 @@
  * every date belongs to exactly one week, and none is orphaned.
  */
 
+import { formatDate, formatDayMonth } from "@/lib/dates";
+
 const DAY_MS = 86_400_000;
 
 /** YYYY-MM-DD for a UTC-midnight Date. */
@@ -105,24 +107,23 @@ export function isInWeek(dateISO: string | null, weekStart: string): boolean {
   return dateISO >= weekStart && dateISO <= weekCountEnd(weekStart);
 }
 
-const DAY_MONTH = new Intl.DateTimeFormat("en-IN", {
-  day: "numeric",
-  month: "short",
-  timeZone: "UTC",
-});
-const DAY_MONTH_YEAR = new Intl.DateTimeFormat("en-IN", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
+/*
+ * Spelled by dates.ts like every other date the app prints, rather than by a
+ * second pair of formatters here. Two places that both answer "how does this
+ * app write a date" is one place too many: it was already how the two ended up
+ * disagreeing once.
+ *
+ * The week boundaries themselves are still computed in UTC above. Formatting a
+ * UTC midnight in Asia/Kolkata lands at 05:30 the same morning, so the day
+ * printed is the day stored.
+ */
 
 /** "31 Aug – 5 Sep 2026", or "This week" for the current one. */
 export function formatWeekRange(weekStart: string): string {
   const monday = parseISO(weekStart);
   const saturday = parseISO(weekEnd(weekStart));
   if (!monday || !saturday) return weekStart;
-  return `${DAY_MONTH.format(monday)} – ${DAY_MONTH_YEAR.format(saturday)}`;
+  return `${formatDayMonth(monday)} – ${formatDate(saturday)}`;
 }
 
 /** A short relative label for the navigator: "This week", "Last week", … */
