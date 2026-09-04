@@ -11,6 +11,13 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { CameraCapture } from "@/components/visits/camera-capture";
 import { createClient } from "@/lib/supabase/client";
 import { preparePhoto } from "@/lib/photo";
@@ -78,6 +85,7 @@ export function CaptureFields({ userId }: { userId: string }) {
   const [geo, setGeo] = useState<GeoState>({ status: "locating" });
   const [photo, setPhoto] = useState<PhotoState>({ status: "idle" });
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [enlarged, setEnlarged] = useState(false);
   /** Set once this device has proved it cannot open a camera in the page. */
   const [cameraUnavailable, setCameraUnavailable] = useState<string | null>(null);
 
@@ -417,15 +425,45 @@ export function CaptureFields({ userId }: { userId: string }) {
 
         {photo.status === "ready" && (
           <div className="space-y-2">
-            <div className="border-border relative overflow-hidden rounded-md border">
+            {/*
+              object-contain, not object-cover. The stamp with the coordinates
+              and the time is burnt along the bottom edge, so a fill-crop cuts
+              off the part that makes the picture evidence — and a rep checking
+              their own photo could not see whether it had worked. Letterboxing
+              on a neutral ground costs nothing and shows the whole frame.
+            */}
+            <button
+              type="button"
+              onClick={() => setEnlarged(true)}
+              className="border-border bg-neutral-subtle focus-visible:ring-ring block w-full overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:outline-none"
+              aria-label="Open the photo at full size"
+            >
               {/* Object URL of a canvas blob — next/image cannot optimise it. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={photo.previewUrl}
                 alt="Stamped photo for this visit"
-                className="max-h-56 w-full object-cover"
+                className="mx-auto max-h-72 w-full object-contain"
               />
-            </div>
+            </button>
+
+            <Dialog open={enlarged} onOpenChange={setEnlarged}>
+              <DialogContent className="sm:max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle className="text-base">Your photo</DialogTitle>
+                  <DialogDescription>
+                    Check the stamp along the bottom edge reads correctly before
+                    you save.
+                  </DialogDescription>
+                </DialogHeader>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={photo.previewUrl}
+                  alt="Stamped photo for this visit, full size"
+                  className="max-h-[80vh] w-full rounded-md object-contain"
+                />
+              </DialogContent>
+            </Dialog>
             <div className="flex items-center justify-between gap-3">
               <p className="text-muted-foreground text-xs">
                 Stamped and uploaded · {Math.round(photo.bytes / 1024)} KB

@@ -1,12 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/proxy";
 import { publicEnv } from "@/lib/env";
+import { isAdminOnlyPath, isRepOnlyPath } from "@/lib/nav";
 
 /** Reachable without a session. Everything else requires one. */
 const PUBLIC_PATHS = ["/login"];
 
-/** Admin-only areas, turned away here so the refusal is a real HTTP redirect. */
-const ADMIN_PATHS = ["/settings"];
+/**
+ * The role split, turned away here so each refusal is a real HTTP redirect.
+ * Both lists live in lib/nav.ts, which is also what builds the navigation, so
+ * a screen cannot appear in one role's bar and be reachable by the other.
+ */
 
 function matches(pathname: string, paths: string[]): boolean {
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -113,7 +117,10 @@ export async function proxy(request: NextRequest) {
   // a refusal is a poor answer to give a security review. Here the session is
   // already loaded, so one more query buys a genuine 307 — and it costs that
   // query only on requests that ask for an admin path.
-  if (user && matches(pathname, ADMIN_PATHS)) {
+  const wantsAdminArea = isAdminOnlyPath(pathname);
+  const wantsRepArea = isRepOnlyPath(pathname);
+
+  if (user && (wantsAdminArea || wantsRepArea)) {
     const { data } = await supabase
       .from("profiles")
       .select("role")
@@ -121,7 +128,14 @@ export async function proxy(request: NextRequest) {
       .maybeSingle();
 
     // Least privilege: an unreadable profile is not an admin.
-    if (data?.role !== "admin") return redirectTo("/");
+    const admin = data?.role === "admin";
+
+    // An admin has no business on the fieldwork screens either. The gate runs
+    // both ways because "log a visit" records a person standing somewhere, and
+    // an admin at a desk was not there — letting them reach the form at all
+    // invites a row that says otherwise.
+    if (wantsAdminArea && !admin) return redirectTo("/");
+    if (wantsRepArea && admin) return redirectTo("/");
   }
 
   return withCsp(response);

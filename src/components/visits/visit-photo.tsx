@@ -42,10 +42,12 @@ export function VisitPhotoThumb({
 
   return (
     <>
+      {/* Contain rather than cover: the stamp along the bottom edge is the
+          point of the photo, and a 64px square crop is exactly what removes it. */}
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="border-border focus-visible:ring-ring mt-2 block size-16 shrink-0 overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:outline-none"
+        className="border-border bg-neutral-subtle focus-visible:ring-ring mt-2 block size-16 shrink-0 overflow-hidden rounded-md border focus-visible:ring-2 focus-visible:outline-none"
         aria-label={`Open the photo from ${caption}`}
       >
         {/* A short-lived signed URL on the storage origin — next/image would
@@ -56,12 +58,12 @@ export function VisitPhotoThumb({
           alt={`Proof photo from ${caption}`}
           loading="lazy"
           onError={() => setFailed(true)}
-          className="size-full object-cover"
+          className="size-full object-contain"
         />
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle className="text-base">Proof photo</DialogTitle>
             <DialogDescription>{caption}</DialogDescription>
@@ -74,7 +76,7 @@ export function VisitPhotoThumb({
               setFailed(true);
               setOpen(false);
             }}
-            className="max-h-[70vh] w-full rounded-md object-contain"
+            className="max-h-[80vh] w-full rounded-md object-contain"
           />
           <p className="text-muted-foreground text-xs">
             The location and time are stamped into the picture. Photos are

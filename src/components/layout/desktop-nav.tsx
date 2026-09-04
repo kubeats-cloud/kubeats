@@ -4,11 +4,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Building2Icon,
+  ClipboardCheckIcon,
   ClockIcon,
+  DatabaseIcon,
   LayoutDashboardIcon,
   PlusIcon,
+  SendIcon,
   SettingsIcon,
   TargetIcon,
+  UsersIcon,
   type LucideIcon,
 } from "lucide-react";
 import { isActive, type NavIconName, type NavItem } from "@/lib/nav";
@@ -22,6 +26,14 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   pending: ClockIcon,
   weekly: TargetIcon,
   settings: SettingsIcon,
+  // The admin workspace. Each one names what the screen is for rather than
+  // decorating it: a checked clipboard for reading the team's work, a paper
+  // plane for handing work out, people for the team, a database for the tools
+  // that touch stored data.
+  review: ClipboardCheckIcon,
+  assign: SendIcon,
+  team: UsersIcon,
+  data: DatabaseIcon,
 };
 
 /**

@@ -5,10 +5,9 @@ import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
 import { DailyPlan } from "@/components/dashboard/daily-plan";
-import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
-import { AssignVisit } from "@/components/dashboard/assign-visit";
 import { MetricList } from "@/components/weekly/metric-list";
+import { AdminOverview } from "@/components/admin/overview";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import {
   getTodayPlan,
@@ -16,9 +15,9 @@ import {
   listPurposes,
   openLoopsByMember,
 } from "@/lib/visits";
-import { getTeamWeek, getWeek } from "@/lib/weekly";
-import { listReps } from "@/lib/closing-report";
-import { formatWeekRange, mondayOf, todayISO } from "@/lib/weeks";
+import { getWeek } from "@/lib/weekly";
+import { formatWeekRange, mondayOf } from "@/lib/weeks";
+import { getOverview } from "@/lib/admin-workspace";
 
 export const metadata = { title: "Dashboard" };
 
@@ -29,14 +28,15 @@ export default async function DashboardPage() {
   const admin = isAdmin(user);
   const weekStart = mondayOf();
 
-  const [plan, institutes, purposes, openLoops, week, team, reps] = await Promise.all([
-    getTodayPlan(user.id),
-    listInstitutesForPicker(),
-    listPurposes(),
-    openLoopsByMember(),
-    getWeek(user.id, weekStart),
-    admin ? getTeamWeek(weekStart) : Promise.resolve(null),
-    admin ? listReps() : Promise.resolve([]),
+  // An admin loads the supervision view; a rep loads their own day. Neither
+  // pays for the other's queries.
+  const [plan, institutes, purposes, openLoops, week, overview] = await Promise.all([
+    admin ? Promise.resolve({ ok: true as const, entries: [] }) : getTodayPlan(user.id),
+    admin ? Promise.resolve([]) : listInstitutesForPicker(),
+    admin ? Promise.resolve([]) : listPurposes(),
+    admin ? Promise.resolve(new Map<string, number>()) : openLoopsByMember(),
+    admin ? Promise.resolve(null) : getWeek(user.id, weekStart),
+    admin ? getOverview() : Promise.resolve(null),
   ]);
 
   const entries = plan.ok ? plan.entries : [];
@@ -45,57 +45,43 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHeader
-        title={`Hello, ${user.name.split(" ")[0]}`}
+        title={admin ? "Overview" : `Hello, ${user.name.split(" ")[0]}`}
         description={
           admin
-            ? "Your day, and how the team is tracking against this week."
+            ? "What the team has been doing, and what is still open."
             : "Plan today's visits here, then log them as they happen."
         }
       />
 
-      <SectionTitle>Today</SectionTitle>
-      <TodaySnapshot
-        planned={entries.length}
-        held={held}
-        openLoops={openLoops.get(user.id) ?? 0}
-      />
+      {/* Fieldwork belongs to reps. An admin's landing screen is supervision:
+          what the team did, who was out, what is still open. */}
+      {!admin && (
+        <>
+          <SectionTitle>Today</SectionTitle>
+          <TodaySnapshot
+            planned={entries.length}
+            held={held}
+            openLoops={openLoops.get(user.id) ?? 0}
+          />
 
-      {plan.ok ? (
-        <DailyPlan
-          institutes={institutes}
-          purposes={purposes}
-          entries={plan.entries}
-        />
-      ) : (
-        <ErrorState message="We could not load today's plan. Please try again in a moment." />
+          {plan.ok ? (
+            <DailyPlan
+              institutes={institutes}
+              purposes={purposes}
+              entries={plan.entries}
+            />
+          ) : (
+            <ErrorState message="We could not load today's plan. Please try again in a moment." />
+          )}
+        </>
       )}
 
       {admin ? (
-        <>
-          <SectionTitle className="mt-8">Assign work</SectionTitle>
-          <AssignVisit
-            reps={reps.filter((rep) => rep.id !== user.id)}
-            institutes={institutes}
-            purposes={purposes}
-            today={todayISO()}
-          />
-
-          <SectionTitle className="mt-8">
-            The team this week
-            <span className="text-muted-foreground ml-2 text-xs font-normal">
-              {formatWeekRange(weekStart)}
-            </span>
-          </SectionTitle>
-          {team?.ok ? (
-            <TeamSnapshot
-              members={team.members}
-              weekStart={weekStart}
-              openLoops={openLoops}
-            />
-          ) : (
-            <ErrorState message="We could not load the team's week. Please try again in a moment." />
-          )}
-        </>
+        overview?.ok ? (
+          <AdminOverview data={overview.data} />
+        ) : (
+          <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />
+        )
       ) : (
         <>
           <SectionTitle className="mt-8">
@@ -104,7 +90,7 @@ export default async function DashboardPage() {
               {formatWeekRange(weekStart)}
             </span>
           </SectionTitle>
-          {week.ok ? (
+          {week?.ok ? (
             <>
               <MetricList
                 title="Target vs achieved"

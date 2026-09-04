@@ -33,18 +33,23 @@ export function AssignVisit({
   institutes,
   purposes,
   today,
+  alwaysOpen = false,
 }: {
   reps: { id: string; name: string }[];
   institutes: PickerInstitute[];
   purposes: string[];
   today: string;
+  /** Skip the collapsed state — used where the form is the whole screen. */
+  alwaysOpen?: boolean;
 }) {
   const [serverState, formAction, isPending] = useActionState(
     assignVisit,
     EMPTY_STATE,
   );
   const [clientState, setClientState] = useState<FormState>(EMPTY_STATE);
-  const [open, setOpen] = useState(false);
+  // On the dashboard this sits behind a button; on the Assign screen the form
+  // is the point of the page, so it opens with it.
+  const [open, setOpen] = useState(alwaysOpen);
   const [member, setMember] = useState("");
   const [instituteId, setInstituteId] = useState("");
   const [purpose, setPurpose] = useState("");

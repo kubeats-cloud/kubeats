@@ -1,17 +1,15 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
+import { DatabaseIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { SectionTitle } from "@/components/section-title";
 import { LocationsPanel } from "@/components/settings/locations-panel";
-import { PhotoFlushPanel } from "@/components/settings/photo-flush-panel";
 import { PurposesPanel } from "@/components/settings/purposes-panel";
 import { TeamPanel } from "@/components/settings/team-panel";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
-import {
-  countStoredPhotos,
-  getPhotoRetentionDays,
-  listPurposeRows,
-  listTeamMembers,
-} from "@/lib/admin";
+import { listPurposeRows, listTeamMembers } from "@/lib/admin";
 import { getLocationTree } from "@/lib/locations";
 
 export const metadata = { title: "Settings" };
@@ -32,12 +30,13 @@ export default async function SettingsPage() {
   // turned away.
   if (!isAdmin(user)) redirect("/");
 
-  const [purposes, tree, members, storedPhotos, retentionDays] = await Promise.all([
+  // The photo counts moved to /data with the flush that needed them; querying
+  // storage on every Settings load for a number nothing shows would be a
+  // request nobody asked for.
+  const [purposes, tree, members] = await Promise.all([
     listPurposeRows(),
     getLocationTree(),
     listTeamMembers(),
-    countStoredPhotos(),
-    getPhotoRetentionDays(),
   ]);
 
   return (
@@ -60,10 +59,24 @@ export default async function SettingsPage() {
       </div>
 
       <SectionTitle className="mt-8">Storage</SectionTitle>
-      <PhotoFlushPanel
-        storedPhotos={storedPhotos}
-        retentionDays={retentionDays}
-      />
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-6">
+          <div>
+            <p className="text-sm font-medium">Photo storage and backups</p>
+            <p className="text-muted-foreground mt-1 max-w-prose text-sm">
+              Flushing photos deletes files for everyone and cannot be undone, so
+              it lives on its own screen rather than at the bottom of this one.
+            </p>
+          </div>
+          <Button asChild variant="outline" className="h-10">
+            <Link href="/data">
+              <DatabaseIcon className="size-4" aria-hidden />
+              Open Data
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+
     </>
   );
 }
