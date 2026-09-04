@@ -127,6 +127,12 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       await admin.from("institutes").delete().eq("id", id);
     }
     for (const member of members) {
+      const { data: files } = await admin.storage.from("visit-photos").list(member.id);
+      if (files?.length) {
+        await admin.storage
+          .from("visit-photos")
+          .remove(files.map((f) => `${member.id}/${f.name}`));
+      }
       await admin.from("weekly_targets").delete().eq("member", member.id);
       await admin.from("visits").delete().eq("member", member.id);
       await admin.from("daily_plans").delete().eq("member", member.id);
@@ -352,6 +358,78 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
   });
 
+  /* ---------------------------------------------------------------- */
+
+  describe("Storage — who can see a proof photo", () => {
+    // A real, tiny JPEG: the point is that it is an object in the bucket.
+    const JPEG = Buffer.from(
+      "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a" +
+        "HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAAIAAgBAREA/8QAFAABAAAAAAAA" +
+        "AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==",
+      "base64",
+    );
+
+    let livePath: string;
+    let purgedPath: string;
+
+    beforeAll(async () => {
+      livePath = `${repA.id}/${crypto.randomUUID()}.jpg`;
+      purgedPath = `${repA.id}/${crypto.randomUUID()}.jpg`;
+
+      for (const path of [livePath, purgedPath]) {
+        const { error } = await admin.storage
+          .from("visit-photos")
+          .upload(path, JPEG, { contentType: "image/jpeg" });
+        expect(error).toBeNull();
+      }
+      // Exactly what the nightly purge leaves behind: the row will keep its
+      // photo_url, the file is gone.
+      await admin.storage.from("visit-photos").remove([purgedPath]);
+    });
+
+    it("lets the owner sign their own photo", async () => {
+      const { data, error } = await repA.db.storage
+        .from("visit-photos")
+        .createSignedUrl(livePath, 60);
+
+      expect(error).toBeNull();
+      expect(data?.signedUrl).toContain("/object/sign/");
+    });
+
+    it("lets an admin sign anyone's photo", async () => {
+      const { error } = await boss.db.storage
+        .from("visit-photos")
+        .createSignedUrl(livePath, 60);
+
+      expect(error).toBeNull();
+    });
+
+    it("refuses another rep, without admitting the file exists", async () => {
+      const { data, error } = await repB.db.storage
+        .from("visit-photos")
+        .createSignedUrl(livePath, 60);
+
+      expect(data?.signedUrl).toBeUndefined();
+      expect(error).not.toBeNull();
+      // "Object not found" rather than "forbidden": the policy hides it.
+      expect(error?.message).toMatch(/not found/i);
+    });
+
+    it("reports a purged photo as missing, which the app reads as expired", async () => {
+      // The case the whole photo-display path is built around: the visit row
+      // keeps its photo_url forever, so this is the normal end state.
+      const { data } = await boss.db.storage
+        .from("visit-photos")
+        .createSignedUrls([livePath, purgedPath], 60);
+
+      const live = data?.find((entry) => entry.path === livePath);
+      const purged = data?.find((entry) => entry.path === purgedPath);
+
+      expect(live?.error).toBeNull();
+      expect(live?.signedUrl).toContain("token=");
+      expect(purged?.error).toBeTruthy();
+    });
+  });
   /* ---------------------------------------------------------------- */
 
   describe("Rule 7 — where the weekly numbers come from", () => {

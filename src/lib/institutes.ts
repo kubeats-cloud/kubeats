@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
+import { signVisitPhotos, type VisitPhoto } from "@/lib/photos";
 import type { InstituteStatus, InstituteType } from "@/lib/validation/institute";
 
 export interface Institute {
@@ -81,6 +82,8 @@ export interface VisitSummary {
   notes: string | null;
   member: string;
   memberName: string | null;
+  /** Null when the visit never had a photo; "expired" when the file is gone. */
+  photo: VisitPhoto | null;
 }
 
 /**
@@ -98,7 +101,7 @@ export async function getInstituteVisits(
 
   const { data, error } = await supabase
     .from("visits")
-    .select("id, activity, lifecycle_status, date, notes, member")
+    .select("id, activity, lifecycle_status, date, notes, member, photo_url")
     .eq("institute_id", instituteId)
     .order("date", { ascending: false });
 
@@ -109,6 +112,9 @@ export async function getInstituteVisits(
 
   const rows = data ?? [];
   const memberIds = [...new Set(rows.map((r) => r.member))];
+
+  // Signed on the caller's own session, so RLS decides whose photos resolve.
+  const photos = await signVisitPhotos(rows.map((r) => r.photo_url));
 
   const names = new Map<string, string | null>();
   if (memberIds.length > 0) {
@@ -126,9 +132,10 @@ export async function getInstituteVisits(
 
   return {
     ok: true,
-    visits: rows.map((r) => ({
+    visits: rows.map(({ photo_url, ...r }) => ({
       ...r,
       memberName: names.get(r.member) ?? null,
+      photo: photo_url ? (photos.get(photo_url) ?? { status: "expired" }) : null,
     })),
   };
 }

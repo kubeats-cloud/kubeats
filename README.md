@@ -191,8 +191,14 @@ Supabase's 1 GB free tier, so the nightly purge (0004) is doing real work.
 Admins can also clear photos early from **Settings → Visit photos**.
 
 A visit keeps its `photo_url` after the file is deleted. That is intended: the
-row is the record, the picture was only the evidence. Anything that displays a
-photo must treat a missing object as **expired**, not as an error.
+row is the record, the picture was only the evidence.
+
+Photos are shown on an institute's visit history, as a thumbnail that opens
+larger on tap. The bucket is private, so each one is signed server-side for five
+minutes on the caller's own session — a rep's own photos, an admin's anyone's.
+A path whose file has gone renders a small "Photo expired" placeholder, never a
+broken image or an error, and anything else that displays a photo must do the
+same.
 
 ## Troubleshooting
 

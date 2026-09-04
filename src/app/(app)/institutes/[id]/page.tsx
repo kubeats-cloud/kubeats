@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { EmptyState, ErrorState } from "@/components/states";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
+import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import { getInstitute, getInstituteVisits } from "@/lib/institutes";
 import { activityLabel } from "@/lib/activities";
 import { class12Total, STREAMS, TYPE_LABELS } from "@/lib/validation/institute";
@@ -176,21 +177,30 @@ export default async function InstituteDetailPage(
           {history.visits.map((visit) => (
             <li
               key={visit.id}
-              className="border-primary bg-card rounded-r-md border-l-2 px-3 py-2"
+              className="border-primary bg-card flex items-start justify-between gap-3 rounded-r-md border-l-2 px-3 py-2"
             >
-              <p className="text-sm font-medium">
-                {activityLabel(visit.activity)}
-                {visit.lifecycle_status && (
-                  <span className="text-muted-foreground font-normal">
-                    {" "}
-                    · {visit.lifecycle_status}
-                  </span>
-                )}
-              </p>
-              <p className="text-muted-foreground text-xs">
-                {visit.memberName ?? "Unknown"} ·{" "}
-                {new Date(visit.date).toLocaleDateString()}
-              </p>
+              <div className="min-w-0">
+                <p className="text-sm font-medium">
+                  {activityLabel(visit.activity)}
+                  {visit.lifecycle_status && (
+                    <span className="text-muted-foreground font-normal">
+                      {" "}
+                      · {visit.lifecycle_status}
+                    </span>
+                  )}
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  {visit.memberName ?? "Unknown"} ·{" "}
+                  {new Date(visit.date).toLocaleDateString()}
+                </p>
+              </div>
+
+              {visit.photo && (
+                <VisitPhotoThumb
+                  photo={visit.photo}
+                  caption={`${activityLabel(visit.activity)} on ${new Date(visit.date).toLocaleDateString()}`}
+                />
+              )}
             </li>
           ))}
         </ul>
