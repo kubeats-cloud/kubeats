@@ -6,6 +6,15 @@ import { z } from "zod";
  * `requireAdmin()` in admin-actions.ts, plus the RLS policies underneath it.
  */
 
+/**
+ * The one definition of "is this a usable name", used by the schemas below and
+ * by the forms, so the browser and the server agree on what they will accept.
+ */
+export function nameLooksValid(value: string, max: number): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= max && /\p{L}|\p{N}/u.test(trimmed);
+}
+
 const name = (max: number, label: string) =>
   z
     .string()
@@ -13,7 +22,7 @@ const name = (max: number, label: string) =>
     .min(1, `${label} is required.`)
     .max(max, `${label} is too long.`)
     // A name made only of punctuation passes a length check but is not a name.
-    .refine((v) => /\p{L}|\p{N}/u.test(v), `${label} needs some letters.`);
+    .refine((v) => nameLooksValid(v, max), `${label} needs some letters.`);
 
 export const purposeSchema = z.object({
   label: name(120, "The purpose"),

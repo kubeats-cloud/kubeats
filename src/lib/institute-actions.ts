@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logError, toFriendlyMessage } from "@/lib/errors";
+import { ensureAreas } from "@/lib/locations";
+import { canonicalAreaName, findExisting } from "@/lib/location-names";
+import { areaSchema } from "@/lib/validation/admin";
 import type { AreaNode } from "@/lib/locations";
 import type { InstituteFormState } from "@/lib/institute-form-state";
 import {
@@ -67,42 +70,32 @@ export type AddAreaResult =
  * Runs on the ordinary server client, not the service role: the RLS policy
  * already lets any authenticated user insert an area, so nothing here needs
  * elevated rights.
+ *
+ * Goes through the same find-or-create helper as the PIN lookup and the admin
+ * panel. Adding an area from this form used to insert the typed text as-is,
+ * which meant "MG Road" and "mg  road" could become two areas depending on
+ * which door they came in by — the Phase 4 city bug, one level down.
  */
 export async function addArea(
   cityId: string,
   rawName: string,
 ): Promise<AddAreaResult> {
-  const name = rawName.trim();
-  if (!name) return { ok: false, message: "Enter an area name." };
-  if (name.length > 120) return { ok: false, message: "That name is too long." };
-  if (!cityId) return { ok: false, message: "Choose a city first." };
-
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("location_areas")
-    .insert({ city_id: cityId, name })
-    .select("id, name")
-    .single();
-
-  if (error) {
-    // Someone already added it — treat that as success and return theirs.
-    if (error.code === "23505") {
-      const existing = await supabase
-        .from("location_areas")
-        .select("id, name")
-        .eq("city_id", cityId)
-        .eq("name", name)
-        .maybeSingle();
-      if (existing.data) return { ok: true, area: existing.data };
-    }
-
-    logError("locations:add-area", error);
+  const parsed = areaSchema.safeParse({ city_id: cityId, name: rawName });
+  if (!parsed.success) {
     return {
       ok: false,
-      message: toFriendlyMessage(error, "We could not add that area."),
+      message: parsed.error.issues[0]?.message ?? "Check the area name.",
     };
   }
 
+  const supabase = await createClient();
+  const areas = await ensureAreas(supabase, parsed.data.city_id, [parsed.data.name]);
+  const match = findExisting(areas, parsed.data.name, canonicalAreaName);
+
+  if (!match) {
+    return { ok: false, message: "We could not add that area." };
+  }
+
   revalidatePath("/institutes");
-  return { ok: true, area: data };
+  return { ok: true, area: match };
 }

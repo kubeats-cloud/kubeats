@@ -82,6 +82,42 @@ export function metricLabel(key: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Counting what happened                                              */
+/* ------------------------------------------------------------------ */
+
+export interface TallyableVisit {
+  activity: string;
+  lifecycle_status: string | null;
+}
+
+/**
+ * Rule 7's visits half: tallies rows against the seven visit-sourced metrics.
+ *
+ * A row matches when the activity agrees and, for the two activities that have
+ * a lifecycle, the Set/Done status agrees too. A session that has since been
+ * closed therefore moves from "set" to "done" — the same row, told from a later
+ * point in time — which is what stops the two columns double-counting it.
+ *
+ * `meetings` is never touched here. It is counted from daily_plans by the
+ * caller, and a bug that quietly filled it in from the visits log would be
+ * invisible in the UI. Kept pure so that rule can be tested without a database.
+ */
+export function tallyVisitMetrics(visits: TallyableVisit[]): MetricCounts {
+  const counts = { ...ZERO_COUNTS };
+  for (const visit of visits) {
+    for (const metric of METRICS) {
+      if (metric.source !== "visits") continue;
+      if (metric.activity !== visit.activity) continue;
+      if (metric.lifecycle !== null && metric.lifecycle !== visit.lifecycle_status) {
+        continue;
+      }
+      counts[metric.key] += 1;
+    }
+  }
+  return counts;
+}
+
+/* ------------------------------------------------------------------ */
 /* Progress                                                            */
 /* ------------------------------------------------------------------ */
 

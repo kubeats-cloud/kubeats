@@ -223,6 +223,9 @@ export const dailyPlanSchema = z.object({
   purpose: z.string().trim().min(1, "Select a purpose.").max(120),
 });
 
+/** Ids arriving from the browser are still input, and still get checked. */
+export const planIdSchema = z.uuid("That entry could not be identified.");
+
 export function dailyPlanFormDataToInput(formData: FormData) {
   const text = (key: string) => {
     const value = formData.get(key);

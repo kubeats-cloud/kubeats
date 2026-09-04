@@ -11,6 +11,7 @@ import {
   completionSchema,
   dailyPlanFormDataToInput,
   dailyPlanSchema,
+  planIdSchema,
   visitFieldErrors,
   visitFormDataToInput,
   visitSchema,
@@ -99,10 +100,18 @@ export async function removeFromDailyPlan(planId: string): Promise<FormState> {
     return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
   }
 
+  // An id is input like any other. RLS already scopes the delete to the
+  // caller's own rows, but a malformed id should come back as a sentence rather
+  // than as a Postgres syntax error.
+  const parsed = planIdSchema.safeParse(planId);
+  if (!parsed.success) {
+    return { error: "That entry could not be identified.", fieldErrors: {} };
+  }
+
   const { error } = await supabase
     .from("daily_plans")
     .delete()
-    .eq("id", planId)
+    .eq("id", parsed.data)
     .is("meetings_actual", null); // a held visit stays on the record
 
   if (error) {

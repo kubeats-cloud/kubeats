@@ -16,6 +16,7 @@ import {
 import { RemoveButton } from "@/components/settings/remove-button";
 import { addArea, addCity, addState } from "@/lib/admin-actions";
 import { EMPTY_ADMIN_STATE, type AdminState } from "@/lib/admin-form-state";
+import { nameLooksValid } from "@/lib/validation/admin";
 import type { StateNode } from "@/lib/locations";
 
 /**
@@ -175,6 +176,9 @@ export function LocationsPanel({ tree }: { tree: StateNode[] }) {
   );
 }
 
+/** The longest a location name may be, matching the schemas. */
+const MAX_NAME = 120;
+
 /** One labelled text input and an Add button, wired to a server action. */
 function AddRow({
   action,
@@ -196,12 +200,23 @@ function AddRow({
   const [value, setValue] = useState("");
   const id = `${inputName}-${label.replace(/\W+/g, "-").toLowerCase()}`;
 
+  const [clientError, setClientError] = useState<string | null>(null);
+  const error = state.error ?? clientError;
+
+  // The same rule the schema applies on the server, checked here first so a
+  // blank or punctuation-only name never becomes a round trip.
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    if (!nameLooksValid(value, MAX_NAME)) {
+      event.preventDefault();
+      setClientError("Enter a name — letters or numbers, up to 120 characters.");
+      return;
+    }
+    setClientError(null);
+    setValue("");
+  }
+
   return (
-    <form
-      action={formAction}
-      onSubmit={() => setValue("")}
-      className="space-y-2 pt-1"
-    >
+    <form action={formAction} onSubmit={handleSubmit} className="space-y-2 pt-1">
       {Object.entries(hidden ?? {}).map(([key, val]) => (
         <input key={key} type="hidden" name={key} value={val} />
       ))}
@@ -217,7 +232,7 @@ function AddRow({
           placeholder={placeholder}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          aria-invalid={state.fieldErrors[inputName] ? true : undefined}
+          aria-invalid={state.fieldErrors[inputName] || clientError ? true : undefined}
         />
         <Button type="submit" variant="outline" className="h-11" disabled={isPending}>
           <PlusIcon className="size-4" aria-hidden />
@@ -227,12 +242,12 @@ function AddRow({
       {state.fieldErrors[inputName] && (
         <p className="text-danger text-xs">{state.fieldErrors[inputName]}</p>
       )}
-      {state.error && (
+      {error && (
         <p
           role="alert"
           className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
         >
-          {state.error}
+          {error}
         </p>
       )}
       {state.ok && state.message && (

@@ -4,10 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
 import { weekCountEnd } from "@/lib/weeks";
 import {
-  METRICS,
   METRIC_KEYS,
   ZERO_COUNTS,
+  tallyVisitMetrics,
   type MetricCounts,
+  type TallyableVisit,
 } from "@/lib/validation/weekly";
 
 /**
@@ -88,36 +89,6 @@ function toRecord(row: RawRow): WeekRecord {
 /* Counting what happened                                              */
 /* ------------------------------------------------------------------ */
 
-interface VisitRow {
-  member: string;
-  activity: string;
-  lifecycle_status: string | null;
-}
-
-/**
- * Tallies one member's visits against the seven visit-sourced metrics.
- *
- * A row matches a metric when the activity agrees and, for the two activities
- * that have a lifecycle, the Set/Done status agrees too. A session that has
- * since been closed therefore moves from "set" to "done" — the same row, told
- * from a later point in time. That is what makes the two columns add up to the
- * number of sessions rather than double-counting each one.
- */
-function tallyVisits(visits: VisitRow[]): MetricCounts {
-  const counts = { ...ZERO_COUNTS };
-  for (const visit of visits) {
-    for (const metric of METRICS) {
-      if (metric.source !== "visits") continue;
-      if (metric.activity !== visit.activity) continue;
-      if (metric.lifecycle !== null && metric.lifecycle !== visit.lifecycle_status) {
-        continue;
-      }
-      counts[metric.key] += 1;
-    }
-  }
-  return counts;
-}
-
 /* ------------------------------------------------------------------ */
 /* One member                                                          */
 /* ------------------------------------------------------------------ */
@@ -167,7 +138,7 @@ export async function getWeek(
     return { ok: false };
   }
 
-  const achieved = tallyVisits(visitsResult.data ?? []);
+  const achieved = tallyVisitMetrics(visitsResult.data ?? []);
   achieved.meetings = plansResult.count ?? 0;
 
   return {
@@ -245,15 +216,15 @@ export async function getTeamWeek(
     heldByMember.set(row.member, (heldByMember.get(row.member) ?? 0) + 1);
   }
 
-  const visitsByMember = new Map<string, VisitRow[]>();
-  for (const row of (visitsResult.data ?? []) as VisitRow[]) {
+  const visitsByMember = new Map<string, TallyableVisit[]>();
+  for (const row of (visitsResult.data ?? []) as (TallyableVisit & { member: string })[]) {
     const list = visitsByMember.get(row.member);
     if (list) list.push(row);
     else visitsByMember.set(row.member, [row]);
   }
 
   const members = (profilesResult.data ?? []).map((profile) => {
-    const achieved = tallyVisits(visitsByMember.get(profile.id) ?? []);
+    const achieved = tallyVisitMetrics(visitsByMember.get(profile.id) ?? []);
     achieved.meetings = heldByMember.get(profile.id) ?? 0;
     return {
       member: profile.id,

@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { publicEnv } from "@/lib/env";
+import { COOKIE_OPTIONS } from "@/lib/supabase/cookies";
 
 /**
  * Refreshes the Supabase session for an incoming request.
@@ -12,8 +13,22 @@ import { publicEnv } from "@/lib/env";
  * Returns the response carrying any refreshed cookies together with the
  * verified user, so the caller can decide where to send the request.
  */
-export async function updateSession(request: NextRequest) {
-  let response = NextResponse.next({ request });
+export async function updateSession(
+  request: NextRequest,
+  /** Extra request headers to forward to the render, e.g. the CSP nonce. */
+  extraHeaders?: Record<string, string>,
+) {
+  // Rebuilt on demand rather than captured once: setAll() below mutates the
+  // request's cookies, and a stale copy would forward the old session.
+  const forwardHeaders = () => {
+    const headers = new Headers(request.headers);
+    for (const [key, value] of Object.entries(extraHeaders ?? {})) {
+      headers.set(key, value);
+    }
+    return headers;
+  };
+
+  let response = NextResponse.next({ request: { headers: forwardHeaders() } });
 
   const { NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY } = publicEnv();
 
@@ -21,6 +36,7 @@ export async function updateSession(request: NextRequest) {
     NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
+      cookieOptions: COOKIE_OPTIONS,
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -29,7 +45,7 @@ export async function updateSession(request: NextRequest) {
           for (const { name, value } of cookiesToSet) {
             request.cookies.set(name, value);
           }
-          response = NextResponse.next({ request });
+          response = NextResponse.next({ request: { headers: forwardHeaders() } });
           for (const { name, value, options } of cookiesToSet) {
             response.cookies.set(name, value, options);
           }
