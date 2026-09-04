@@ -310,6 +310,74 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(error?.code).toBe("FO007");
     });
 
+    it("refuses to change the photo on a visit that already has one", async (ctx) => {
+      if (!has0006) ctx.skip();
+      const made = await repA.db
+        .from("visits")
+        .insert({
+          institute_id: instituteId,
+          member: repA.id,
+          activity: "olympiad",
+          date: iso(),
+          photo_url: photoFor(repA.id),
+        })
+        .select("id")
+        .single();
+      if (made.error) throw new Error(`visit: ${made.error.message}`);
+
+      const swap = await repA.db
+        .from("visits")
+        .update({ photo_url: photoFor(repA.id) })
+        .eq("id", made.data.id)
+        .select("id");
+      expect(swap.error?.code).toBe("FO008");
+
+      // ...and not even for the service role, which gets past every policy.
+      const asAdmin = await admin
+        .from("visits")
+        .update({ photo_url: photoFor(repA.id) })
+        .eq("id", made.data.id)
+        .select("id");
+      expect(asAdmin.error?.code).toBe("FO008");
+
+      // An update that leaves the photo alone still works — this is the path
+      // the closing report takes, and breaking it would break completing a
+      // visit at all.
+      const elsewhere = await repA.db
+        .from("visits")
+        .update({ notes: `${TAG} edited elsewhere` })
+        .eq("id", made.data.id)
+        .select("id");
+      expect(elsewhere.error).toBeNull();
+
+      await admin.from("visits").delete().eq("id", made.data.id);
+    });
+
+    it("refuses to blank the photo out", async (ctx) => {
+      if (!has0006) ctx.skip();
+      const made = await repA.db
+        .from("visits")
+        .insert({
+          institute_id: instituteId,
+          member: repA.id,
+          activity: "olympiad",
+          date: iso(),
+          photo_url: photoFor(repA.id),
+        })
+        .select("id")
+        .single();
+      if (made.error) throw new Error(`visit: ${made.error.message}`);
+
+      const cleared = await repA.db
+        .from("visits")
+        .update({ photo_url: null })
+        .eq("id", made.data.id)
+        .select("id");
+      expect(cleared.error?.code).toBe("FO008");
+
+      await admin.from("visits").delete().eq("id", made.data.id);
+    });
+
     it("accepts the same visit once it carries a photo", async (ctx) => {
       if (!has0006) ctx.skip();
       const { data, error } = await repA.db

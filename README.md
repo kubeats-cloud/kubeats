@@ -90,7 +90,7 @@ Editor → New query → paste the whole file → Run). They are idempotent.
 | `0003_photo_retention.sql` | The 30-day photo retention window, its audit table and the purge function. | Yes |
 | `0004_photo_retention_schedule.sql` | Enables pg_cron and pg_net, stores credentials in Vault, schedules the nightly purge. | Optional — without it photos are never deleted automatically |
 | `0005_closing_report_and_assignment.sql` | The closing report's columns, `visit_people`, and admin-assigned plan entries. | Yes |
-| `0006_photo_required.sql` | Rule 12 — makes the visit photo mandatory: `log_visit()` raises `FO007`, and the `visits_photo_required` CHECK refuses a direct insert. | Yes |
+| `0006_photo_required.sql` | Rule 12 — makes the visit photo mandatory and final: `log_visit()` raises `FO007`, the `visits_photo_required` CHECK refuses a direct insert, and the `visits_photo_final` trigger raises `FO008` on any later change to `photo_url`. | Yes |
 
 > **0004 has two placeholders you must fill in — in the SQL editor only.**
 > Lines 51 and 52 take your project URL and your service_role key. Paste them

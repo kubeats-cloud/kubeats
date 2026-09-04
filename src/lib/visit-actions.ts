@@ -35,6 +35,7 @@ const RPC_MESSAGES: Record<string, string> = {
   FO005: "That entry is no longer on today's plan. Add it again on the Dashboard.",
   FO006: "That institute no longer exists.",
   FO007: "A photo is required to log this visit.",
+  FO008: "The photo was taken during the visit and cannot be changed afterwards.",
 };
 
 async function requireUser() {

@@ -26,7 +26,7 @@ export interface PreparedPhoto {
   bytes: number;
 }
 
-async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
+async function loadBitmap(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   if (typeof createImageBitmap === "function") {
     try {
       return await createImageBitmap(file);
@@ -57,7 +57,8 @@ function formatCoords(stamp: PhotoStamp): string {
 }
 
 export async function preparePhoto(
-  file: File,
+  /** A picked file, or a frame captured from the in-app camera. */
+  file: Blob,
   stamp: PhotoStamp,
 ): Promise<PreparedPhoto> {
   const source = await loadBitmap(file);
@@ -80,7 +81,7 @@ export async function preparePhoto(
 
   // --- the stamp -----------------------------------------------------------
   const lines = [
-    "FIELD OPS",
+    "KUbeats",
     formatCoords(stamp),
     stamp.takenAt.toLocaleString(),
   ];

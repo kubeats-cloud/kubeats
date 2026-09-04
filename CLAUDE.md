@@ -122,6 +122,18 @@ Concretely, and true as of Phase 9:
   and the `visits_photo_required` CHECK, which is the one that holds against a
   direct insert. The geo-tag beside it is deliberately NOT required — a denied
   GPS permission still saves, because a rep with no signal must not be stuck.
+- The photo arrives one of two ways, both in `CaptureFields`: the in-app camera
+  (`getUserMedia`, rear-facing by default, in `camera-capture.tsx`) or a file
+  from the device. Whichever it is, the coordinates stamped into the image are
+  read **at the moment of attaching**, not at page load — browsers strip EXIF
+  geotags, so a live reading is both the only option and the harder one to fake.
+  If `getUserMedia` is unavailable or refused, it falls back to the native
+  `capture="environment"` input; there is no desktop webcam path beyond that.
+- `photo_url` is written once and never again — the `visits_photo_final` trigger
+  (0006) raises `FO008` on any UPDATE that changes it, for the service role too.
+  Written as "any change at all" rather than "any change after `closed_at`" on
+  purpose: a meeting never gets a `closed_at`, so the narrower rule would leave
+  every meeting's evidence editable forever.
 - A locked week freezes the COMMITTED TARGETS, nothing else. The achieved
   column stays live: it is recomputed from `daily_plans` and `visits` on every
   read, so closing an old "Set" loop moves that row from Sessions Set to

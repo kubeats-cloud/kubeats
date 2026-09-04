@@ -1,5 +1,5 @@
 -- =============================================================================
--- KUbeats — migration 0006: the proof photo becomes mandatory
+-- KUbeats — migration 0006: the proof photo becomes mandatory, and final
 --
 -- Every visit now requires a photograph. A visit without one is not evidence
 -- that anybody went anywhere, so this closes the last way to record one.
@@ -32,8 +32,19 @@
 --     ... restore ...
 --     (re-run this file)
 --
+-- IT IS ALSO FINAL
+--   A photo is attached while the visit is being logged and never afterwards.
+--   The trigger at the bottom refuses any UPDATE that changes photo_url, so a
+--   completed visit's evidence cannot be swapped, and a photo cannot be
+--   back-filled onto a past visit. It applies to the service role too - like
+--   the meeting gate, no key gets past it.
+--
+--   For genuine data repair, drop it, fix the row, and re-run this file:
+--     drop trigger visits_photo_final on public.visits;
+--
 -- ERROR CODES
---   FO007  no photo was supplied   (Rule 12)
+--   FO007  no photo was supplied            (Rule 12)
+--   FO008  photo_url changed after the fact (Rule 12, the timing lock)
 --   FO001-FO006 are unchanged; see 0002_log_visit_rpc.sql.
 -- =============================================================================
 
@@ -215,4 +226,56 @@ $do$;
 --     p_institute_id := (select id from public.institutes limit 1),
 --     p_activity     := 'olympiad'
 --   );
+-- -----------------------------------------------------------------------------
+
+-- -----------------------------------------------------------------------------
+-- 3. The timing lock: photo_url is written once and never again.
+--
+-- The photo belongs to the moment of the visit. Allowing it to change later
+-- would mean a rep could log a visit with any picture and quietly replace it
+-- afterwards, which empties the evidence of its meaning.
+--
+-- Written as "any change at all" rather than "any change once closed_at is
+-- set", deliberately and more strictly than it needs to be:
+--
+--   * a meeting never gets closed_at - it is complete the moment it is logged -
+--     so a rule keyed on closed_at would leave every meeting's photo editable
+--     forever, which is the opposite of the intent;
+--   * nothing in the application updates photo_url at all, so there is no
+--     legitimate write this refuses.
+--
+-- SECURITY INVOKER is wrong here: this must hold whoever is writing.
+-- -----------------------------------------------------------------------------
+
+create or replace function public.guard_photo_final()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if new.photo_url is distinct from old.photo_url then
+    raise exception 'The photo was taken during the visit and cannot be changed afterwards.'
+      using errcode = 'FO008';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists visits_photo_final on public.visits;
+
+create trigger visits_photo_final
+  before update of photo_url on public.visits
+  for each row
+  execute function public.guard_photo_final();
+
+-- -----------------------------------------------------------------------------
+-- Check it took:
+--
+--   select tgname from pg_trigger
+--    where tgrelid = 'public.visits'::regclass and not tgisinternal;
+--   -- expect visits_photo_final alongside the meeting-gate trigger
+--
+--   -- and this must fail with FO008, even as the service role:
+--   update public.visits set photo_url = 'someone-else/x.jpg'
+--    where id = (select id from public.visits limit 1);
 -- -----------------------------------------------------------------------------
