@@ -76,6 +76,32 @@ Dark mode: `@custom-variant dark` is defined but no `.dark` palette exists, so
 `dark:` utilities inside shadcn components never fire. Adding a `.dark { … }`
 block in `globals.css` is the extension point if v2 wants it.
 
+## Portability
+
+This app must stay movable: hosted Supabase today, a client's self-hosted
+Supabase or plain Postgres later, on any host that runs a Node server.
+
+**The rule: no host-specific API may appear in application code.** No edge
+runtime, no platform SDK, no `process.env.VERCEL_*` / `CF_*`, no provider image
+loader, no KV or queue binding reached from a component or an action. If a
+platform needs something, it goes in config or a thin adapter module — one file,
+named for the platform — and the app keeps talking to its own interface.
+
+Concretely, and true as of Phase 9:
+
+- Every environment variable is read in `src/lib/env.ts` and nowhere else, apart
+  from `NODE_ENV`. Adding a `process.env.SOMETHING` read anywhere else is the
+  thing this rule exists to stop.
+- The Supabase origin is derived from `NEXT_PUBLIC_SUPABASE_URL` — including in
+  the CSP — so pointing at a self-hosted instance is a variable change, never a
+  code change. No hostname is written down in `src/`.
+- Everything the database needs lives in `supabase/migrations/`. What those
+  migrations cannot carry — auth users, storage objects, the Vault secret and
+  the cron schedule — is listed in `docs/BACKUP-RESTORE.md`, which is the
+  document to update if that list ever changes.
+- `NEXT_PUBLIC_*` values are inlined at build time, so moving projects means a
+  rebuild, not just a restart. That is a deployment fact, not a code smell.
+
 ## Engineering notes
 
 - Next.js 16: `cookies()` is async-only, and middleware is now `proxy.ts`

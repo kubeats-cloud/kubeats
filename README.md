@@ -200,6 +200,26 @@ A path whose file has gone renders a small "Photo expired" placeholder, never a
 broken image or an error, and anything else that displays a photo must do the
 same.
 
+## Backups and moving hosts
+
+```bash
+npm run backup                 # → ./backups/<timestamp>/  (rows, users, photos)
+npm run backup -- --no-photos  # faster, rows and users only
+```
+
+Four things hold state and they move differently: table rows, auth users (not
+just rows — and password hashes need a SQL-level dump), the photo files in the
+private bucket, and the Vault secret plus cron job from migration `0004`, which
+cannot be exported at all and must be re-created by re-running that migration.
+
+**[docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md)** is the runbook: scheduling a
+routine backup, the `pg_dump` commands for a real move, the restore order and
+what breaks when a step is skipped, pointing the app at a new project, and what
+running on plain Postgres would and would not give you. It also states plainly
+which steps have been executed and which you would be the first to run.
+
+`backups/` is git-ignored and contains personal data. Store it accordingly.
+
 ## Troubleshooting
 
 **"Missing public environment variables" on startup.** `.env.local` is absent or
