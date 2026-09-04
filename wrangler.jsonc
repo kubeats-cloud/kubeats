@@ -1,0 +1,41 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // KUbeats on Cloudflare Workers.
+  //
+  // The app itself knows nothing about Cloudflare — no platform imports, no
+  // runtime checks, no bindings reached from a component or an action. This
+  // file and open-next.config.ts are the whole of the platform coupling, which
+  // is what CLAUDE.md's portability rule asks for.
+  "name": "kubeats",
+  "main": ".open-next/worker.js",
+
+  // Pin the runtime. Cloudflare only enables newer behaviour on or after this
+  // date, so a deploy months from now behaves the way this one does.
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": [
+    // Next's server needs Node built-ins — Buffer, crypto, streams. Without
+    // this flag the Worker fails at import time, not at request time, so the
+    // symptom is an entire deployment that will not boot.
+    "nodejs_compat",
+    // Keeps fetch() to the public internet rather than looping back into the
+    // Worker, which is what the adapter expects.
+    "global_fetch_strictly_public"
+  ],
+
+  // The static half of the build: /_next/static, the brand images, the icons.
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+
+  // Deliberately absent:
+  //   r2_buckets + WORKER_SELF_REFERENCE — the incremental cache, which this
+  //     app has no use for while every route is dynamic.
+  //   images — next/image is set to `unoptimized`, so there is no resizing
+  //     service to bind. Both brand assets are already sized for their slot.
+}

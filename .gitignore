@@ -43,3 +43,10 @@ next-env.d.ts
 
 # Data backups — never commit customer data
 backups/
+
+# Cloudflare adapter output
+.open-next/
+.wrangler/
+# Local Worker secrets for `wrangler dev` — same rule as .env.local
+.dev.vars
+.dev.vars.*

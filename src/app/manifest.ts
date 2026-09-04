@@ -14,7 +14,7 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#ffffff",
     theme_color: "#c0341c",
     icons: [
-      { src: "/brand/kubeats-mark.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/brand/kubeats-icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
       { src: "/icon.png", sizes: "192x192", type: "image/png" },
     ],
   };

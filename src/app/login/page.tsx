@@ -36,8 +36,8 @@ export default async function LoginPage(props: PageProps<"/login">) {
           <Image
             src="/brand/kubeats-logo-transparent.png"
             alt="KUbeats — For a smarter KU"
-            width={1004}
-            height={747}
+            width={600}
+            height={446}
             priority
             className="h-auto w-56 max-w-full"
           />
