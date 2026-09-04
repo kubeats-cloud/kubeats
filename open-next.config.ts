@@ -14,4 +14,23 @@ import { defineCloudflareConfig } from "@opennextjs/cloudflare";
  * https://opennext.js.org/cloudflare/caching — and give it a bucket in
  * wrangler.jsonc.
  */
-export default defineCloudflareConfig();
+const config = {
+  ...defineCloudflareConfig(),
+
+  /**
+   * `npm run build` IS the adapter build, so that Cloudflare's default build
+   * command produces a Worker without anyone configuring anything. The adapter
+   * in turn builds Next by running a script from this package.json — and if
+   * that were `build`, it would invoke itself forever. So point it at the plain
+   * Next build.
+   *
+   * It has to stay the adapter's child process rather than a step we chain
+   * ourselves: the adapter sets NEXT_PRIVATE_STANDALONE before running this,
+   * which is what produces the `.next/standalone` output it then bundles.
+   * Running `next build` first and passing `--skipNextBuild` skips that, and
+   * the bundle step fails looking for files standalone mode would have written.
+   */
+  buildCommand: "npm run build:next",
+};
+
+export default config;

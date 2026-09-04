@@ -46,5 +46,8 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build
+      # The deployable artefact, not just `next build`: this is the step that
+      # catches an adapter-level break (a missing esbuild, an incompatible
+      # Next version) here rather than on the host's build machine.
+      - name: Build Worker
         run: npm run build

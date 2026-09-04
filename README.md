@@ -131,11 +131,18 @@ to be made by hand.
 
 ```bash
 npm run dev        # http://localhost:3000
-npm run build      # production build
+npm run build:next # plain Next production build
 npm start          # serve the build
-npm run check      # lint + type-check + build, the whole gate
+npm run check      # lint + type-check + build:next, the whole gate
 npm test           # unit tests, plus integration tests if .env.local is set
+npm run build      # Next build + Cloudflare Worker bundle (what the host runs)
 ```
+
+`build` and `build:next` differ only in what comes out. `build:next` is the
+ordinary Next build and is what the local gate and any Node host use. `build`
+runs the OpenNext adapter, which runs `build:next` for you in standalone mode
+and then bundles the result into `.open-next/worker.js`. Use it when you want
+the artefact Cloudflare deploys; use `check` for a fast local pass.
 
 `GET /api/health` returns `{"status":"ok","checks":{"database":"ok"}}` with a
 200, or 503 if the database is unreachable. It needs no session, returns no
@@ -166,7 +173,8 @@ a database message reach the browser.
 
 ## Deployment
 
-Any host that runs a Node server works; Vercel is the path of least resistance.
+Any host that runs a Node server works. Cloudflare Workers is what this repo is
+configured for; nothing in `src/` knows that.
 
 1. Push to GitHub. The CI workflow runs lint, type-check, tests and build on
    every push.
@@ -177,7 +185,31 @@ Any host that runs a Node server works; Vercel is the path of least resistance.
 5. In Supabase → Authentication → URL Configuration, set the Site URL to your
    deployed origin.
 
-`npm run build` output is entirely dynamic (`ƒ`): every route reads the session,
+### Cloudflare Workers
+
+No dashboard build command is needed — the default `npm run build` is the
+adapter build, and `wrangler.jsonc` tells Wrangler where the output is. Leave
+the build command field empty and set the deploy command to `npx wrangler
+deploy` (its default).
+
+Locally:
+
+```bash
+npm run cf:preview   # build, then serve the Worker on workerd
+npm run cf:deploy    # build, then wrangler deploy
+```
+
+Two files hold everything platform-specific: `wrangler.jsonc` (Worker name,
+compatibility flags, the assets binding) and `open-next.config.ts`. Moving to a
+Node host means deleting them and running `build:next` instead.
+
+### Deploying somewhere that isn't Cloudflare
+
+Set the host's build command to `npm run build:next` and its start command to
+`npm start`. `build` would still succeed, but it produces a Worker bundle the
+host has no use for.
+
+The build output is entirely dynamic (`ƒ`): every route reads the session,
 so nothing is prerendered and no page is cached across users.
 
 **Serve it over HTTPS.** The session cookie is marked `Secure` in production,
