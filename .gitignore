@@ -50,3 +50,12 @@ backups/
 # Local Worker secrets for `wrangler dev` — same rule as .env.local
 .dev.vars
 .dev.vars.*
+
+# Throwaway verification harnesses. They read .env.local at runtime and hold no
+# secrets themselves, but they are not part of the app and one already reached a
+# commit by way of `git add -A`.
+_s4*
+_v12*
+_check.mjs
+_rules.mjs
+_sess.mjs
