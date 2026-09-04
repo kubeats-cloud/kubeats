@@ -87,6 +87,18 @@ export function publicEnv(): PublicEnv {
   return cachedPublic;
 }
 
+/**
+ * Optional: a contact string for the User-Agent the place lookup sends to
+ * OpenStreetMap, whose usage policy asks for one. Optional rather than
+ * required because a deployment that never reaches Nominatim — a self-hosted
+ * instance behind a firewall, say — should not fail to boot over a courtesy
+ * header. Read here because this file is the only place that reads env.
+ */
+export function placeLookupContact(): string | null {
+  const value = process.env.PLACE_LOOKUP_CONTACT;
+  return value && value.trim() !== "" ? value.trim() : null;
+}
+
 let cachedServer: ServerEnv | undefined;
 
 /**

@@ -53,6 +53,29 @@ const has0005 = configured
       .then(({ error }) => !error)
   : false;
 
+/**
+ * Migration 0007 adds the reverse-geocoding cache. Probed the same way as 0005:
+ * a project without it skips these loudly rather than failing.
+ */
+const has0007 = configured
+  ? await admin
+      .from("place_cache")
+      .select("cell")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0007) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0007 is not applied to this project.",
+      "    The place-cache suite is being SKIPPED, not passing.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
 if (configured && !has0005) {
   console.warn(
     [
@@ -260,6 +283,57 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         date: iso(1),
       });
       expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0007)("place_cache — the reverse-geocoding cache", () => {
+    const cell = "23.0225,72.5714";
+
+    afterAll(async () => {
+      if (has0007) await admin.from("place_cache").delete().eq("cell", cell);
+    });
+
+    it("lets any signed-in rep read it — it is shared, not personal", async () => {
+      await admin.from("place_cache").upsert({ cell, label: `${TAG} Bopal, Ahmedabad` });
+      const { data, error } = await repA.db.from("place_cache").select("label").eq("cell", cell);
+      expect(error).toBeNull();
+      expect(data?.[0]?.label).toContain("Bopal");
+    });
+
+    it("refuses a write from a rep, so one cannot poison what the team sees", async () => {
+      const { error } = await repA.db
+        .from("place_cache")
+        .upsert({ cell: "1.0000,1.0000", label: `${TAG} forged` })
+        .select();
+      // Either refused outright, or filtered to nothing by the policy.
+      const { data: after } = await admin
+        .from("place_cache")
+        .select("cell")
+        .eq("cell", "1.0000,1.0000");
+      expect(error !== null || (after ?? []).length === 0).toBe(true);
+    });
+
+    it("accepts the shape cellFor produces, and rejects anything else", async () => {
+      const good = await admin
+        .from("place_cache")
+        .upsert({ cell: "-33.8688,-151.2093", label: `${TAG} Sydney` })
+        .select();
+      expect(good.error).toBeNull();
+      await admin.from("place_cache").delete().eq("cell", "-33.8688,-151.2093");
+
+      const bad = await admin.from("place_cache").upsert({ cell: "not-a-cell" }).select();
+      expect(bad.error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("remembers a lookup that found nothing, so we stop asking", async () => {
+      const empty = "0.0000,0.0000";
+      const { error } = await admin.from("place_cache").upsert({ cell: empty, label: null }).select();
+      expect(error).toBeNull();
+      const { data } = await admin.from("place_cache").select("label").eq("cell", empty).single();
+      expect(data?.label).toBeNull();
+      await admin.from("place_cache").delete().eq("cell", empty);
     });
   });
 

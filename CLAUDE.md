@@ -129,6 +129,18 @@ Concretely, and true as of Phase 9:
   geotags, so a live reading is both the only option and the harder one to fake.
   If `getUserMedia` is unavailable or refused, it falls back to the native
   `capture="environment"` input; there is no desktop webcam path beyond that.
+- The stamp carries an approximate area name under the coordinates, from
+  OpenStreetMap's Nominatim via `/api/place` (server-side, so the User-Agent
+  their policy asks for can be set and the answer cached in `place_cache`,
+  migration 0007). It is decoration and is treated as such: a 3.5s timeout on
+  the route, a 4s abort in the browser, and any failure simply omits the line.
+  The coordinates and the time are never replaced by it, and no visit has ever
+  failed to save because a place could not be named.
+- The area name is deliberately NOT stored on `visits`. It is already burned
+  into that visit's photograph, and `place_cache` can be joined on the rounded
+  coordinates to recover it — see the query at the foot of 0007. A column would
+  be a third copy of the same fact, and would mean redefining `log_visit()` for
+  a convenience label.
 - `photo_url` is written once and never again — the `visits_photo_final` trigger
   (0006) raises `FO008` on any UPDATE that changes it, for the service role too.
   Written as "any change at all" rather than "any change after `closed_at`" on

@@ -53,6 +53,13 @@ type PhotoState =
   | { status: "ready"; path: string; previewUrl: string; bytes: number }
   | { status: "failed"; message: string };
 
+/**
+ * The client-side guard on the area-name lookup. The route already gives up
+ * after 3.5s; this is a hair longer, and only exists so a route that never
+ * answers at all cannot hold a photo hostage.
+ */
+const PLACE_TIMEOUT_MS = 4000;
+
 const GEO_MESSAGES: Record<number, string> = {
   1: "Location permission was denied. You can still save the visit.",
   2: "Your location is not available right now. You can still save the visit.",
@@ -150,6 +157,35 @@ export function CaptureFields({ userId }: { userId: string }) {
     });
   }, [applyFix]);
 
+  /**
+   * An approximate area name for the stamp, or null. Never throws, never waits
+   * long, and is never a reason a photo does not happen: the server route has
+   * its own timeout, and this one guards against the route itself hanging. If
+   * anything at all goes wrong the stamp simply carries the coordinates and the
+   * time, exactly as it did before this line existed.
+   */
+  const namePlace = useCallback(async (fix: Fix | null): Promise<string | null> => {
+    if (!fix) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PLACE_TIMEOUT_MS);
+    try {
+      const response = await fetch("/api/place", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latitude: fix.latitude, longitude: fix.longitude }),
+        signal: controller.signal,
+      });
+      if (!response.ok) return null;
+      const body = (await response.json()) as { ok: boolean; label?: string | null };
+      return body.ok ? (body.label ?? null) : null;
+    } catch {
+      // Aborted, offline, or the route is unhappy. All the same to us.
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }, []);
+
   /** The single path every photo takes, from either button. */
   const processAndUpload = useCallback(
     async (image: Blob) => {
@@ -157,11 +193,15 @@ export function CaptureFields({ userId }: { userId: string }) {
         setPhoto({ status: "working", step: "Reading your location…" });
         const fix = await freshFix();
 
+        setPhoto({ status: "working", step: "Naming the area…" });
+        const place = await namePlace(fix);
+
         setPhoto({ status: "working", step: "Stamping…" });
         const prepared = await preparePhoto(image, {
           latitude: fix?.latitude ?? null,
           longitude: fix?.longitude ?? null,
           takenAt: new Date(),
+          place,
         });
 
         setPhoto({ status: "working", step: "Uploading…" });
@@ -199,7 +239,7 @@ export function CaptureFields({ userId }: { userId: string }) {
         });
       }
     },
-    [freshFix, userId],
+    [freshFix, namePlace, userId],
   );
 
   async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {

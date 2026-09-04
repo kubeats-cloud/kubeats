@@ -17,6 +17,14 @@ export interface PhotoStamp {
   latitude: number | null;
   longitude: number | null;
   takenAt: Date;
+  /**
+   * An approximate area name, when one could be found. Additional to the
+   * coordinates and never a substitute: the numbers are the record, this is
+   * the line a person can read. Null omits it entirely rather than printing a
+   * placeholder, so a photo taken where the lookup failed simply looks like a
+   * photo taken before this existed.
+   */
+  place?: string | null;
 }
 
 export interface PreparedPhoto {
@@ -80,9 +88,11 @@ export async function preparePhoto(
   if ("close" in source) source.close();
 
   // --- the stamp -----------------------------------------------------------
+  const place = stamp.place?.trim();
   const lines = [
     "KUbeats",
     formatCoords(stamp),
+    ...(place ? [place] : []),
     stamp.takenAt.toLocaleString(),
   ];
 
