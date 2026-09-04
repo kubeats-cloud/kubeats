@@ -86,3 +86,13 @@ block in `globals.css` is the extension point if v2 wants it.
   database as RLS and triggers, not only in the UI.
 - Validate every input on both client and server. Never surface stack traces,
   SQL or secrets to users.
+- A write that touches more than one table goes through a Postgres function so
+  it is one transaction. Saving a visit is `public.log_visit()` (migration
+  0002); it runs SECURITY INVOKER, so RLS and every trigger still apply. It
+  raises `FO001`-`FO006` for the cases a rep can cause, and `src/lib/visit-actions.ts`
+  maps those codes — never the message text — to sentences.
+- Visit photos are deleted automatically after
+  `public.visit_photo_retention_days()` days (migration 0003, scheduled in
+  0004). The visit rows, coordinates and timestamps are kept forever, so a row
+  older than the window still has a `photo_url` whose file is gone: anything
+  that displays a photo must treat a missing object as "expired", not an error.

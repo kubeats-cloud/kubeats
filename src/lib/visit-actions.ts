@@ -11,13 +11,26 @@ import {
   completionSchema,
   dailyPlanFormDataToInput,
   dailyPlanSchema,
-  hasLifecycle,
   visitFieldErrors,
   visitFormDataToInput,
   visitSchema,
 } from "@/lib/validation/visit";
 
 const CHECK_VIOLATION = "23514";
+
+/**
+ * The SQLSTATEs log_visit() raises for the cases a rep can actually cause.
+ * Mapping on the code rather than the message means the wording lives here, in
+ * one place, and no database text ever reaches the browser.
+ */
+const RPC_MESSAGES: Record<string, string> = {
+  FO001: "That institute is not on today's plan. Add it on the Dashboard, then log the meeting.",
+  FO002: "That meeting is already marked as held.",
+  FO003: "That photo could not be attached.",
+  FO004: "Your session has expired. Please sign in again.",
+  FO005: "That entry is no longer on today's plan. Add it again on the Dashboard.",
+  FO006: "That institute no longer exists.",
+};
 
 async function requireUser() {
   const supabase = await createClient();
@@ -134,115 +147,48 @@ export async function createVisit(
     return { error: "That photo could not be attached.", fieldErrors: {} };
   }
 
-  const today = todayISO();
-  const lifecycle = hasLifecycle(input.activity);
-  const isSet = lifecycle && input.lifecycle_status === "Set";
-
-  // Rule 2 — re-check the gate here so the rep gets a sentence rather than a
-  // constraint. The trigger is still the authority; this is the friendly path.
-  if (input.activity === "meeting") {
-    const { data: plan, error } = await supabase
-      .from("daily_plans")
-      .select("id, institute_id, meetings_actual")
-      .eq("id", input.daily_plan_id ?? "")
-      .eq("member", user.id)
-      .eq("date", today)
-      .maybeSingle();
-
-    if (error) logError("visit:plan-lookup", error);
-
-    if (!plan || plan.institute_id !== input.institute_id) {
-      return {
-        error:
-          "That institute is not on today's plan. Add it on the Dashboard, then log the meeting.",
-        fieldErrors: {},
-      };
-    }
-    if (plan.meetings_actual !== null) {
-      return {
-        error: "That meeting is already marked as held.",
-        fieldErrors: {},
-      };
-    }
-  }
-
-  const { error: insertError } = await supabase.from("visits").insert({
-    institute_id: input.institute_id,
-    member: user.id,
-    activity: input.activity,
-    lifecycle_status: lifecycle ? input.lifecycle_status : null,
-    // `date` is always the day the work was done — the day the rep logged it.
-    // A "Set" session's future date lives in expected_date alone, because the
-    // weekly rollup counts by `date`: a session fixed today must earn its
-    // "set" credit in this week, not in the week it is expected to happen.
-    date: today,
-    expected_date: isSet ? input.expected_date : null,
-    latitude: input.latitude,
-    longitude: input.longitude,
-    photo_url: input.photo_path,
-    notes: input.notes,
-    status_set_to: input.status_set_to,
-    follow_up_date: input.follow_up_date,
-    follow_up_time: input.follow_up_time,
+  // One call, one transaction. The RPC inserts the visit, marks today's plan
+  // entry held and updates the institute's status together, so a failure part
+  // way through leaves nothing behind. Its rule checks run inside that
+  // transaction alongside the meeting-gate trigger — see
+  // supabase/migrations/0002_log_visit_rpc.sql.
+  const { error } = await supabase.rpc("log_visit", {
+    p_institute_id: input.institute_id,
+    p_activity: input.activity,
+    p_lifecycle_status: input.lifecycle_status,
+    p_expected_date: input.expected_date,
+    p_latitude: input.latitude,
+    p_longitude: input.longitude,
+    p_photo_url: input.photo_path,
+    p_notes: input.notes,
+    p_status_set_to: input.status_set_to,
+    p_follow_up_date: input.follow_up_date,
+    p_follow_up_time: input.follow_up_time,
+    p_daily_plan_id: input.daily_plan_id,
   });
 
-  if (insertError) {
-    logError("visit:create", insertError);
+  if (error) {
+    logError("visit:create", error);
 
-    // The meeting-gate trigger raises check_violation. Everything we can
-    // recognise gets its own sentence; nothing raw reaches the browser.
-    if (insertError.code === CHECK_VIOLATION && input.activity === "meeting") {
+    const known = RPC_MESSAGES[error.code ?? ""];
+    if (known) return { error: known, fieldErrors: {} };
+
+    // The gate trigger is the backstop behind FO001: it raises check_violation,
+    // and so do the lifecycle and follow-up constraints.
+    if (error.code === CHECK_VIOLATION) {
       return {
         error:
-          "A meeting can only be logged for an institute on today's plan. Add it on the Dashboard first.",
+          input.activity === "meeting"
+            ? "A meeting can only be logged for an institute on today's plan. Add it on the Dashboard first."
+            : "That combination is not allowed. Please check the dates and status.",
         fieldErrors: {},
       };
     }
+
     return {
-      error: toFriendlyMessage(insertError, "We could not save this visit. Please try again."),
+      error: toFriendlyMessage(error, "We could not save this visit. Please try again."),
       fieldErrors: {},
     };
-  }
-
-  // Rule 7 — the weekly Meetings figure is counted from the plan, so marking it
-  // held is what makes the visit count.
-  if (input.activity === "meeting" && input.daily_plan_id) {
-    const { error } = await supabase
-      .from("daily_plans")
-      .update({
-        meetings_actual: 1,
-        follow_up_date: input.follow_up_date,
-      })
-      .eq("id", input.daily_plan_id)
-      .eq("member", user.id);
-
-    if (error) {
-      // The visit is saved; only the plan flag is behind. Say so plainly rather
-      // than implying the whole thing failed.
-      logError("visit:mark-held", error);
-      return {
-        error:
-          "The visit was saved, but today's plan could not be marked as held. Please try marking it again from the Dashboard.",
-        fieldErrors: {},
-      };
-    }
-  }
-
-  // Rule 4 — status is set by hand, and the trigger stamps who and when.
-  if (input.status_set_to) {
-    const { error } = await supabase
-      .from("institutes")
-      .update({ status: input.status_set_to })
-      .eq("id", input.institute_id);
-
-    if (error) {
-      logError("visit:status", error);
-      return {
-        error:
-          "The visit was saved, but the institute's status could not be updated. You can set it on the next visit.",
-        fieldErrors: {},
-      };
-    }
   }
 
   revalidatePath("/");
