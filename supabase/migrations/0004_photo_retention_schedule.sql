@@ -32,29 +32,69 @@ create extension if not exists pg_net;
 -- Vault keeps it encrypted at rest; only the SECURITY DEFINER purge function
 -- reads it, and that function is callable by nobody but the scheduler.
 --
--- REPLACE both placeholders below:
---   PROJECT_URL_HERE       Dashboard -> Project Settings -> Data API -> Project URL
---                          e.g. https://abcdefghijklm.supabase.co
---   SERVICE_ROLE_KEY_HERE  Dashboard -> Project Settings -> API Keys -> service_role
+-- EDIT EXACTLY TWO THINGS: the text between the quotes on the two lines marked
+-- <<< below. Do not use find-and-replace on this file — the words project_url
+-- and service_role_key appear elsewhere as the names the secrets are stored
+-- under, and overwriting those breaks the purge in a way you would not notice
+-- until a month from now.
+--
+-- Paste into the Supabase SQL editor, fill the two values in THERE, and run it
+-- there. The copy in the repo keeps its placeholders.
+--
+--   project URL       Dashboard -> Project Settings -> Data API -> Project URL
+--                     looks like https://abcdefghijklm.supabase.co
+--   service_role key  Dashboard -> Project Settings -> API Keys -> service_role
+--                     a long token beginning eyJ
 -- -----------------------------------------------------------------------------
 do $$
 declare
-  c_project_url text := 'PROJECT_URL_HERE';
-  c_service_key text := 'SERVICE_ROLE_KEY_HERE';
+  v_url text := 'paste project URL between these quotes';    -- <<< EDIT THIS LINE
+  v_key text := 'paste service_role key between these quotes'; -- <<< EDIT THIS LINE
+  v_id  uuid;
 begin
-  if c_project_url = 'PROJECT_URL_HERE' or c_service_key = 'SERVICE_ROLE_KEY_HERE' then
-    raise exception 'Replace the two placeholders in STEP 2 before running this file.';
+  -- Checked by shape rather than by comparing against the placeholder text, so
+  -- that a careless find-and-replace cannot switch the guard off along with it.
+  v_url := rtrim(btrim(v_url), '/');
+  v_key := btrim(v_key);
+
+  if v_url !~ '^https://[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$' then  -- a host, not prose
+    raise exception
+      'STEP 2: v_url is not a Supabase project URL. Expected https://<ref>.supabase.co';
   end if;
 
-  -- create_secret fails on a duplicate name, so clear any previous value first.
-  delete from vault.secrets where name in ('project_url', 'service_role_key');
+  if v_key !~ '^eyJ' or length(v_key) < 100 then
+    raise exception
+      'STEP 2: v_key is not a service_role key. Expected a long token beginning eyJ';
+  end if;
 
-  perform vault.create_secret(
-    c_project_url, 'project_url',
-    'Field Ops: Storage API base URL, used by purge_old_visit_photos()');
-  perform vault.create_secret(
-    c_service_key, 'service_role_key',
-    'Field Ops: used only by purge_old_visit_photos()');
+  -- Update in place when the secret already exists; create_secret rejects a
+  -- duplicate name, and this file is meant to be safe to re-run.
+  select id into v_id from vault.secrets where name = 'project_url';
+  if v_id is null then
+    perform vault.create_secret(v_url, 'project_url',
+      'Field Ops: Storage API base URL, used by purge_old_visit_photos()');
+  else
+    perform vault.update_secret(v_id, v_url, 'project_url',
+      'Field Ops: Storage API base URL, used by purge_old_visit_photos()');
+  end if;
+
+  select id into v_id from vault.secrets where name = 'service_role_key';
+  if v_id is null then
+    perform vault.create_secret(v_key, 'service_role_key',
+      'Field Ops: used only by purge_old_visit_photos()');
+  else
+    perform vault.update_secret(v_id, v_key, 'service_role_key',
+      'Field Ops: used only by purge_old_visit_photos()');
+  end if;
+
+  -- Prove the purge function will actually find them, under exactly the names
+  -- it looks for. If a rename slipped in, fail here rather than a month from
+  -- now when the first photo fails to expire.
+  if not exists (select 1 from vault.decrypted_secrets where name = 'project_url')
+     or not exists (select 1 from vault.decrypted_secrets where name = 'service_role_key') then
+    raise exception
+      'The secrets did not land under the names project_url and service_role_key.';
+  end if;
 end $$;
 
 
