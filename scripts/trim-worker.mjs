@@ -33,7 +33,8 @@
  *
  * If the app ever does use @vercel/og this stops and changes nothing.
  */
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const MIDDLEWARE = ".open-next/middleware/handler.mjs";
 const SERVER = ".open-next/server-functions/default/handler.mjs";
@@ -83,3 +84,104 @@ console.log(
   `trim-worker: removed @vercel/og wasm imports from the middleware bundle ` +
     `(${(before - after) / 1024} KiB of source, ~1.4 MiB of wasm Wrangler will no longer upload).`,
 );
+
+guardServiceRoleKey();
+
+/**
+ * Refuses to finish a build that would ship the service-role key.
+ *
+ * The adapter writes the whole environment into
+ * `.open-next/cloudflare/next-env.mjs` as plaintext string literals, and esbuild
+ * copies that into `worker.js.map`. Neither is uploaded today — Wrangler only
+ * sends `worker.js` and `.open-next/assets`, and `upload_source_maps` defaults
+ * to false — so the key stays on the build machine. That is a property of the
+ * configuration, though, not of the code, and it is one line away from being
+ * untrue. This makes it a property the build enforces.
+ *
+ * Two checks, because there are two ways it goes wrong:
+ *
+ *   1. `upload_source_maps: true` in wrangler.jsonc. Tempting, because
+ *      `observability` is already on and readable stack traces are worth
+ *      having — but the map holds the key, so enabling it hands the key to
+ *      Cloudflare. There is no safe way to turn this on while the adapter
+ *      inlines the environment. Leave it off.
+ *
+ *   2. The key's value appearing in something uploaded verbatim: the Worker
+ *      entry, the bundles it pulls in, or anything under assets/, which is
+ *      served publicly. A leak into assets/ is the catastrophic one — that is
+ *      the browser-readable half.
+ *
+ * What this does NOT cover, stated plainly rather than implied: Wrangler does
+ * the final bundling at deploy time, so a key that arrived only by an import
+ * this scan cannot follow would not be caught here. The two checks above are
+ * the realistic paths, and the second covers the one that would be public.
+ *
+ * Skips the value scan when the key is not in the environment — CI builds
+ * deliberately run without it — but still checks the config, which needs no
+ * secret to read.
+ */
+function guardServiceRoleKey() {
+  const WRANGLER = "wrangler.jsonc";
+
+  if (existsSync(WRANGLER)) {
+    // Strip // comments first: the warning below this very check mentions the
+    // setting by name, and matching that would be a false alarm on every build.
+    const config = readFileSync(WRANGLER, "utf8").replace(/^\s*\/\/.*$/gm, "");
+    if (/"upload_source_maps"\s*:\s*true/.test(config)) {
+      fail(
+        `${WRANGLER} sets "upload_source_maps": true.\n` +
+          "  worker.js.map contains SUPABASE_SERVICE_ROLE_KEY in plaintext, because the\n" +
+          "  OpenNext adapter inlines the environment into .open-next/cloudflare/next-env.mjs.\n" +
+          "  Turning this on uploads the key to Cloudflare. Remove the setting.",
+      );
+    }
+  }
+
+  // This runs as its own process, so the .env.local that `next build` read is
+  // not in our environment. Same idiom as scripts/backup.mjs. Without it the
+  // scan below would skip on every local build and only ever look like it ran.
+  try {
+    process.loadEnvFile(".env.local");
+  } catch {
+    // Already exported, or genuinely absent — handled just below.
+  }
+
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!key) {
+    console.log(
+      "trim-worker: SUPABASE_SERVICE_ROLE_KEY is not set, so the leak scan was skipped " +
+        "(expected in CI). The upload_source_maps check still ran.",
+    );
+    return;
+  }
+
+  const SCANNABLE = /\.(js|mjs|cjs|json|html|css|txt|map)$/;
+  // The two places the adapter is known to put the key, neither of which is
+  // uploaded. Excluded so the guard reports real regressions rather than the
+  // situation it was written to describe.
+  const KNOWN_CONTAINED = new Set([
+    join(".open-next", "cloudflare", "next-env.mjs"),
+    join(".open-next", "worker.js.map"),
+  ]);
+
+  const offenders = [];
+  for (const entry of readdirSync(".open-next", { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !SCANNABLE.test(entry.name)) continue;
+    const path = join(entry.parentPath ?? entry.path, entry.name);
+    if (KNOWN_CONTAINED.has(path)) continue;
+    if (readFileSync(path, "utf8").includes(key)) offenders.push(path);
+  }
+
+  if (offenders.length > 0) {
+    fail(
+      "the service-role key is present in files this build would upload:\n" +
+        offenders.map((p) => `    ${p}`).join("\n") +
+        "\n  That key bypasses Row Level Security entirely. Do not deploy this build.\n" +
+        "  Find what put it there, and rotate the key — it has to be assumed burned.",
+    );
+  }
+
+  console.log(
+    "trim-worker: checked the Worker bundle and assets for the service-role key — none present.",
+  );
+}

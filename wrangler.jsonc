@@ -33,6 +33,20 @@
     "enabled": true
   },
 
+  // DO NOT ADD "upload_source_maps": true.
+  //
+  // It is the obvious next step from the line above — observability is on, and
+  // a minified stack trace is close to useless without a map. It is also a key
+  // disclosure. The OpenNext adapter inlines the whole environment into
+  // .open-next/cloudflare/next-env.mjs as plaintext, esbuild copies that into
+  // worker.js.map, and the map is ~25 MiB of which one string is
+  // SUPABASE_SERVICE_ROLE_KEY. That key bypasses Row Level Security completely.
+  //
+  // Wrangler's default is false, which is the only reason the key stays on the
+  // build machine today. scripts/trim-worker.mjs fails the build if this is
+  // ever set to true, so this is not the only thing standing in the way — but
+  // read the guard before you argue with it.
+
   // The adapter deliberately does not minify its own output, so that it can
   // apply string-replacement patches to it (see build.js: `options.minify =
   // false`). By the time Wrangler bundles, every patch is applied, so this is

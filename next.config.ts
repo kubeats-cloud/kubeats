@@ -30,6 +30,12 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   /*
+   * Next sends `X-Powered-By: Next.js` on every response otherwise. It buys
+   * nothing and tells a scanner which framework to look up advisories for.
+   */
+  poweredByHeader: false,
+
+  /*
    * The two brand images are local PNGs, already sized for the slots they sit
    * in, so there is nothing for an optimiser to do. Turning it off keeps the
    * app off any one host's image service — Cloudflare's needs a binding, and
