@@ -1,0 +1,88 @@
+# KUbeats — Handover
+
+The things that are the **client's** to decide or run, gathered in one place. Each links to the
+document that has the full detail; this page is the index, not a copy of them.
+
+## Outstanding client-owned items
+
+| Item | Why it matters | Where the detail lives |
+| --- | --- | --- |
+| **Custom domain** | A professional URL, and it unlocks the free WAF login rate-limit (closes pen-test P1) | This document, below |
+| **Rotate the service-role key** | It has appeared in a build log; rotating retires it | `docs/PHASE-10-Production-Readiness-Audit.md` (H2) and the rotation steps handed over in session |
+| **Weekly backup + one restore rehearsal** | No automatic backup exists on the free tier; a mistaken delete is otherwise unrecoverable | `docs/BACKUP-RESTORE.md`, "For the client" |
+| **Uptime monitoring** | Nothing polls `/api/health` today, so an outage goes unnoticed | `docs/PHASE-10-Production-Readiness-Audit.md` (M2) |
+| **Deploy size ceiling** | 122 KiB headroom under the 3072 KiB free-plan limit; the next big feature likely needs the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
+
+None of these is an application code change. They are operational decisions for whoever owns the
+Cloudflare and Supabase accounts after handover.
+
+---
+
+## Custom domain (client decision)
+
+The app is live at `https://kubeats.pavanstudy2012.workers.dev`. Moving it to a domain the client
+owns — e.g. `app.yourschoolgroup.com` — is optional but recommended, for two reasons:
+
+1. **A professional URL.** A `*.workers.dev` address is fine for a developer preview; a paying
+   client's field team should not be logging into someone else's subdomain.
+2. **It unlocks brute-force protection on login.** Cloudflare's WAF rate-limiting is a **zone-level**
+   feature — it can only be attached to a domain that exists as a zone in the account. `*.workers.dev`
+   is Cloudflare's zone, not ours, so no WAF rule can attach to the current URL. On a custom domain,
+   one **free** rate-limit rule closes pen-test finding **P1** (see
+   `docs/PHASE-10-Frontend-Security-Pentest.md`). Until then, P1's interim risk is Medium and
+   mitigated (non-enumerable login errors, Supabase's own throttling, a small admin-created user
+   base with no public signup).
+
+### Steps
+
+**1. Add the domain to Cloudflare (free plan is fine).**
+In the Cloudflare dashboard, add the domain as a site and follow the nameserver instructions. If the
+domain is already on Cloudflare, it is already a zone — skip to step 2.
+
+**2. Point the domain at the Worker.**
+Workers & Pages → **kubeats** → Settings → **Domains & Routes** → **Add** → **Custom Domain** →
+enter the hostname (e.g. `app.yourschoolgroup.com`). Cloudflare provisions the TLS certificate and
+routes the hostname to the Worker automatically. The Worker stays reachable at its `workers.dev`
+address too; that route can be disabled separately later if you want the custom domain to be the
+only entry point.
+
+**3. Add the WAF login rate-limit rule.**
+Security → **WAF** → **Rate limiting rules** → create one rule on that zone:
+
+- **When incoming requests match:** `URI Path` equals `/login` **AND** `Request Method` equals `POST`
+- **Rate:** ~10 requests per 1 minute, counting by **IP**
+- **Then:** **Block** (or **Managed Challenge**) for the timeout window
+
+The free plan includes one rate-limiting rule with limited configurability — enough for exactly this.
+Confirm it is available on the account's plan before relying on it.
+
+**4. Verify.**
+Send ~15 rapid `POST /login` requests from one IP; once the threshold trips they should return
+`429`/`403`. (Ask the developer for the exact test command if needed.)
+
+### What changes in the app — and what does not
+
+**Almost nothing, and no code change is required for the app to serve on the new domain.**
+
+- **The Supabase connection is unaffected.** The app derives the Supabase origin from the
+  `NEXT_PUBLIC_SUPABASE_URL` environment variable (read in `src/lib/env.ts` and nowhere else),
+  including in the Content-Security-Policy. It does **not** hardcode its own hostname anywhere, so
+  moving the app's URL does not touch how it reaches the database.
+- **Only the app's own URL changes**, and that happens at the edge (Cloudflare routing), not in the
+  code. The app builds its links relative to the incoming request, so it works on whatever hostname
+  serves it.
+
+**Two things to update outside the code, or sign-in emails will break:**
+
+- **Supabase Auth URLs.** Supabase dashboard → Authentication → **URL Configuration**: set the
+  **Site URL** to the new domain and add it to **Redirect URLs**. Password-reset and any email links
+  point at the Site URL, so if it still says the old address those emails will send people to the
+  wrong place.
+- **Redeploy if you change any environment variable.** `NEXT_PUBLIC_*` values are inlined at build
+  time, so any env change is a rebuild, not just a restart. The domain move itself needs no env
+  change — but if you also retire the `workers.dev` route or adjust anything in `.env`/the Cloudflare
+  variables, trigger a fresh deploy (an empty commit pushed to `main` is enough) and re-check
+  `/api/health` afterwards.
+
+*The domain move is a handover decision. Until it happens, P1 stays Deferred / Planned with the
+interim mitigation recorded above and in the pen-test report.*

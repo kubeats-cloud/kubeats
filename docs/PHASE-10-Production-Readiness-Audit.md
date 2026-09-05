@@ -211,16 +211,30 @@ alternative is fighting the auth library.
 
 #### M5 — No application-level rate limiting
 
-Supabase enforces auth rate limits (the code handles `429` on sign-in, and account enumeration is
-correctly prevented by an indistinguishable error). But `/api/place`, `/api/pincode` and the server
-actions have none of their own. A signed-in user could loop `/api/place` and get the app's IP
-**banned by OpenStreetMap**, degrading the photo stamp for everyone.
+Two faces of the same gap. Both are now **Deferred / Planned** (decided 5 Sep 2026), for the reasons
+below.
 
-Partly mitigated: `place_cache` means repeat coordinates never reach Nominatim, and the route is
-auth-gated so it is not an open proxy. At 20 known users the realistic risk is an accidental loop,
-not an attack.
+**(a) Login brute force — tracked as pen-test finding P1.** The follow-up pen test confirmed this:
+30 rapid failed logins drew no `429`, so throttling rests on Supabase's own (looser) limits. The
+audit's earlier line that "Supabase enforces auth rate limits" was optimistic — it does *some*, but
+not within a burst.
 
-**Fix.** A simple per-user counter in Postgres, or accept and monitor. Do not over-engineer this.
+> **STATUS: Deferred / Planned.** Closes with one free Cloudflare WAF rate-limit rule (`POST /login`,
+> ~10 req/min per IP, Block/Managed Challenge) **once the app moves to a custom domain** — WAF
+> rate-limiting is zone-level and cannot attach to `*.workers.dev`. See
+> [HANDOVER.md](../HANDOVER.md), "Custom domain", and P1 in the pen-test report.
+> **Interim risk: Medium, mitigated** by non-enumerable login errors, Supabase's built-in
+> throttling, and a small admin-created user base (~20–100, no public signup).
+> **Deliberately not done in-Worker** (rate-limit binding / KV / Durable Object): it would be the
+> first host-specific code in the app, breaking the portability rule to close a Medium finding the
+> custom domain closes for free.
+
+**(b) Outbound-calling routes** — `/api/place`, `/api/pincode`. A signed-in user could loop
+`/api/place` and get the app's IP throttled by OpenStreetMap, degrading the photo stamp for
+everyone. Partly mitigated: `place_cache` means repeat coordinates never reach Nominatim, and both
+routes are auth-gated (verified: `401` unauthenticated), so they are not an open proxy. At this scale
+the realistic risk is an accidental loop, not an attack. **Fix if it ever bites:** a per-user counter
+in Postgres. Accept and monitor for now.
 
 ---
 
@@ -347,7 +361,8 @@ microphone=(), payment=()`. Only gap: `x-powered-by` (L1).
 
 **Residual risks, stated plainly:** (1) service-role key pending rotation — H2; (2) session cookie
 readable by script if XSS ever succeeds — M4; (3) any rep can edit any institute unattributed — M1;
-(4) no rate limiting on the two outbound-calling routes — M5.
+(4) login brute-force throttling deferred to the custom-domain WAF rule, and no rate limiting on the
+two outbound-calling routes — M5 / P1.
 
 ---
 
@@ -452,6 +467,7 @@ recorded so the client inherits the reasoning, not just the consequence.
 | 8 | 3–4 Playwright smoke tests over sign-in → log a visit → submit the week | half day | M3 — would have caught the phase-9 hydration outage |
 | 9 | CI size gate failing above ~2950 KiB | 30 min | Turns scenario 16 from a failed deploy into a failed build |
 | 10 | `<h1>` on the login page | 5 min | L2 |
+| 11 | After the custom-domain move, add the free WAF rate-limit rule on `POST /login` | 10 min | Closes P1 / M5(a); prerequisite and steps in [HANDOVER.md](../HANDOVER.md) |
 
 ### Nice to have later
 

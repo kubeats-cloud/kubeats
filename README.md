@@ -7,6 +7,9 @@ Admins oversee the team, manage the shared lists, and create accounts.
 
 Roughly twenty users. Built to be read and maintained by one developer.
 
+> **Handing this over?** [HANDOVER.md](HANDOVER.md) lists what is the client's to decide or run —
+> custom domain, key rotation, backups, monitoring — each pointing to the document with the detail.
+
 ## Screens
 
 Six, and no more. The navigation is a thumb-reachable bottom bar.
