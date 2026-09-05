@@ -31,10 +31,14 @@ import { activityLabelFor } from "@/lib/validation/visit";
 import {
   ACTIVITIES_CONDUCTED,
   CONTACT_TYPES,
+  INTEREST_PROGRAMS,
+  MANAGEMENT_INTERESTS,
   MANAGEMENT_RESPONSES,
   PARTICIPATION_LEVELS,
+  PRIMARY_OUTCOMES,
   SESSION_CLASSES,
   SESSION_STREAMS,
+  STUDENT_INTENTS,
   STUDENT_RESPONSES,
   VISIT_OUTCOMES,
   closingReportFormDataToInput,
@@ -110,11 +114,15 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
     other_faculty_count: visit.other_faculty_count?.toString() ?? "",
     session_participation: visit.session_participation ?? "",
     student_questions: visit.student_questions ?? "",
+    students_reached: visit.students_reached?.toString() ?? "",
     student_response: visit.student_response ?? "",
     student_interest: visit.student_interest?.toString() ?? "",
+    student_intent: visit.student_intent ?? "",
     management_feedback: visit.management_feedback ?? "",
+    management_interest: visit.management_interest ?? "",
     discussion_summary: visit.discussion_summary ?? "",
     visit_outcome: visit.visit_outcome ?? "",
+    primary_outcome: visit.primary_outcome ?? "",
     applications_collected: visit.applications_collected?.toString() ?? "",
     admissions_generated: visit.admissions_generated?.toString() ?? "",
     follow_up_action: visit.follow_up_action ?? "",
@@ -122,6 +130,9 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
     employee_remarks: visit.employee_remarks ?? "",
   });
   const [streams, setStreams] = useState<string[]>(visit.session_streams ?? []);
+  const [interestPrograms, setInterestPrograms] = useState<string[]>(
+    visit.most_interested_programs ?? [],
+  );
   const [managementResponse, setManagementResponse] = useState<string[]>(
     visit.management_response ?? [],
   );
@@ -176,6 +187,9 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
       {(showSession ? streams : []).map((value) => (
         <input key={value} type="hidden" name="session_streams" value={value} />
       ))}
+      {interestPrograms.map((value) => (
+        <input key={value} type="hidden" name="most_interested_programs" value={value} />
+      ))}
       {(showManagement ? managementResponse : []).map((value) => (
         <input key={value} type="hidden" name="management_response" value={value} />
       ))}
@@ -209,6 +223,7 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
           activities={activities}
           field={field}
           streams={streams}
+          interestPrograms={interestPrograms}
           managementResponse={managementResponse}
           followUp={followUp}
           isPending={isPending}
@@ -436,6 +451,21 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                 </div>
 
                 <div className="space-y-2">
+                  <Label htmlFor="reached">Students reached (optional)</Label>
+                  <Input
+                    id="reached"
+                    className="h-11"
+                    inputMode="numeric"
+                    value={field.students_reached}
+                    onChange={(e) => digits("students_reached", 5)(e.target.value)}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    How many the visit reached overall — often more than attended.
+                  </p>
+                  {problem("students_reached")}
+                </div>
+
+                <div className="space-y-2">
                   <Label>Streams present (optional)</Label>
                   <div className="flex flex-wrap gap-4">
                     {SESSION_STREAMS.map((stream) => (
@@ -572,6 +602,47 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                 <p className="text-muted-foreground text-xs">1 is cold, 5 is keen.</p>
                 {problem("student_interest")}
               </div>
+
+              <div className="space-y-2">
+                <Label>Most-interested programs (optional)</Label>
+                <div className="flex flex-wrap gap-4">
+                  {INTEREST_PROGRAMS.map((program) => (
+                    <label
+                      key={program}
+                      className="flex min-h-11 items-center gap-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={interestPrograms.includes(program)}
+                        onCheckedChange={() =>
+                          setInterestPrograms(toggle(interestPrograms, program))
+                        }
+                      />
+                      {program}
+                    </label>
+                  ))}
+                </div>
+                {problem("most_interested_programs")}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Where they landed (optional)</Label>
+                <Select
+                  value={field.student_intent}
+                  onValueChange={set("student_intent")}
+                >
+                  <SelectTrigger className="h-11 w-full">
+                    <SelectValue placeholder="Student intent" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STUDENT_INTENTS.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {problem("student_intent")}
+              </div>
           </FormSection>
 
           {/* 5. Management ---------------------------------------------- */}
@@ -597,6 +668,26 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                     </label>
                   ))}
                   {problem("management_response")}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Interest level</Label>
+                  <Select
+                    value={field.management_interest}
+                    onValueChange={set("management_interest")}
+                  >
+                    <SelectTrigger className="h-11 w-full">
+                      <SelectValue placeholder="How interested are they?" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MANAGEMENT_INTERESTS.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {problem("management_interest")}
                 </div>
 
                 <div className="space-y-2">
@@ -629,6 +720,29 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                   aria-invalid={fieldErrors.discussion_summary ? true : undefined}
                 />
                 {problem("discussion_summary")}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Primary outcome</Label>
+                <Select
+                  value={field.primary_outcome}
+                  onValueChange={set("primary_outcome")}
+                >
+                  <SelectTrigger
+                    className="h-11 w-full"
+                    aria-invalid={fieldErrors.primary_outcome ? true : undefined}
+                  >
+                    <SelectValue placeholder="What mainly came of this visit?" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PRIMARY_OUTCOMES.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {problem("primary_outcome")}
               </div>
 
               <div className="space-y-2">
@@ -763,6 +877,7 @@ function Review({
   activities,
   field,
   streams,
+  interestPrograms,
   managementResponse,
   followUp,
   isPending,
@@ -773,6 +888,7 @@ function Review({
   activities: string[];
   field: Record<string, string>;
   streams: string[];
+  interestPrograms: string[];
   managementResponse: string[];
   followUp: boolean;
   isPending: boolean;
@@ -822,6 +938,7 @@ function Review({
                   field.session_class && `class ${field.session_class}`,
                   streams.length ? streams.join(", ") : null,
                   field.students_attended && `${field.students_attended} students`,
+                  field.students_reached && `${field.students_reached} reached`,
                   field.session_participation && `${field.session_participation} participation`,
                 ]
                   .filter(Boolean)
@@ -829,8 +946,13 @@ function Review({
               )}
             {line("Student response", field.student_response)}
             {line("Interest", field.student_interest ? `${field.student_interest} / 5` : null)}
+            {line("Interested in", interestPrograms.join(", ") || null)}
+            {line("Student intent", field.student_intent)}
             {hasManagement(activities) &&
               line("Management", managementResponse.join(", "))}
+            {hasManagement(activities) &&
+              line("Management interest", field.management_interest)}
+            {line("Primary outcome", field.primary_outcome)}
             {line("Outcome", field.visit_outcome)}
             {line("Applications", field.applications_collected)}
             {line("Admissions", field.admissions_generated)}

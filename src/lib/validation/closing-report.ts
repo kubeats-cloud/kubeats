@@ -26,6 +26,7 @@ export const ACTIVITIES_CONDUCTED = [
   "Management meeting",
   "Career guidance session",
   "Seminar or workshop",
+  "Faculty Interaction",
   "Campus visit",
   "Olympiad registration",
   "Application collection",
@@ -83,7 +84,44 @@ export const VISIT_OUTCOMES = [
 
 export const SESSION_CLASSES = ["9", "10", "11", "12", "Mixed"] as const;
 export const SESSION_STREAMS = ["science", "commerce", "humanities"] as const;
-export const PARTICIPATION_LEVELS = ["High", "Moderate", "Low"] as const;
+export const PARTICIPATION_LEVELS = ["Low", "Moderate", "High", "Very High"] as const;
+
+/** B — student interaction. */
+export const INTEREST_PROGRAMS = [
+  "Engineering",
+  "Computer Science",
+  "AI/ML",
+  "Management",
+  "Design",
+  "Commerce",
+  "Law",
+  "Other",
+] as const;
+
+export const STUDENT_INTENTS = [
+  "Just Information",
+  "Exploring Options",
+  "Interested",
+  "Strongly Interested",
+  "Ready for Campus Visit",
+] as const;
+
+/** C — management interest level, distinct from the response checkboxes. */
+export const MANAGEMENT_INTERESTS = ["Low", "Medium", "High", "Very High"] as const;
+
+/** D — the primary outcome category, distinct from visit_outcome. */
+export const PRIMARY_OUTCOMES = [
+  "Meeting completed",
+  "Career session completed",
+  "Campus visit discussed",
+  "Campus visit confirmed",
+  "Application drive planned",
+  "Follow-up meeting required",
+  "Information requested",
+  "Admission discussion completed",
+  "Partnership discussion initiated",
+  "Other",
+] as const;
 
 export const hasSession = (activities: string[]) =>
   activities.some((a) => (SESSION_ACTIVITIES as readonly string[]).includes(a));
@@ -175,16 +213,25 @@ export const closingReportSchema = z
     other_faculty_count: count,
     session_participation: oneOf(PARTICIPATION_LEVELS),
     student_questions: text(2000),
+    // B) Student interaction. students_reached sits beside students_attended
+    //    above and is distinct from it.
+    students_reached: count,
 
-    // Response
+    // Response / student interaction
     student_response: oneOf(STUDENT_RESPONSES),
     student_interest: count,
+    most_interested_programs: manyOf(INTEREST_PROGRAMS),
+    student_intent: oneOf(STUDENT_INTENTS),
     management_response: manyOf(MANAGEMENT_RESPONSES),
     management_feedback: text(2000),
+    // C) Management interest level.
+    management_interest: oneOf(MANAGEMENT_INTERESTS),
 
     // Outcome
     discussion_summary: text(4000),
     visit_outcome: oneOf(VISIT_OUTCOMES),
+    // D) Primary outcome category.
+    primary_outcome: oneOf(PRIMARY_OUTCOMES),
     applications_collected: count,
     admissions_generated: count,
 
@@ -216,6 +263,11 @@ export const closingReportSchema = z
     if (!value.visit_outcome) {
       fail("visit_outcome", "How did the visit end?");
     }
+    // D) The primary outcome is a headline classification, wanted on every
+    //    filed report, so it is always required.
+    if (!value.primary_outcome) {
+      fail("primary_outcome", "What was the primary outcome?");
+    }
 
     // Required only because of what the rep said happened.
     if (hasSession(value.activities_conducted)) {
@@ -235,6 +287,10 @@ export const closingReportSchema = z
       }
       if (!value.management_feedback) {
         fail("management_feedback", "What did they say?");
+      }
+      // C) When there was a management meeting, an interest level is expected.
+      if (!value.management_interest) {
+        fail("management_interest", "How interested is management?");
       }
     }
 
@@ -292,12 +348,17 @@ export function closingReportFormDataToInput(formData: FormData) {
     other_faculty_count: str("other_faculty_count"),
     session_participation: str("session_participation"),
     student_questions: str("student_questions"),
+    students_reached: str("students_reached"),
     student_response: str("student_response"),
     student_interest: str("student_interest"),
+    most_interested_programs: many("most_interested_programs"),
+    student_intent: str("student_intent"),
     management_response: many("management_response"),
     management_feedback: str("management_feedback"),
+    management_interest: str("management_interest"),
     discussion_summary: str("discussion_summary"),
     visit_outcome: str("visit_outcome"),
+    primary_outcome: str("primary_outcome"),
     applications_collected: str("applications_collected"),
     admissions_generated: str("admissions_generated"),
     follow_up_needed: str("follow_up_needed") === "yes",

@@ -137,14 +137,21 @@ export async function submitClosingReport(
       other_faculty_count: session ? input.other_faculty_count : null,
       session_participation: session ? input.session_participation : null,
       student_questions: session ? input.student_questions : null,
+      // students_reached is a session number, kept only when a session happened,
+      // exactly like students_attended above.
+      students_reached: session ? input.students_reached : null,
 
       student_response: input.student_response,
       student_interest: input.student_interest,
+      most_interested_programs: input.most_interested_programs,
+      student_intent: input.student_intent,
       management_response: input.management_response,
       management_feedback: input.management_feedback,
+      management_interest: input.management_interest,
 
       discussion_summary: input.discussion_summary,
       visit_outcome: input.visit_outcome,
+      primary_outcome: input.primary_outcome,
       applications_collected: input.applications_collected,
       admissions_generated: input.admissions_generated,
 

@@ -37,6 +37,7 @@ export function ReportView({ report }: { report: VisitReport }) {
     report.session_class && `class ${report.session_class}`,
     report.session_streams?.length ? report.session_streams.join(", ") : null,
     report.students_attended !== null ? `${report.students_attended} students` : null,
+    report.students_reached !== null ? `${report.students_reached} reached` : null,
     report.session_duration_mins !== null ? `${report.session_duration_mins} min` : null,
     report.session_participation && `${report.session_participation} participation`,
   ]
@@ -100,8 +101,12 @@ export function ReportView({ report }: { report: VisitReport }) {
               "Student interest",
               report.student_interest !== null ? `${report.student_interest} / 5` : null,
             )}
+            {row("Interested in", chips(report.most_interested_programs))}
+            {row("Student intent", report.student_intent)}
             {row("Management response", chips(report.management_response))}
+            {row("Management interest", report.management_interest)}
             {row("Management said", report.management_feedback)}
+            {row("Primary outcome", report.primary_outcome)}
             {row("Outcome", report.visit_outcome)}
             {row(
               "Applications collected",
