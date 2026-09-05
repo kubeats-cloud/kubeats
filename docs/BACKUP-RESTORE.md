@@ -27,12 +27,118 @@ nothing appears broken — photos simply stop being deleted, quietly, forever.
 
 ---
 
+## For the client: who does what, and when
+
+**This is the section to read if you are not the developer.** Three jobs. If
+nobody is named against each one, they will not happen.
+
+| | Job | Who | How often |
+| --- | --- | --- | --- |
+| 1 | **Take the backup** | The client, on the client's machine | Weekly, automatically |
+| 2 | **Check the backup is readable** | The client | Quarterly, 2 minutes |
+| 3 | **Prove it actually restores** | Developer or a technical helper | Once at handover, then yearly |
+
+### Why the client, and not the developer
+
+A backup that lives on the developer's laptop is not the client's backup. When
+the engagement ends, so does the arrangement — usually without anyone noticing
+until the day it is needed. **Job 1 belongs on a machine the client controls and
+keeps switched on.**
+
+### Job 1 — the weekly backup (Windows)
+
+Run this once, in a Command Prompt, replacing the path if the project lives
+somewhere else. It creates a scheduled task that runs every Sunday at 20:00.
+
+```
+schtasks /create /tn "KUbeats weekly backup" ^
+  /tr "cmd /c cd /d \"D:\free lance\" && npm run backup" ^
+  /sc weekly /d SUN /st 20:00 /rl highest
+```
+
+Then prove it works, rather than assuming:
+
+```
+schtasks /run   /tn "KUbeats weekly backup"
+schtasks /query /tn "KUbeats weekly backup" /v /fo LIST
+```
+
+A new folder should appear under `backups\`. **If it does not, the schedule is
+not working and you have no backups** — the task will keep reporting success
+while doing nothing if the path is wrong.
+
+Three things that stop this working, all of them silent:
+
+- **The machine must be awake at 20:00 on Sunday.** A laptop that is shut takes
+  no backup and reports no error. Pick an hour the machine is reliably on.
+- **`npm` must be available to the account the task runs as.** The command above
+  was tested on the handover machine; on a different one, run it by hand first.
+- **Nothing deletes old backups.** They accumulate forever. Delete anything
+  older than about three months, or take `--no-photos` weekly and a full one
+  monthly — photos are almost all of the size.
+
+On macOS or Linux, the same thing in `crontab -e`:
+
+```
+0 20 * * 0 cd /srv/kubeats && /usr/bin/npm run backup >> /var/log/kubeats-backup.log 2>&1
+```
+
+### Where backups must be kept
+
+> **A backup holds personal data: names, mobile numbers, GPS coordinates of
+> where staff were standing, and photographs of school premises.**
+
+Two rules, and they pull in opposite directions, so both matter:
+
+1. **Not only on the machine that runs the app.** A laptop that is lost, stolen
+   or dies takes the app and its only backup together. Send them somewhere else
+   — a synced folder or an external drive:
+
+   ```
+   npm run backup -- --out "C:/Users/<you>/OneDrive/kubeats-backups"
+   ```
+
+2. **Somewhere you would be willing to defend.** Not a shared drive the whole
+   office can browse, not a personal phone, not an unencrypted USB stick left in
+   a drawer. If the client has a policy about staff data, this is covered by it.
+
+`backups/` is excluded from version control, so a backup cannot reach GitHub by
+accident. Everything else about where it goes is a decision someone has to make
+on purpose.
+
+### Job 2 — the quarterly check (2 minutes)
+
+```
+npm run backup:verify -- backups/<timestamp>
+```
+
+Reads the backup on its own terms — no internet, no passwords, no Supabase
+account needed, so it works on a copy from an external drive years later. It
+prints a line per check and ends with either `Backup verified` or a count of
+failures, and exits non-zero on failure so it can be scheduled too.
+
+It confirms the backup is **readable and internally consistent**: every table
+file present and valid, row counts matching what the manifest claims, every row
+carrying the key a restore needs, photo files present and not truncated, and no
+API keys accidentally captured. It cannot tell you whether the backup matches
+the live system today — nothing offline can — which is what job 3 is for.
+
+### Job 3 — the yearly restore rehearsal
+
+A backup nobody has restored is a hypothesis. See
+**"Proving a backup actually restores"** below. Do it once before handover, so
+the client is told "we have restored this", which is a different claim from "we
+have backups".
+
+---
+
 ## Routine backup
 
 ```bash
 npm run backup                  # → ./backups/<timestamp>/
 npm run backup -- --no-photos   # rows and users only, much faster
 npm run backup -- --out D:/field-ops-backups
+npm run backup:verify -- backups/<timestamp>   # check one, offline
 ```
 
 It reads the same `.env.local` the app uses and writes:
@@ -273,6 +379,129 @@ What does not come across:
 In short: the data and the rules move to plain Postgres cleanly. The *platform*
 services — auth, storage, scheduling — are what Supabase is actually providing,
 and they would need replacing.
+
+---
+
+## Proving a backup actually restores
+
+Do this once before handover, then yearly. It costs a free Supabase project and
+about half an hour, and it is the only thing that turns "we take backups" into
+"we have restored from a backup".
+
+**The whole risk in this procedure is restoring into production by mistake.**
+The steps below are arranged so that cannot happen quietly.
+
+### 1. A scratch project
+
+Create a second free Supabase project — call it `kubeats-restore-test`, so
+nobody mistakes it for anything else. Wait for it to finish provisioning.
+
+### 2. Build the schema
+
+SQL Editor → New query → paste and run each migration **in order**, one at a
+time: `0001_init.sql`, `0002`, `0003`, `0004`, `0005`, `0006`, `0007`,
+`0008_ist_calendar_day.sql`. Each should report success before you start the
+next.
+
+`0004` needs `pg_cron` and the Vault secrets; on a scratch project you can let
+it fail, since nothing being tested here depends on the purge running. Note it
+and move on.
+
+### 3. Point at the scratch project — and only the scratch project
+
+Copy `.env.local` to `.env.restore-test`, then change **all three** values to the
+scratch project's, from Project Settings → API:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://<scratch-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<scratch anon key>
+SUPABASE_SERVICE_ROLE_KEY=<scratch service-role key>
+```
+
+> **Check this before going further.** A half-edited file — new URL, production
+> service-role key — is the shape of the accident this is guarding against.
+
+Confirm what the file actually points at, rather than what you meant to type:
+
+```bash
+node -e "process.loadEnvFile('.env.restore-test'); console.log(process.env.NEXT_PUBLIC_SUPABASE_URL)"
+```
+
+**It must print the scratch project's URL.** If it prints the production one,
+stop and fix the file.
+
+### 4. Dry run first — read the "into" line
+
+```bash
+node --env-file=.env.restore-test scripts/restore.mjs --from backups/<timestamp> --dry-run
+```
+
+It prints where it is reading from and where it would write:
+
+```
+  from   https://<production-ref>.supabase.co
+  into   https://<scratch-ref>.supabase.co   (dry run)
+```
+
+**Read the `into` line. Every time.** If it names production, stop: your env
+file is wrong. The script also refuses outright to restore into the project a
+backup came from without `--force`, which is a second net under the same fall —
+but the `into` line is the one you should be relying on.
+
+### 5. Restore for real
+
+Only once the dry run named the scratch project:
+
+```bash
+node --env-file=.env.restore-test scripts/restore.mjs --from backups/<timestamp> --force
+```
+
+`--force` is needed because the migrations seeded reference rows, so the target
+is not empty. That is the flag's purpose here — not to override a warning about
+production.
+
+### 6. Check it came back
+
+In the scratch project's SQL Editor:
+
+```sql
+select 'institutes' as t, count(*) from public.institutes
+union all select 'visits',         count(*) from public.visits
+union all select 'daily_plans',    count(*) from public.daily_plans
+union all select 'weekly_targets', count(*) from public.weekly_targets
+union all select 'profiles',       count(*) from public.profiles;
+```
+
+Compare against `manifest.json` in the backup. States, cities, purposes and
+areas will be **higher** than the manifest — the migrations seeded them and the
+restore upserted on top — which is expected. The rows that matter (institutes,
+visits, plans, weekly targets, profiles) should match exactly.
+
+Then prove a photo survived, which is the part a row count cannot tell you:
+Storage → `visit-photos` → open a folder → download a file. It should be a real
+photograph with the stamp burnt in, not a zero-byte placeholder.
+
+Finally, check identity was preserved: a restored visit's `member` should still
+match the same person's `profiles.id`. That is what makes the backup useful
+rather than merely present.
+
+### 7. Take the scratch project down
+
+Delete it in the dashboard, and delete `.env.restore-test` locally:
+
+```bash
+rm .env.restore-test
+```
+
+It holds a service-role key for a project that is about to stop existing, but
+the habit is what matters. Then confirm you are back to normal:
+
+```bash
+node -e "process.loadEnvFile('.env.local'); console.log(process.env.NEXT_PUBLIC_SUPABASE_URL)"
+```
+
+Write down the date you did this. That date is the answer to "when did you last
+prove the backups work?", and it is a much better answer than "they run weekly".
 
 ---
 

@@ -89,6 +89,25 @@ single largest risk in the system, and it is a risk of total loss rather than de
 backups cover the database and auth users but **not** the photo files or the Vault secret and cron
 job, so the script is still wanted. Store backups off the machine that runs them.
 
+> **Status — 5 Sep 2026: partly closed.**
+>
+> - A **baseline backup has been taken and verified**: 14 files, 63.7 KiB; every table's row count
+>   matches production, auth user ids and emails match, and the stored photo is **byte-identical**
+>   to the live object (SHA-256 `78ecf48cb2540d3b…`). `npm run restore --dry-run` reads it correctly
+>   and its "same project" guard fires as intended.
+> - **`npm run backup:verify` now exists** (`scripts/verify-backup.mjs`, 21 unit tests) so checking a
+>   backup is a routine anyone can run. It is deliberately **offline** — no network, no credentials —
+>   so it works on a copy from an external drive years later, which is when it is actually needed.
+> - `docs/BACKUP-RESTORE.md` now opens with a **client-facing section** naming who owns each job, the
+>   tested weekly Task Scheduler command, why backups must live off the app machine, and a full
+>   **restore rehearsal** procedure.
+>
+> **Still open, and still the handover blocker:** the recurring schedule is not running on a machine
+> the client controls, and the restore rehearsal has not been performed. The tooling and the
+> procedure are done; the operational commitment is not. Note also that the baseline was taken when
+> the database was nearly empty (0 institutes, 0 visits), so it proves the pipeline rather than a
+> full-data restore — take another once real field data exists.
+
 ---
 
 #### H2 — The service-role key is materialised in plaintext by the build, and has reached a build log
@@ -418,7 +437,7 @@ recorded so the client inherits the reasoning, not just the consequence.
 
 | # | Task | Effort | Why |
 | --- | --- | --- | --- |
-| 1 | **Run `npm run backup`**, then schedule it (or move Supabase to Pro) | 10 min | H1 — the only finding blocking approval |
+| 1 | ~~Run `npm run backup`~~ **done and verified 5 Sep**. Remaining: put the **weekly schedule on a machine the client controls**, store backups **off** that machine, and do the **restore rehearsal** once — all three in `docs/BACKUP-RESTORE.md`, "For the client" | 30 min | H1 — the only finding blocking approval |
 | 2 | **Rotate `SUPABASE_SERVICE_ROLE_KEY`**; update the Cloudflare Secret and `.env.local` | 15 min | H2 — it has been in a build log |
 | 3 | **Point a free uptime monitor at `/api/health`** with alerting | 5 min | M2 — turns "the client tells you" into "you know first" |
 | 4 | Confirm with the client **who holds the Cloudflare and Supabase accounts**, and that recovery contacts are theirs | 15 min | A handover is not complete while access belongs to the developer |

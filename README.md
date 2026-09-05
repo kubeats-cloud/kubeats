@@ -415,7 +415,12 @@ same.
 ```bash
 npm run backup                 # → ./backups/<timestamp>/  (rows, users, photos)
 npm run backup -- --no-photos  # faster, rows and users only
+npm run backup:verify -- backups/<timestamp>   # is that backup any good?
 ```
+
+`backup:verify` reads a backup on its own terms — no network, no keys, no
+Supabase account — so it still works on a copy pulled off an external drive
+years later, which is the only moment anyone actually asks the question.
 
 Four things hold state and they move differently: table rows, auth users (not
 just rows — and password hashes need a SQL-level dump), the photo files in the
@@ -428,7 +433,12 @@ what breaks when a step is skipped, pointing the app at a new project, and what
 running on plain Postgres would and would not give you. It also states plainly
 which steps have been executed and which you would be the first to run.
 
-`backups/` is git-ignored and contains personal data. Store it accordingly.
+`backups/` is git-ignored and contains personal data — names, mobile numbers,
+GPS coordinates and photographs of school premises. Keep a copy somewhere other
+than the machine running the app, and somewhere you would be willing to defend.
+The runbook's **"For the client"** section names who owns the weekly backup, the
+quarterly check and the yearly restore rehearsal; unassigned, none of them
+happen.
 
 ## Troubleshooting
 

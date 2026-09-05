@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "backup": "node scripts/backup.mjs",
+    "backup:verify": "node scripts/verify-backup.mjs",
     "restore": "node scripts/restore.mjs",
     "cf:preview": "npm run build && wrangler dev",
     "cf:deploy": "npm run build && wrangler deploy"
