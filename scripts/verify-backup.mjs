@@ -27,8 +27,16 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BACKUP_TABLES, PHOTO_BUCKET } from "./tables.mjs";
 
-/** Anything shaped like a JWT. A backup should never carry one. */
-const JWT = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
+/**
+ * Anything shaped like a Supabase credential. A backup should never carry one.
+ *
+ * Two shapes, because the project may run on either key system:
+ *   - a JWT (legacy anon / service_role, and any user session token): eyJ….….…
+ *   - a new-format API key: sb_secret_… or sb_publishable_…
+ * The client runs this verifier after the migration to the new keys, so it has
+ * to recognise a leaked new-format key too, not just the old JWT shape.
+ */
+const SECRET = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}|sb_(?:secret|publishable)_[A-Za-z0-9_-]{8,}/;
 
 /**
  * Reads a backup directory and reports on it.
@@ -178,7 +186,7 @@ export function verifyBackup(root) {
   const textFiles = readdirSync(root, { recursive: true, withFileTypes: true })
     .filter((e) => e.isFile() && /\.(json|txt|md)$/.test(e.name))
     .map((e) => join(e.parentPath ?? e.path, e.name));
-  const withSecrets = textFiles.filter((f) => JWT.test(readFileSync(f, "utf8")));
+  const withSecrets = textFiles.filter((f) => SECRET.test(readFileSync(f, "utf8")));
   add(withSecrets.length === 0, "no API keys or tokens in the backup",
       withSecrets.length === 0 ? `${textFiles.length} file(s) scanned` : withSecrets.join(", "));
 

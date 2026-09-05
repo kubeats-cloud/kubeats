@@ -203,11 +203,31 @@ describe("verifyBackup — a backup that is not sound", () => {
     expect(verifyBackup(root).ok).toBe(false);
   });
 
-  it("catches an API key that has leaked into the backup", () => {
+  it("catches a legacy JWT key that has leaked into the backup", () => {
     const root = makeBackup();
     writeFileSync(
       join(root, "tables", "profiles.json"),
       JSON.stringify([{ id: "row-1", note: "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.c2lnbmF0dXJlZmFrZQ" }]),
+    );
+    expect(failure(root)?.label).toContain("no API keys");
+  });
+
+  it("catches a new-format Supabase secret key that has leaked into the backup", () => {
+    // After the client migrates to the new key system, a leaked credential
+    // looks like sb_secret_… , not a JWT — the scan must catch it too.
+    const root = makeBackup();
+    writeFileSync(
+      join(root, "tables", "profiles.json"),
+      JSON.stringify([{ id: "row-1", note: "sb_secret_aBcD1234efGh5678ijKl90mnOpQr" }]),
+    );
+    expect(failure(root)?.label).toContain("no API keys");
+  });
+
+  it("catches a new-format publishable key that has leaked into the backup", () => {
+    const root = makeBackup();
+    writeFileSync(
+      join(root, "tables", "profiles.json"),
+      JSON.stringify([{ id: "row-1", note: "sb_publishable_aBcD1234efGh5678ijKl90mn" }]),
     );
     expect(failure(root)?.label).toContain("no API keys");
   });
