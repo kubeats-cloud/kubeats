@@ -358,10 +358,15 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("dates a plan row it was not given a date for", async () => {
+      // repB, not repA: the meeting-gate suite above leaves a plan row on
+      // (repA, today, instituteId) that the weekly-metrics suite below then
+      // marks held and counts, so it has to stay. daily_plans is unique on
+      // (member, date, institute_id), and this row defaults to today — under
+      // repA that is the same key, which made this a duplicate-key failure.
       const { data, error } = await admin
         .from("daily_plans")
         .insert({
-          member: repA.id,
+          member: repB.id,
           institute_id: instituteId,
           purpose: `${TAG} default-date`,
         })

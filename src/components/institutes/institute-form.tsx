@@ -91,8 +91,14 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
       <p className="text-danger text-xs">{fieldErrors[key]}</p>
     ) : null;
 
+  // The form is noValidate so that handleSubmit above is what rejects a bad
+  // field. Left to itself the browser stops the submit on `required` and shows
+  // its own "Please fill out this field" bubble, which means the shared schema
+  // never runs and Name is the one field that errors differently from all the
+  // others. `required` stays on the input — it still tells assistive technology
+  // the field is mandatory, and only the browser's error UI is being dropped.
   return (
-    <form action={formAction} onSubmit={handleSubmit} className="space-y-4">
+    <form action={formAction} onSubmit={handleSubmit} noValidate className="space-y-4">
       <FormSection
         title="The basics"
         description="What it is called and what kind of place it is."

@@ -48,7 +48,7 @@ export default async function TeamPage(props: PageProps<"/team">) {
         description="Each rep's commitment for the week and what they have achieved against it."
       />
 
-      <WeekNavigator weekStart={weekStart} />
+      <WeekNavigator weekStart={weekStart} basePath="/team" />
 
       <SectionTitle className="mt-6">
         The week
