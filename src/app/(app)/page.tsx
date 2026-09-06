@@ -15,7 +15,7 @@ import {
   listPurposes,
   openLoopsByMember,
 } from "@/lib/visits";
-import { getWeek } from "@/lib/weekly";
+import { getTargets } from "@/lib/targets";
 import { formatWeekRange, mondayOf } from "@/lib/weeks";
 import { getOverview } from "@/lib/admin-workspace";
 
@@ -35,7 +35,7 @@ export default async function DashboardPage() {
     admin ? Promise.resolve([]) : listInstitutesForPicker(),
     admin ? Promise.resolve([]) : listPurposes(),
     admin ? Promise.resolve(new Map<string, number>()) : openLoopsByMember(),
-    admin ? Promise.resolve(null) : getWeek(user.id, weekStart),
+    admin ? Promise.resolve(null) : getTargets(user.id, "weekly", weekStart),
     admin ? getOverview() : Promise.resolve(null),
   ]);
 
@@ -99,13 +99,13 @@ export default async function DashboardPage() {
                 committed={week.view.record.id !== null}
                 emptyAction={
                   <Button asChild className="h-11">
-                    <Link href="/weekly">Set this week&rsquo;s targets</Link>
+                    <Link href="/targets">Set this week&rsquo;s targets</Link>
                   </Button>
                 }
               />
               {week.view.record.id !== null && (
                 <Button asChild variant="outline" className="mt-3 h-11 w-full">
-                  <Link href="/weekly">Open the Weekly tab</Link>
+                  <Link href="/targets">Open Targets</Link>
                 </Button>
               )}
             </>

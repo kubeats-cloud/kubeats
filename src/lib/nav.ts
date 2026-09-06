@@ -43,7 +43,7 @@ export const REP_NAV: NavItem[] = [
   { href: "/institutes", label: "Institutes", icon: "institutes" },
   { href: "/log", label: "Log Visit", icon: "log" },
   { href: "/pending", label: "Pending", icon: "pending" },
-  { href: "/weekly", label: "Weekly", icon: "weekly" },
+  { href: "/targets", label: "Targets", icon: "weekly" },
   { href: "/materials", label: "Materials", icon: "materials" },
 ];
 

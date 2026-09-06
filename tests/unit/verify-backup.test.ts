@@ -161,8 +161,8 @@ describe("verifyBackup — a backup that is not sound", () => {
 
   it("names the table it could not verify, not just that something failed", () => {
     const root = makeBackup();
-    rmSync(join(root, "tables", "weekly_targets.json"));
-    expect(failure(root)?.label).toContain("weekly_targets");
+    rmSync(join(root, "tables", "targets.json"));
+    expect(failure(root)?.label).toContain("targets");
   });
 
   it("catches a manifest written by a newer backup script", () => {

@@ -43,7 +43,8 @@ change it in the database first.
 - **The meeting gate** — a meeting can only be logged for an institute on that
   member's plan for that day (`visits_enforce_meeting_gate`).
 - **The weekly lock** — a submitted week cannot be edited, and only an admin can
-  reopen it; the trigger stamps who and when (`weekly_targets_enforce_lock`).
+  reopen it; the trigger stamps who and when (`targets_enforce_lock`). The same
+  rule covers daily, weekly and monthly periods.
 - **Role visibility** — a rep sees only their own work, an admin sees the team.
 - **Rule 7 sourcing** — the weekly *Meetings* figure comes from `daily_plans`
   entries marked held; the other seven come from the `visits` log.

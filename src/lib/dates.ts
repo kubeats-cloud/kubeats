@@ -130,6 +130,14 @@ export function formatDayMonth(value: string | Date | null | undefined): string 
   return `${day} ${MONTHS[month - 1]}`;
 }
 
+/** "Sep 2026" — a whole month, where naming a day would be misleading. */
+export function formatMonthYear(value: string | Date | null | undefined): string {
+  const date = toDate(value);
+  if (!date) return "";
+  const { year, month } = fieldsOf(date);
+  return `${MONTHS[month - 1]} ${year}`;
+}
+
 /** "4 Sep 2026, 14:15" — the moment something was filed or submitted. */
 export function formatDateTime(value: string | Date | null | undefined): string {
   const date = toDate(value);

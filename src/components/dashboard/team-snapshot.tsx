@@ -10,7 +10,7 @@ import {
   completionPercent,
   toneFor,
 } from "@/lib/validation/weekly";
-import type { TeamMemberWeek } from "@/lib/weekly";
+import type { TeamMemberTargets } from "@/lib/targets";
 
 /**
  * The admin's view of the week.
@@ -40,7 +40,7 @@ interface Row {
 }
 
 function rowsFrom(
-  members: TeamMemberWeek[],
+  members: TeamMemberTargets[],
   weekStart: string,
   openLoops: Map<string, number>,
 ): Row[] {
@@ -71,7 +71,7 @@ export function TeamSnapshot({
   weekStart,
   openLoops,
 }: {
-  members: TeamMemberWeek[];
+  members: TeamMemberTargets[];
   weekStart: string;
   openLoops: Map<string, number>;
 }) {

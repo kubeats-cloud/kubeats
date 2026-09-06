@@ -468,7 +468,7 @@ In the scratch project's SQL Editor:
 select 'institutes' as t, count(*) from public.institutes
 union all select 'visits',         count(*) from public.visits
 union all select 'daily_plans',    count(*) from public.daily_plans
-union all select 'weekly_targets', count(*) from public.weekly_targets
+union all select 'targets', count(*) from public.targets
 union all select 'profiles',       count(*) from public.profiles;
 ```
 

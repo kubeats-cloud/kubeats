@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fieldLabel, visitSchema } from "@/lib/validation/visit";
 import { newMemberSchema } from "@/lib/validation/admin";
-import { weeklyTargetsSchema } from "@/lib/validation/weekly";
+import { targetsSchema } from "@/lib/validation/weekly";
 
 /**
  * The schemas the browser and the server share. These are the rules a rep meets
@@ -139,8 +139,8 @@ describe("visitSchema", () => {
   });
 });
 
-describe("weeklyTargetsSchema", () => {
-  const week = { week_start: "2026-08-31" };
+describe("targetsSchema", () => {
+  const week = { period: "weekly", period_start: "2026-08-31" };
   const zeros = {
     meetings: "",
     sessions_set: "",
@@ -150,26 +150,67 @@ describe("weeklyTargetsSchema", () => {
     olympiad: "",
     application: "",
     admission: "",
+    institutes_covered: "",
   };
 
   it("reads an empty box as zero", () => {
-    const result = weeklyTargetsSchema.safeParse({ ...week, ...zeros });
+    const result = targetsSchema.safeParse({ ...week, ...zeros });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.meetings).toBe(0);
   });
 
   it("refuses a target that is not a whole number", () => {
     expect(
-      weeklyTargetsSchema.safeParse({ ...week, ...zeros, meetings: "12a" }).success,
+      targetsSchema.safeParse({ ...week, ...zeros, meetings: "12a" }).success,
     ).toBe(false);
     expect(
-      weeklyTargetsSchema.safeParse({ ...week, ...zeros, meetings: "-3" }).success,
+      targetsSchema.safeParse({ ...week, ...zeros, meetings: "-3" }).success,
     ).toBe(false);
   });
 
-  it("insists the week starts on a Monday", () => {
+  it("insists a weekly period starts on a Monday", () => {
     expect(
-      weeklyTargetsSchema.safeParse({ ...zeros, week_start: "2026-09-02" }).success,
+      targetsSchema.safeParse({
+        ...zeros,
+        period: "weekly",
+        period_start: "2026-09-02",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("insists a monthly period starts on the 1st", () => {
+    expect(
+      targetsSchema.safeParse({
+        ...zeros,
+        period: "monthly",
+        period_start: "2026-09-15",
+      }).success,
+    ).toBe(false);
+    expect(
+      targetsSchema.safeParse({
+        ...zeros,
+        period: "monthly",
+        period_start: "2026-09-01",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("takes any date for a daily period", () => {
+    // A Wednesday is not the start of a week or a month, but it is a perfectly
+    // good day — the alignment rule has to be per-period, not one rule.
+    expect(
+      targetsSchema.safeParse({
+        ...zeros,
+        period: "daily",
+        period_start: "2026-09-02",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("refuses a period it does not know", () => {
+    expect(
+      targetsSchema.safeParse({ ...zeros, period: "quarterly", period_start: "2026-09-01" })
+        .success,
     ).toBe(false);
   });
 });

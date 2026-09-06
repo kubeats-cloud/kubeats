@@ -19,7 +19,7 @@ export const BACKUP_TABLES = [
   { name: "institutes", conflict: "id" },
   { name: "daily_plans", conflict: "id" },
   { name: "visits", conflict: "id" },
-  { name: "weekly_targets", conflict: "id" },
+  { name: "targets", conflict: "id" },
   { name: "pincodes_cache", conflict: "pincode" },
   { name: "photo_purge_runs", conflict: "id", regenerateId: true },
 ];

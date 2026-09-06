@@ -2,7 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
-import { weekCountEnd } from "@/lib/weeks";
+import { periodRange, type Period } from "@/lib/periods";
 import {
   METRIC_KEYS,
   ZERO_COUNTS,
@@ -12,41 +12,51 @@ import {
 } from "@/lib/validation/weekly";
 
 /**
- * Reading the week: what was committed, and what actually happened.
+ * Reading a target period: what was committed, and what actually happened.
  *
- * Rule 7 in one sentence: Meetings come from the daily plan, everything else
- * comes from the visits log. Both are counted by `date` — the day the work was
- * logged — which is why a "Set" visit is dated today rather than its expected
- * date. The window runs Monday through Sunday even though the week is reported
- * as Monday to Saturday, so a Sunday's work counts towards the week that has
- * just ended instead of falling out of the figures altogether.
+ * Rule 7 is unchanged and now applies to all three periods. Meetings come from
+ * the daily plan, the other visit metrics come from the visits log, and both
+ * are counted by `date` — the day the work was logged — over whatever range the
+ * period covers. periods.ts owns that range, including the weekly case's
+ * deliberate Sunday end, so a Sunday still folds into the week that just ended.
  *
- * Every read here is scoped by RLS: a rep's queries can only return their own
- * rows, an admin's return the whole team's. The member filters below are for
- * correctness of the answer, not for security.
+ * institutes_covered is the exception to "count the rows": it is the number of
+ * DISTINCT institutes reached, so four visits to one school count once. It is
+ * filled in here rather than by tallyVisitMetrics() for the same reason
+ * `meetings` is — that function counts matching rows and cannot express it.
+ *
+ * Every read is scoped by RLS: a rep's queries return only their own rows, an
+ * admin's return the team's. The member filters below are for correctness of
+ * the answer, not for security.
  */
 
-export interface WeekRecord {
+export interface TargetRecord {
   id: string | null;
   member: string;
-  week_start: string;
+  period: Period;
+  period_start: string;
   locked: boolean;
   submitted_at: string | null;
   reopened_at: string | null;
   targets: MetricCounts;
 }
 
-export interface WeekView {
-  record: WeekRecord;
+export interface TargetView {
+  record: TargetRecord;
   achieved: MetricCounts;
 }
 
-/** A week with no row yet: nothing committed, nothing locked. */
-function emptyRecord(member: string, weekStart: string): WeekRecord {
+/** A period with no row yet: nothing committed, nothing locked. */
+function emptyRecord(
+  member: string,
+  period: Period,
+  periodStart: string,
+): TargetRecord {
   return {
     id: null,
     member,
-    week_start: weekStart,
+    period,
+    period_start: periodStart,
     locked: false,
     submitted_at: null,
     reopened_at: null,
@@ -57,18 +67,19 @@ function emptyRecord(member: string, weekStart: string): WeekRecord {
 // Built from METRIC_KEYS so the column list cannot drift from the metrics.
 // supabase-js can only infer a row type from a literal select string, so the
 // rows come back untyped and `toRecord` below checks each field itself.
-const ROW_COLUMNS = `id, member, week_start, locked, submitted_at, reopened_at, ${METRIC_KEYS.join(", ")}`;
+const ROW_COLUMNS = `id, member, period, period_start, locked, submitted_at, reopened_at, ${METRIC_KEYS.join(", ")}`;
 
 type RawRow = Record<string, unknown> & {
   id: string;
   member: string;
-  week_start: string;
+  period: string;
+  period_start: string;
   locked: boolean;
   submitted_at: string | null;
   reopened_at: string | null;
 };
 
-function toRecord(row: RawRow): WeekRecord {
+function toRecord(row: RawRow): TargetRecord {
   const targets = { ...ZERO_COUNTS };
   for (const key of METRIC_KEYS) {
     const value = row[key];
@@ -77,7 +88,8 @@ function toRecord(row: RawRow): WeekRecord {
   return {
     id: row.id,
     member: row.member,
-    week_start: row.week_start,
+    period: row.period as Period,
+    period_start: row.period_start,
     locked: row.locked,
     submitted_at: row.submitted_at,
     reopened_at: row.reopened_at,
@@ -85,29 +97,35 @@ function toRecord(row: RawRow): WeekRecord {
   };
 }
 
-/* ------------------------------------------------------------------ */
-/* Counting what happened                                              */
-/* ------------------------------------------------------------------ */
+/** A visit row as the achieved-count queries select it. */
+type CountableVisit = TallyableVisit & { institute_id: string };
+
+function achievedFrom(visits: CountableVisit[], meetingsHeld: number): MetricCounts {
+  const achieved = tallyVisitMetrics(visits);
+  achieved.meetings = meetingsHeld;
+  achieved.institutes_covered = new Set(visits.map((v) => v.institute_id)).size;
+  return achieved;
+}
 
 /* ------------------------------------------------------------------ */
 /* One member                                                          */
 /* ------------------------------------------------------------------ */
 
-export async function getWeek(
+export async function getTargets(
   memberId: string,
-  weekStart: string,
-): Promise<{ ok: true; view: WeekView } | { ok: false }> {
+  period: Period,
+  periodStart: string,
+): Promise<{ ok: true; view: TargetView } | { ok: false }> {
   const supabase = await createClient();
-  // Sunday counts towards the week that just ended, so the upper bound is the
-  // Sunday rather than the Saturday the rep is shown. See lib/weeks.ts.
-  const end = weekCountEnd(weekStart);
+  const { start, end } = periodRange(period, periodStart);
 
   const [targetsResult, plansResult, visitsResult] = await Promise.all([
     supabase
-      .from("weekly_targets")
+      .from("targets")
       .select(ROW_COLUMNS)
       .eq("member", memberId)
-      .eq("week_start", weekStart)
+      .eq("period", period)
+      .eq("period_start", periodStart)
       .maybeSingle(),
     // Rule 7: the Meetings figure is the count of plan entries actually held.
     supabase
@@ -115,39 +133,39 @@ export async function getWeek(
       .select("id", { count: "exact", head: true })
       .eq("member", memberId)
       .eq("meetings_actual", 1)
-      .gte("date", weekStart)
+      .gte("date", start)
       .lte("date", end),
     supabase
       .from("visits")
-      .select("member, activity, lifecycle_status")
+      .select("member, activity, lifecycle_status, institute_id")
       .eq("member", memberId)
-      .gte("date", weekStart)
+      .gte("date", start)
       .lte("date", end),
   ]);
 
   if (targetsResult.error) {
-    logError("weekly:targets", targetsResult.error);
+    logError("targets:row", targetsResult.error);
     return { ok: false };
   }
   if (plansResult.error) {
-    logError("weekly:meetings", plansResult.error);
+    logError("targets:meetings", plansResult.error);
     return { ok: false };
   }
   if (visitsResult.error) {
-    logError("weekly:visits", visitsResult.error);
+    logError("targets:visits", visitsResult.error);
     return { ok: false };
   }
-
-  const achieved = tallyVisitMetrics(visitsResult.data ?? []);
-  achieved.meetings = plansResult.count ?? 0;
 
   return {
     ok: true,
     view: {
       record: targetsResult.data
         ? toRecord(targetsResult.data as unknown as RawRow)
-        : emptyRecord(memberId, weekStart),
-      achieved,
+        : emptyRecord(memberId, period, periodStart),
+      achieved: achievedFrom(
+        (visitsResult.data ?? []) as CountableVisit[],
+        plansResult.count ?? 0,
+      ),
     },
   };
 }
@@ -156,49 +174,52 @@ export async function getWeek(
 /* The whole team                                                      */
 /* ------------------------------------------------------------------ */
 
-export interface TeamMemberWeek {
+export interface TeamMemberTargets {
   member: string;
   name: string;
   role: string;
-  view: WeekView;
+  view: TargetView;
 }
 
 /**
- * Every member's week in four queries rather than four per member.
+ * Every member's period in four queries rather than four per member.
  *
  * Only an admin's RLS scope returns other people's rows, so this is safe to
  * call from an admin surface; a rep calling it would simply see themselves.
  */
-export async function getTeamWeek(
-  weekStart: string,
-): Promise<{ ok: true; members: TeamMemberWeek[] } | { ok: false }> {
+export async function getTeamTargets(
+  period: Period,
+  periodStart: string,
+): Promise<{ ok: true; members: TeamMemberTargets[] } | { ok: false }> {
   const supabase = await createClient();
-  // Sunday counts towards the week that just ended, so the upper bound is the
-  // Sunday rather than the Saturday the rep is shown. See lib/weeks.ts.
-  const end = weekCountEnd(weekStart);
+  const { start, end } = periodRange(period, periodStart);
 
   const [profilesResult, targetsResult, plansResult, visitsResult] =
     await Promise.all([
       supabase.from("profiles").select("id, name, role").order("name"),
-      supabase.from("weekly_targets").select(ROW_COLUMNS).eq("week_start", weekStart),
+      supabase
+        .from("targets")
+        .select(ROW_COLUMNS)
+        .eq("period", period)
+        .eq("period_start", periodStart),
       supabase
         .from("daily_plans")
         .select("member")
         .eq("meetings_actual", 1)
-        .gte("date", weekStart)
+        .gte("date", start)
         .lte("date", end),
       supabase
         .from("visits")
-        .select("member, activity, lifecycle_status")
-        .gte("date", weekStart)
+        .select("member, activity, lifecycle_status, institute_id")
+        .gte("date", start)
         .lte("date", end),
     ]);
 
   for (const [context, result] of [
-    ["weekly:team-profiles", profilesResult],
-    ["weekly:team-targets", targetsResult],
-    ["weekly:team-meetings", plansResult],
-    ["weekly:team-visits", visitsResult],
+    ["targets:team-profiles", profilesResult],
+    ["targets:team-rows", targetsResult],
+    ["targets:team-meetings", plansResult],
+    ["targets:team-visits", visitsResult],
   ] as const) {
     if (result.error) {
       logError(context, result.error);
@@ -206,7 +227,7 @@ export async function getTeamWeek(
     }
   }
 
-  const records = new Map<string, WeekRecord>();
+  const records = new Map<string, TargetRecord>();
   for (const row of (targetsResult.data ?? []) as unknown as RawRow[]) {
     records.set(row.member, toRecord(row));
   }
@@ -216,26 +237,27 @@ export async function getTeamWeek(
     heldByMember.set(row.member, (heldByMember.get(row.member) ?? 0) + 1);
   }
 
-  const visitsByMember = new Map<string, TallyableVisit[]>();
-  for (const row of (visitsResult.data ?? []) as (TallyableVisit & { member: string })[]) {
+  const visitsByMember = new Map<string, CountableVisit[]>();
+  for (const row of (visitsResult.data ?? []) as (CountableVisit & {
+    member: string;
+  })[]) {
     const list = visitsByMember.get(row.member);
     if (list) list.push(row);
     else visitsByMember.set(row.member, [row]);
   }
 
-  const members = (profilesResult.data ?? []).map((profile) => {
-    const achieved = tallyVisitMetrics(visitsByMember.get(profile.id) ?? []);
-    achieved.meetings = heldByMember.get(profile.id) ?? 0;
-    return {
-      member: profile.id,
-      name: profile.name ?? "Unnamed member",
-      role: profile.role as string,
-      view: {
-        record: records.get(profile.id) ?? emptyRecord(profile.id, weekStart),
-        achieved,
-      },
-    };
-  });
+  const members = (profilesResult.data ?? []).map((profile) => ({
+    member: profile.id,
+    name: profile.name ?? "Unnamed member",
+    role: profile.role as string,
+    view: {
+      record: records.get(profile.id) ?? emptyRecord(profile.id, period, periodStart),
+      achieved: achievedFrom(
+        visitsByMember.get(profile.id) ?? [],
+        heldByMember.get(profile.id) ?? 0,
+      ),
+    },
+  }));
 
   return { ok: true, members };
 }
@@ -250,7 +272,7 @@ export async function memberName(memberId: string): Promise<string | null> {
     .maybeSingle();
 
   if (error) {
-    logError("weekly:member-name", error);
+    logError("targets:member-name", error);
     return null;
   }
   return data?.name ?? null;
