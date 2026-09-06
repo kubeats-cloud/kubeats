@@ -9,7 +9,9 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -18,11 +20,16 @@ import { CaptureFields } from "@/components/visits/capture-fields";
 import { createVisit } from "@/lib/visit-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import type { PickerInstitute, PlanEntry } from "@/lib/visits";
-import { INSTITUTE_STATUSES } from "@/lib/validation/institute";
+import {
+  CATEGORY_LABELS,
+  STATUS_CATEGORIES,
+  statusesInCategory,
+} from "@/lib/validation/institute";
 import {
   ACTIVITIES,
   followUpHidden,
   followUpRequired,
+  followUpSuggested,
   hasLifecycle,
   fieldLabel,
   visitFieldErrors,
@@ -72,6 +79,7 @@ export function LogVisitForm({
   const status = statusSetTo === NO_CHANGE ? null : statusSetTo;
   const hideFollowUp = followUpHidden(status);
   const needFollowUp = followUpRequired(status);
+  const suggestFollowUp = followUpSuggested(status);
 
   const error = serverState.error ?? clientState.error;
   const fieldErrors = serverState.error
@@ -295,12 +303,19 @@ export function LogVisitForm({
               <SelectTrigger className="h-11 w-full">
                 <SelectValue />
               </SelectTrigger>
+              {/* Grouped by category so it is obvious which choices leave the
+                  institute in play and which close the loop. */}
               <SelectContent>
                 <SelectItem value={NO_CHANGE}>No change</SelectItem>
-                {INSTITUTE_STATUSES.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
+                {STATUS_CATEGORIES.map((category) => (
+                  <SelectGroup key={category}>
+                    <SelectLabel>{CATEGORY_LABELS[category]}</SelectLabel>
+                    {statusesInCategory(category).map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 ))}
               </SelectContent>
             </Select>
@@ -317,6 +332,12 @@ export function LogVisitForm({
             </p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
+              {suggestFollowUp && (
+                <p className="text-muted-foreground text-xs sm:col-span-2">
+                  Nobody is booked to come back to you on an invitation — set a
+                  date to chase the RSVP.
+                </p>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="follow-up-date">
                   Follow-up date {needFollowUp ? "(required)" : "(optional)"}

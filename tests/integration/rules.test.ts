@@ -1,6 +1,11 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tallyVisitMetrics } from "@/lib/validation/weekly";
+import {
+  INSTITUTE_STATUSES,
+  isOpenStatus,
+  statusCategory,
+} from "@/lib/validation/institute";
 
 /**
  * The rules that live in Postgres.
@@ -73,6 +78,33 @@ const has0007 = configured
 const has0008 = configured
   ? await admin.rpc("app_today").then(({ error }) => !error)
   : false;
+
+/**
+ * Migration 0010 adds the institute_statuses lookup and the three event
+ * statuses. Like 0008's suite, this one is the only thing that can catch the
+ * app's catalogue and the database's table disagreeing about which statuses
+ * exist and which are open — so it warns rather than passing quietly.
+ */
+const has0010 = configured
+  ? await admin
+      .from("institute_statuses")
+      .select("status")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0010) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0010 is not applied to this project.",
+      "    The institute_status_category suite is being SKIPPED, not passing —",
+      "    which means nothing here is checking that the app and the database",
+      "    agree on the nine statuses or on which of them are open.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
 
 if (configured && !has0008) {
   console.warn(
@@ -1133,4 +1165,149 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(tallied.meetings).toBe(0); // never sourced from visits
     });
   });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0010)(
+    "institute_status_category — one vocabulary, agreed by both halves",
+    () => {
+      /**
+       * The app decides what a rep may choose (INSTITUTE_STATUS_CATALOGUE) and
+       * the database decides what may be stored (institute_statuses, plus the
+       * two CHECK constraints). Features C and D will ask both which statuses
+       * are closed, so the two have to answer identically. Only a real
+       * database can say whether they still do.
+       */
+      it("holds exactly the app's nine statuses, in the app's order", async () => {
+        const { data, error } = await admin
+          .from("institute_statuses")
+          .select("status, category, sort_order")
+          .order("sort_order");
+
+        expect(error).toBeNull();
+        expect(data?.map((row) => row.status)).toEqual([...INSTITUTE_STATUSES]);
+      });
+
+      it("gives every status the same category the app does", async () => {
+        const { data } = await admin
+          .from("institute_statuses")
+          .select("status, category");
+
+        for (const row of data ?? []) {
+          expect(row.category, row.status).toBe(statusCategory(row.status));
+        }
+      });
+
+      it("answers institute_status_category() the way the app does", async () => {
+        for (const status of INSTITUTE_STATUSES) {
+          const { data, error } = await admin.rpc("institute_status_category", {
+            p_status: status,
+          });
+          expect(error, status).toBeNull();
+          expect(data, status).toBe(statusCategory(status));
+        }
+      });
+
+      it("answers institute_status_is_open() the way the app does", async () => {
+        for (const status of INSTITUTE_STATUSES) {
+          const { data } = await admin.rpc("institute_status_is_open", {
+            p_status: status,
+          });
+          expect(data, status).toBe(isOpenStatus(status));
+        }
+      });
+
+      it("knows nothing about a status outside the nine", async () => {
+        // Null, not 'closed'. An institute whose status the database does not
+        // recognise must not be mistaken for a finished loop.
+        const { data: category } = await admin.rpc("institute_status_category", {
+          p_status: "Principal said maybe",
+        });
+        expect(category).toBeNull();
+
+        const { data: open } = await admin.rpc("institute_status_is_open", {
+          p_status: "Principal said maybe",
+        });
+        expect(open).toBeNull();
+      });
+
+      it("stores each of the three new statuses on an institute", async () => {
+        for (const status of [
+          "Invited principal for event",
+          "RSVP received",
+          "Will not come",
+        ]) {
+          const { error } = await admin
+            .from("institutes")
+            .update({ status })
+            .eq("id", instituteId);
+          expect(error, status).toBeNull();
+        }
+      });
+
+      it("still refuses a status outside the nine", async () => {
+        const { error } = await admin
+          .from("institutes")
+          .update({ status: "Principal said maybe" })
+          .eq("id", instituteId);
+
+        expect(error?.code).toBe(CHECK_VIOLATION);
+      });
+
+      it("records each new status on a visit", async () => {
+        for (const status of [
+          "Invited principal for event",
+          "RSVP received",
+          "Will not come",
+        ]) {
+          const { error } = await admin.from("visits").insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "olympiad",
+            date: iso(),
+            photo_url: photoFor(repA.id),
+            status_set_to: status,
+          });
+          expect(error, status).toBeNull();
+        }
+      });
+
+      it("leaves Rule 5 exactly as it was", async () => {
+        const visit = (status: string, followUp: string | null) => ({
+          institute_id: instituteId,
+          member: repA.id,
+          activity: "olympiad" as const,
+          date: iso(),
+          photo_url: photoFor(repA.id),
+          status_set_to: status,
+          follow_up_date: followUp,
+        });
+
+        // Unchanged: approval still demands a date...
+        const approval = await admin
+          .from("visits")
+          .insert(visit("Pending for management approval", null));
+        expect(approval.error?.code).toBe(CHECK_VIOLATION);
+
+        // ...and a "scheduled" status still forbids one.
+        const scheduled = await admin
+          .from("visits")
+          .insert(visit("Session scheduled", "2026-10-01"));
+        expect(scheduled.error?.code).toBe(CHECK_VIOLATION);
+
+        // New: an invitation saves without one, because a rep who does not yet
+        // know when they will chase it must not be stuck.
+        const invited = await admin
+          .from("visits")
+          .insert(visit("Invited principal for event", null));
+        expect(invited.error).toBeNull();
+
+        // New: a closed status may still carry one — "ask again next intake".
+        const declined = await admin
+          .from("visits")
+          .insert(visit("Will not come", "2027-01-15"));
+        expect(declined.error).toBeNull();
+      });
+    },
+  );
 });

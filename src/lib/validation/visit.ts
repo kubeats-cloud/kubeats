@@ -51,12 +51,29 @@ export const FOLLOW_UP_HIDDEN_FOR = [
 
 export const FOLLOW_UP_REQUIRED_FOR = "Pending for management approval";
 
+/**
+ * Recommended, not enforced.
+ *
+ * An invitation is the one open status whose next step is entirely ours to
+ * chase — nobody is scheduled to come back to us, so without a date it simply
+ * goes quiet. The form says so; the schema and the database deliberately do
+ * not, because a rep who genuinely does not know when they will chase it must
+ * still be able to log the visit.
+ */
+export const FOLLOW_UP_SUGGESTED_FOR = ["Invited principal for event"] as const;
+
 export function followUpHidden(status: string | null): boolean {
   return status !== null && (FOLLOW_UP_HIDDEN_FOR as readonly string[]).includes(status);
 }
 
 export function followUpRequired(status: string | null): boolean {
   return status === FOLLOW_UP_REQUIRED_FOR;
+}
+
+export function followUpSuggested(status: string | null): boolean {
+  return (
+    status !== null && (FOLLOW_UP_SUGGESTED_FOR as readonly string[]).includes(status)
+  );
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
