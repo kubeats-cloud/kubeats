@@ -12,7 +12,7 @@ import {
   targetsSchema,
   weeklyFieldErrors,
 } from "@/lib/validation/weekly";
-import { isFuturePeriod, shiftPeriod, type Period } from "@/lib/periods";
+import { isFuturePeriod, shiftPeriod, type TargetPeriod } from "@/lib/periods";
 
 /**
  * Rule 6 — the target lock, now for all three periods.
@@ -34,7 +34,7 @@ const LOCKED_MESSAGE =
   "This period is locked. Ask an admin to reopen it before making changes.";
 
 /** How far ahead a rep may commit, per period. Beyond this is a typo, not a plan. */
-const MAX_AHEAD: Record<Period, number> = {
+const MAX_AHEAD: Record<TargetPeriod, number> = {
   daily: 31,
   weekly: 8,
   monthly: 6,
@@ -57,7 +57,7 @@ function mapLockError(error: { code?: string }, fallback: string): string {
 }
 
 /** How many whole periods `periodStart` sits ahead of the current one. */
-function periodsAhead(period: Period, periodStart: string): number {
+function periodsAhead(period: TargetPeriod, periodStart: string): number {
   let cursor = shiftPeriod(period, periodStart, 0);
   for (let steps = 0; steps <= MAX_AHEAD[period] + 1; steps += 1) {
     if (!isFuturePeriod(period, cursor)) return steps;

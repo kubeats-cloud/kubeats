@@ -2,8 +2,8 @@ import Link from "next/link";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  PERIODS,
   PERIOD_LABELS,
+  PERIOD_NOUN,
   formatPeriodRange,
   periodLabel,
   periodStartOf,
@@ -28,11 +28,18 @@ import { cn } from "@/lib/utils";
 export function PeriodControls({
   period,
   periodStart,
+  options,
   member,
   basePath = "/targets",
 }: {
   period: Period;
   periodStart: string;
+  /**
+   * Which periods this screen offers. Targets takes TARGET_PERIODS (no yearly,
+   * because the table has no such row); the activity report takes
+   * REPORT_PERIODS (no weekly). One control, two vocabularies.
+   */
+  options: readonly Period[];
   /** Carried through so an admin drilling into a rep stays on that rep. */
   member?: string;
   basePath?: string;
@@ -49,7 +56,7 @@ export function PeriodControls({
   return (
     <div className="mb-4 space-y-2">
       <div className="bg-card border-border flex gap-1 rounded-lg border p-1">
-        {PERIODS.map((option) => (
+        {options.map((option) => (
           <Button
             key={option}
             asChild
@@ -70,7 +77,7 @@ export function PeriodControls({
         <Button asChild variant="ghost" className="size-11 shrink-0">
           <Link
             href={href(period, shiftPeriod(period, periodStart, -1))}
-            aria-label={`Previous ${period === "daily" ? "day" : period === "weekly" ? "week" : "month"}`}
+            aria-label={`Previous ${PERIOD_NOUN[period]}`}
           >
             <ChevronLeftIcon className="size-5" aria-hidden />
           </Link>
@@ -89,7 +96,7 @@ export function PeriodControls({
         <Button asChild variant="ghost" className="size-11 shrink-0">
           <Link
             href={href(period, shiftPeriod(period, periodStart, 1))}
-            aria-label={`Next ${period === "daily" ? "day" : period === "weekly" ? "week" : "month"}`}
+            aria-label={`Next ${PERIOD_NOUN[period]}`}
           >
             <ChevronRightIcon className="size-5" aria-hidden />
           </Link>

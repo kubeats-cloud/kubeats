@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { saveTargets, submitTargets } from "@/lib/target-actions";
-import { PERIOD_NOUN, type Period } from "@/lib/periods";
+import { PERIOD_NOUN, type TargetPeriod } from "@/lib/periods";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import {
   METRICS,
@@ -47,7 +47,7 @@ export function TargetsForm({
   submittedAt,
   reopenedAt,
 }: {
-  period: Period;
+  period: TargetPeriod;
   periodStart: string;
   targets: MetricCounts;
   achieved: MetricCounts;
