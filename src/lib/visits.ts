@@ -3,6 +3,7 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
 import { todayISO } from "@/lib/dates";
+import type { InstituteStatus } from "@/lib/validation/institute";
 
 /*
  * There used to be a second copy of todayISO() here, computing the day from the
@@ -16,13 +17,20 @@ export interface PickerInstitute {
   id: string;
   name: string;
   city: string | null;
+  /**
+   * Carried so a picker can say when an institute's loop is already finished.
+   * Nothing filters on it — a closed institute has always been plannable, and
+   * this exists so a rep can SEE that they are reopening an old thread rather
+   * than starting a new one by mistake.
+   */
+  status: InstituteStatus | null;
 }
 
 export async function listInstitutesForPicker(): Promise<PickerInstitute[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("institutes")
-    .select("id, name, city")
+    .select("id, name, city, status")
     .order("name");
 
   if (error) {

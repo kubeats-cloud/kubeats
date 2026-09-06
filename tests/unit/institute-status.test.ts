@@ -4,6 +4,8 @@ import {
   INSTITUTE_STATUSES,
   INSTITUTE_STATUS_CATALOGUE,
   STATUS_CATEGORIES,
+  institutePickerLabel,
+  reopeningInstitute,
   isClosedStatus,
   isOpenStatus,
   statusCategory,
@@ -257,5 +259,84 @@ describe("visitSchema accepts the widened vocabulary", () => {
       const issue = result.error.issues.find((i) => i.path[0] === "status_set_to");
       expect(issue?.message).toBe("Choose one of the listed statuses.");
     }
+  });
+});
+
+describe("institutePickerLabel — finding a finished institute again (feature D)", () => {
+  const base = { name: "Horizon International School", city: "Ahmedabad" };
+
+  it("spells out the status when the loop is closed", () => {
+    expect(institutePickerLabel({ ...base, status: "RSVP received" })).toBe(
+      "Horizon International School · Ahmedabad — RSVP received (closed)",
+    );
+  });
+
+  it("marks every closed status and no open one", () => {
+    for (const status of INSTITUTE_STATUSES) {
+      const label = institutePickerLabel({ ...base, status });
+      expect(label.includes("(closed)"), status).toBe(isClosedStatus(status));
+      // The status itself is only worth the space when it changes what the
+      // rep is about to do.
+      expect(label.includes(status), status).toBe(isClosedStatus(status));
+    }
+  });
+
+  it("says nothing extra for an institute with no status yet", () => {
+    expect(institutePickerLabel({ ...base, status: null })).toBe(
+      "Horizon International School · Ahmedabad",
+    );
+  });
+
+  it("copes with a missing city", () => {
+    expect(institutePickerLabel({ name: "Zenith", city: null, status: null })).toBe(
+      "Zenith",
+    );
+    expect(
+      institutePickerLabel({ name: "Zenith", city: null, status: "Will not come" }),
+    ).toBe("Zenith — Will not come (closed)");
+  });
+
+  it("does not mark a status it does not recognise", () => {
+    // A stale row or a future status must not be silently called closed.
+    expect(institutePickerLabel({ ...base, status: "Something else" })).toBe(
+      "Horizon International School · Ahmedabad",
+    );
+  });
+});
+
+describe("reopeningInstitute — when the picker should warn (feature D)", () => {
+  const institutes = [
+    { id: "closed-1", name: "Horizon", status: "RSVP received" },
+    { id: "closed-2", name: "Pinnacle", status: "Will not come" },
+    { id: "open-1", name: "Zenith", status: "First meeting done" },
+    { id: "fresh-1", name: "Abc test", status: null },
+  ];
+
+  it("returns the institute when its loop is already closed", () => {
+    expect(reopeningInstitute(institutes, "closed-1")?.name).toBe("Horizon");
+    expect(reopeningInstitute(institutes, "closed-2")?.name).toBe("Pinnacle");
+  });
+
+  it("says nothing for an open one, an unstatused one, or no selection", () => {
+    expect(reopeningInstitute(institutes, "open-1")).toBeNull();
+    expect(reopeningInstitute(institutes, "fresh-1")).toBeNull();
+    expect(reopeningInstitute(institutes, "")).toBeNull();
+  });
+
+  it("says nothing for an id that is not in the list", () => {
+    expect(reopeningInstitute(institutes, "not-a-real-id")).toBeNull();
+  });
+
+  it("agrees with the catalogue for every one of the nine", () => {
+    for (const status of INSTITUTE_STATUSES) {
+      const list = [{ id: "x", name: "Somewhere", status }];
+      expect(Boolean(reopeningInstitute(list, "x")), status).toBe(
+        isClosedStatus(status),
+      );
+    }
+  });
+
+  it("copes with an empty registry", () => {
+    expect(reopeningInstitute([], "closed-1")).toBeNull();
   });
 });

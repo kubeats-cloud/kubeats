@@ -106,6 +106,50 @@ export const CATEGORY_LABELS: Record<StatusCategory, string> = {
   closed: "Closed — nothing further owed",
 };
 
+/**
+ * How an institute reads in a picker.
+ *
+ * A closed institute has always been plannable — there is no constraint, no
+ * policy and no filter anywhere that stops it, and re-adding one is how a new
+ * cycle of engagement starts. What was missing was any way to TELL, so the
+ * closed ones now carry their status: "Horizon International School · Ahmedabad
+ * — RSVP received (closed)".
+ *
+ * Only closed statuses are spelled out. Marking all nine would put a label on
+ * every row of a long list and bury the one distinction that changes what the
+ * rep is about to do.
+ */
+export function institutePickerLabel(institute: {
+  name: string;
+  city: string | null;
+  status: string | null;
+}): string {
+  const place = institute.city ? ` · ${institute.city}` : "";
+  return isClosedStatus(institute.status)
+    ? `${institute.name}${place} — ${institute.status} (closed)`
+    : `${institute.name}${place}`;
+}
+
+/**
+ * The institute a rep is about to reopen, if that is what they are doing.
+ *
+ * Returns the selection only when its loop is already closed, which is the one
+ * case a picker should say something about before the rep commits. Everything
+ * else — no selection, an unknown id, an open status, no status yet — is an
+ * ordinary plan entry and gets no commentary.
+ *
+ * A function rather than two lines inside the component so the decision can be
+ * tested without a browser, and so the next screen that needs it asks the same
+ * question the same way.
+ */
+export function reopeningInstitute<
+  T extends { id: string; status: string | null },
+>(institutes: readonly T[], selectedId: string): T | null {
+  if (!selectedId) return null;
+  const selected = institutes.find((institute) => institute.id === selectedId);
+  return selected && isClosedStatus(selected.status) ? selected : null;
+}
+
 /** Blank optional fields arrive from a form as "", which we store as null. */
 const optionalText = (max: number) =>
   z
