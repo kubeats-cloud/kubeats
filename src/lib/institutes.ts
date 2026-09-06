@@ -165,3 +165,74 @@ export async function getInstituteVisits(
     })),
   };
 }
+
+export interface StatusChange {
+  id: string;
+  status: InstituteStatus;
+  changedAt: string;
+  changedBy: string | null;
+  /** Null when RLS hides that profile — a rep may only read their own. */
+  changedByName: string | null;
+  /** The visit that caused it, when one did. */
+  visitId: string | null;
+}
+
+/**
+ * The institute's status journey, newest first (migration 0011).
+ *
+ * Readable by everyone: institute_status_history_select is `using (true)`,
+ * like the registry itself. "This school went cold in March" is a fact about
+ * the school, not about the rep who recorded it, and the next person to pick
+ * it up needs it.
+ *
+ * The open/closed category is deliberately not selected — it is not stored.
+ * Derive it with statusCategory() from the shared catalogue, so this feature
+ * cannot become a second opinion about which statuses are closed.
+ */
+export async function getInstituteStatusHistory(
+  instituteId: string,
+): Promise<{ ok: true; changes: StatusChange[] } | { ok: false }> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("institute_status_history")
+    .select("id, status, changed_at, changed_by, visit_id")
+    .eq("institute_id", instituteId)
+    .order("changed_at", { ascending: false });
+
+  if (error) {
+    logError("institutes:status-history", error);
+    return { ok: false };
+  }
+
+  const rows = data ?? [];
+  const changerIds = [
+    ...new Set(rows.map((r) => r.changed_by).filter((id): id is string => Boolean(id))),
+  ];
+
+  const names = new Map<string, string>();
+  if (changerIds.length > 0) {
+    const { data: profiles, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, name")
+      .in("id", changerIds);
+
+    if (profileError) {
+      // Names are decoration; the journey still reads without them.
+      logError("institutes:status-history-members", profileError);
+    }
+    for (const p of profiles ?? []) names.set(p.id, p.name);
+  }
+
+  return {
+    ok: true,
+    changes: rows.map((r) => ({
+      id: r.id,
+      status: r.status as InstituteStatus,
+      changedAt: r.changed_at,
+      changedBy: r.changed_by,
+      changedByName: r.changed_by ? (names.get(r.changed_by) ?? null) : null,
+      visitId: r.visit_id,
+    })),
+  };
+}

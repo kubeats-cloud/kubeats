@@ -2,7 +2,7 @@ import Link from "next/link";
 import { formatDate } from "@/lib/dates";
 import { PageColumn } from "@/components/layout/page-column";
 import { notFound } from "next/navigation";
-import { ArrowLeftIcon, HistoryIcon } from "lucide-react";
+import { ArrowLeftIcon, HistoryIcon, MilestoneIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormSection } from "@/components/form-section";
@@ -10,8 +10,13 @@ import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { EmptyState, ErrorState } from "@/components/states";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
+import { StatusTimeline } from "@/components/institutes/status-timeline";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
-import { getInstitute, getInstituteVisits } from "@/lib/institutes";
+import {
+  getInstitute,
+  getInstituteStatusHistory,
+  getInstituteVisits,
+} from "@/lib/institutes";
 import { activityLabel } from "@/lib/activities";
 import { class12Total, STREAMS, TYPE_LABELS } from "@/lib/validation/institute";
 
@@ -43,7 +48,11 @@ export default async function InstituteDetailPage(
   const institute = await getInstitute(id);
   if (!institute) notFound();
 
-  const history = await getInstituteVisits(id);
+  // Two independent reads, so the slower one does not hold up the other.
+  const [history, statusHistory] = await Promise.all([
+    getInstituteVisits(id),
+    getInstituteStatusHistory(id),
+  ]);
   const total = class12Total(institute.class12);
 
   return (
@@ -161,6 +170,28 @@ export default async function InstituteDetailPage(
             </Row>
           </dl>
       </FormSection>
+
+      <SectionTitle>Status history</SectionTitle>
+      <div className="mb-6">
+        {!statusHistory.ok ? (
+          <ErrorState message="We could not load this institute's status history just now." />
+        ) : statusHistory.changes.length === 0 ? (
+          <EmptyState
+            icon={MilestoneIcon}
+            title="No status changes recorded"
+            description={
+              institute.status
+                ? "This institute's status was set before status history was kept. Every change from now on is recorded here."
+                : "Once someone sets this institute's status, every change will be recorded here."
+            }
+          />
+        ) : (
+          <StatusTimeline
+            changes={statusHistory.changes}
+            currentStatus={institute.status}
+          />
+        )}
+      </div>
 
       <SectionTitle>Visit history</SectionTitle>
       {!history.ok ? (
