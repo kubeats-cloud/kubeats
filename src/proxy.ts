@@ -108,6 +108,25 @@ export async function proxy(request: NextRequest) {
     return redirectTo("/");
   }
 
+  // /weekly became /targets when the screen grew daily and monthly periods.
+  //
+  // Answered here rather than by a page calling permanentRedirect(), for the
+  // same reason the admin gate below moved here: by the time a page under
+  // app/loading.tsx runs, the response has begun streaming and no redirect can
+  // still set a status. That route returned 200 with the redirect buried in the
+  // RSC payload, so a browser followed it but curl, a crawler and anything
+  // without JavaScript did not - and a permanent redirect that only some
+  // clients can see is not one.
+  //
+  // ?week= becomes ?start= and the period is pinned, so a link saved when the
+  // screen was called Weekly lands on exactly the week it used to.
+  if (pathname === "/weekly" || pathname.startsWith("/weekly/")) {
+    const params = new URLSearchParams({ period: "weekly" });
+    const week = request.nextUrl.searchParams.get("week");
+    if (week) params.set("start", week);
+    return redirectTo("/targets", params);
+  }
+
   // Admin-only areas.
   //
   // The page checks this for itself as well, but by the time a dynamic page

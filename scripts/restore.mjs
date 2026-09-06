@@ -26,7 +26,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
-import { BACKUP_TABLES, PHOTO_BUCKET } from "./tables.mjs";
+import { BACKUP_BUCKETS, BACKUP_TABLES, SEED_OWNED_BY_BACKUP } from "./tables.mjs";
 
 const CHUNK = 200;
 
@@ -124,6 +124,32 @@ async function main() {
     `  ${"auth users".padEnd(20)} ${dryRun ? `${users.length} would be created` : `${created} created, ${existing} already there`}`,
   );
 
+  // 2. Clear the seeded reference tables ------------------------------------
+  //
+  // See SEED_OWNED_BY_BACKUP in tables.mjs. The migrations seed states, cities
+  // and purposes; the backup carries its own, with different ids and usually
+  // more of them. Upserting one onto the other does not merge, it accumulates -
+  // a rehearsal turned 85 + 88 cities into 173. For these tables the backup is
+  // the authority, so they are emptied first.
+  //
+  // Only reached for a table the backup actually contains: a --tables run that
+  // does not include them must not quietly delete them.
+  const clearing = SEED_OWNED_BY_BACKUP.filter(
+    (t) => tables.some((x) => x.name === t) && readJson(join(root, "tables", `${t}.json`)),
+  );
+  if (clearing.length > 0) {
+    for (const table of clearing) {
+      if (dryRun) continue;
+      // A predicate that matches everything, because PostgREST refuses an
+      // unqualified delete - which is a good rule, and this is the exception.
+      const { error } = await db.from(table).delete().not("id", "is", null);
+      if (error) throw new Error(`clearing ${table}: ${error.message}`);
+    }
+    console.log(
+      `  ${"seed cleared".padEnd(20)} ${dryRun ? "would clear" : "cleared"} ${clearing.join(", ")}`,
+    );
+  }
+
   // 2. Table rows -----------------------------------------------------------
   for (const { name: table, conflict, regenerateId } of tables) {
     const stored = readJson(join(root, "tables", `${table}.json`));
@@ -162,9 +188,28 @@ async function main() {
     console.log(`  ${table.padEnd(20)} ${done} restored`);
   }
 
-  // 3. Photos ---------------------------------------------------------------
-  const storageRoot = join(root, "storage", PHOTO_BUCKET);
-  if (existsSync(storageRoot)) {
+  // 3. Storage ---------------------------------------------------------------
+  //
+  // Every bucket the backup carries, not only the photos. A material is a PDF
+  // or an image, so the content type comes from the extension rather than being
+  // assumed: uploading a PDF as image/jpeg would store it unreadable, and the
+  // materials bucket's allowed_mime_types would refuse it outright.
+  const CONTENT_TYPES = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".pdf": "application/pdf",
+  };
+  const contentTypeFor = (file) => {
+    const dot = file.lastIndexOf(".");
+    return CONTENT_TYPES[dot === -1 ? "" : file.slice(dot).toLowerCase()]
+      ?? "application/octet-stream";
+  };
+
+  for (const bucket of BACKUP_BUCKETS) {
+    const storageRoot = join(root, "storage", bucket.name);
+    if (!existsSync(storageRoot)) {
+      console.log(`  ${bucket.label.padEnd(20)} (none in this backup)`);
+      continue;
+    }
     let uploaded = 0;
     for (const folder of readdirSync(storageRoot)) {
       const folderPath = join(storageRoot, folder);
@@ -175,20 +220,18 @@ async function main() {
           continue;
         }
         const { error } = await db.storage
-          .from(PHOTO_BUCKET)
+          .from(bucket.name)
           .upload(`${folder}/${file}`, readFileSync(join(folderPath, file)), {
-            contentType: "image/jpeg",
+            contentType: contentTypeFor(file),
             upsert: true,
           });
-        if (error) console.warn(`    ! ${folder}/${file}: ${error.message}`);
+        if (error) console.warn(`    ! ${bucket.name}/${folder}/${file}: ${error.message}`);
         else uploaded += 1;
       }
     }
     console.log(
-      `  ${"photos".padEnd(20)} ${dryRun ? `${uploaded} would be uploaded` : `${uploaded} uploaded`}`,
+      `  ${bucket.label.padEnd(20)} ${dryRun ? `${uploaded} would be uploaded` : `${uploaded} uploaded`}`,
     );
-  } else {
-    console.log(`  ${"photos".padEnd(20)} (none in this backup)`);
   }
 
   console.log("\nStill to do by hand, because no backup can carry them:");

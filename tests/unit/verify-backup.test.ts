@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { verifyBackup } from "../../scripts/verify-backup.mjs";
-import { BACKUP_TABLES, PHOTO_BUCKET } from "../../scripts/tables.mjs";
+import {
+  BACKUP_BUCKETS,
+  BACKUP_TABLES,
+  NOT_BACKED_UP,
+  PHOTO_BUCKET,
+} from "../../scripts/tables.mjs";
 
 /**
  * The backup verifier.
@@ -67,6 +72,16 @@ function makeBackup(options: { photos?: number | null; users?: number } = {}) {
       tables: counts,
       authUsers: users,
       photos,
+      buckets: { [PHOTO_BUCKET]: photos ?? null, materials: 0 },
+      coverage: {
+        checked: true,
+        liveTables: [
+          ...TABLES.map((t) => t.name),
+          ...(NOT_BACKED_UP as { name: string }[]).map((t) => t.name),
+        ],
+        backedUp: TABLES.map((t) => t.name),
+        notBackedUp: (NOT_BACKED_UP as { name: string }[]).map((t) => t.name),
+      },
     }),
   );
 
@@ -105,7 +120,25 @@ describe("verifyBackup — a sound backup", () => {
       writeFileSync(join(root, "tables", `${name}.json`), "[]");
     }
     writeFileSync(join(root, "auth-users.json"), "[]");
-    const manifest = { takenAt: "t", source: "s", tables: Object.fromEntries(TABLES.map((t) => [t.name, 0])), authUsers: 0, photos: 0 };
+    // An empty project still has a schema, so a real backup of one still
+    // records which tables it accounted for.
+    const manifest = {
+      takenAt: "t",
+      source: "s",
+      tables: Object.fromEntries(TABLES.map((t) => [t.name, 0])),
+      authUsers: 0,
+      photos: 0,
+      buckets: Object.fromEntries(BACKUP_BUCKETS.map((b) => [b.name, 0])),
+      coverage: {
+        checked: true,
+        liveTables: [
+          ...TABLES.map((t) => t.name),
+          ...(NOT_BACKED_UP as { name: string }[]).map((t) => t.name),
+        ],
+        backedUp: TABLES.map((t) => t.name),
+        notBackedUp: (NOT_BACKED_UP as { name: string }[]).map((t) => t.name),
+      },
+    };
     writeFileSync(join(root, "manifest.json"), JSON.stringify(manifest));
     expect(verifyBackup(root).ok).toBe(true);
   });
@@ -238,5 +271,70 @@ describe("verifyBackup — a backup that is not sound", () => {
     rmSync(join(root, "tables", "profiles.json"));
     const { checks } = verifyBackup(root);
     expect(checks.filter((c: { ok: boolean }) => !c.ok).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("verifyBackup — the coverage guard", () => {
+  /**
+   * The check that exists because it had already gone wrong. visit_people,
+   * institute_status_history and materials were each added by a migration and
+   * never added to the backup, and nothing complained: the backup succeeded and
+   * the verifier passed. A forgotten table's failure mode is a backup that
+   * looks perfect, so these tests are about noticing an absence.
+   */
+  it("accepts a backup that accounted for every table", () => {
+    expect(failure(makeBackup())).toBeUndefined();
+  });
+
+  it("fails a backup taken before the coverage check existed", () => {
+    const root = makeBackup();
+    const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
+    delete manifest.coverage;
+    writeFileSync(join(root, "manifest.json"), JSON.stringify(manifest));
+    expect(failure(root)?.label).toContain("verified its own table coverage");
+  });
+
+  it("fails when the source database had a table nobody backed up", () => {
+    const root = makeBackup();
+    const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
+    manifest.coverage.liveTables.push("a_table_added_by_a_later_migration");
+    writeFileSync(join(root, "manifest.json"), JSON.stringify(manifest));
+    const f = failure(root);
+    expect(f?.label).toContain("accounted for");
+    expect(f?.detail).toContain("a_table_added_by_a_later_migration");
+  });
+
+  it("fails when a table it claims to back up has no file", () => {
+    const root = makeBackup();
+    rmSync(join(root, "tables", "visit_people.json"));
+    const f = failure(root);
+    expect(f).toBeDefined();
+  });
+
+  it("carries the three tables the audit found missing", () => {
+    const names = TABLES.map((t) => t.name);
+    for (const table of ["visit_people", "institute_status_history", "materials"]) {
+      expect(names, table).toContain(table);
+    }
+  });
+
+  it("gives a reason for every table it deliberately skips", () => {
+    for (const entry of NOT_BACKED_UP as { name: string; reason: string }[]) {
+      expect(entry.reason.length, entry.name).toBeGreaterThan(20);
+    }
+  });
+
+  it("backs up both private buckets", () => {
+    expect(BACKUP_BUCKETS.map((b) => b.name)).toEqual(["visit-photos", "materials"]);
+  });
+});
+
+describe("verifyBackup — storage", () => {
+  it("notices a bucket the manifest counted but the disk does not have", () => {
+    const root = makeBackup();
+    const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
+    manifest.buckets.materials = 3;
+    writeFileSync(join(root, "manifest.json"), JSON.stringify(manifest));
+    expect(failure(root)?.label).toContain("materials");
   });
 });
