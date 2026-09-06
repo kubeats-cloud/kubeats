@@ -1,0 +1,12 @@
+# KUbeats — security contact
+#
+# RFC 9116. Please edit Contact before this reaches production; the address
+# below is a placeholder and is not monitored.
+
+Contact: mailto:security@example.com
+Expires: 2027-09-06T00:00:00.000Z
+Preferred-Languages: en
+
+# If you are reporting something, it helps to include: the URL or endpoint, the
+# request you sent, what you expected, and what happened instead. Please do not
+# run automated scans against production — ask and we will arrange a window.

@@ -10,8 +10,9 @@ document that has the full detail; this page is the index, not a copy of them.
 | **Custom domain** | A professional URL, and it unlocks the free WAF login rate-limit (closes pen-test P1) | This document, below |
 | **Rotate the service-role key** | It has appeared in a build log; rotating retires it | `docs/PHASE-10-Production-Readiness-Audit.md` (H2) and the rotation steps handed over in session |
 | **Weekly backup + one restore rehearsal** | No automatic backup exists on the free tier; a mistaken delete is otherwise unrecoverable | `docs/BACKUP-RESTORE.md`, "For the client" |
-| **Uptime monitoring** | Nothing polls `/api/health` today, so an outage goes unnoticed | `docs/PHASE-10-Production-Readiness-Audit.md` (M2) |
-| **Deploy size ceiling** | 122 KiB headroom under the 3072 KiB free-plan limit; the next big feature likely needs the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
+| **Uptime monitoring** | Nothing polls `/api/health` today, so an outage goes unnoticed. Point a monitor at it for liveness; set `HEALTH_CHECK_TOKEN` if you also want it to check the database | `docs/PHASE-10-Production-Readiness-Audit.md` (M2), and "Security findings & posture" below for F2 |
+| **Deploy size ceiling** | 106 KiB headroom under the 3072 KiB free-plan limit; the next big feature likely needs the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
+| **Edit `security.txt`** | It ships with a placeholder contact address that nobody reads | This document, "Security findings & posture" |
 
 None of these is an application code change. They are operational decisions for whoever owns the
 Cloudflare and Supabase accounts after handover.
@@ -86,3 +87,86 @@ Send ~15 rapid `POST /login` requests from one IP; once the threshold trips they
 
 *The domain move is a handover decision. Until it happens, P1 stays Deferred / Planned with the
 interim mitigation recorded above and in the pen-test report.*
+
+---
+
+## Security findings & posture
+
+Two independent penetration tests have been run against this app: our own during Phase 10, and a
+later external one by a colleague of the client. They agreed on the shape of the result — the
+application boundaries hold, and what remains is a small number of hardening items. This section is
+the summary; it is not a substitute for either report.
+
+### What both tests passed
+
+| Area | Result |
+| --- | --- |
+| Role-based access control | **PASS** — a rep cannot reach admin screens or data, in the proxy, the page, and RLS |
+| IDOR / object references | **PASS** — no path found to another user's records by guessing an id |
+| Secrets in the bundle | **PASS** — the service-role key never reaches the client; the build asserts this |
+| Open redirect | **NOT VULNERABLE** — `?next=` was already sanitised at render time |
+| Security headers | **PASS** — nonce-based CSP with `strict-dynamic`, HSTS, `frame-ancestors 'none'`, no sniffing |
+
+### What was fixed after the external test
+
+| ID | Finding | What changed |
+| --- | --- | --- |
+| **F2** | Public `/api/health` ran a database query on every request, and disclosed latency and DB status | The public answer is now a static `{"ok":true}` that touches nothing (~5 ms instead of ~400 ms). The real check still exists behind `HEALTH_CHECK_TOKEN` + the `x-health-token` header; leave the variable unset and the deep check does not exist at all. |
+| **F3** | The `next` parameter was sanitised when rendered but re-checked only loosely in the sign-in action | `safeNextPath()` in `src/lib/validation/auth.ts` is now the single definition both sides call. It accepts only `^/(?!/)`, rejects backslashes, control characters (CR/LF header-splitting shapes) and absurd lengths, and falls back to `/`. Covered by `tests/unit/safe-next.test.ts`. |
+| **F5** | No security contact published | `public/.well-known/security.txt` (RFC 9116), reachable without a session — `.well-known` is excluded from the proxy matcher so it is never redirected to login and never costs a session refresh. **The contact address is a placeholder: edit it.** |
+| **F8** | Session cookie is not `HttpOnly` | Attempted, measured, and **reverted** — see below. |
+
+### F8: why the session cookie is not HttpOnly
+
+This was tested rather than assumed. With `httpOnly: true`:
+
+- login — **works**
+- staying signed in across navigation — **works**
+- sign out — **works**
+- **any upload from the browser — broken**, `403 new row violates row-level security policy`
+
+`@supabase/ssr`'s *browser* client builds its `Authorization` header from the session it reads out of
+`document.cookie`. Hide that cookie from script and the client silently falls back to the anon key,
+so every call it makes is anonymous. Two paths depend on it, both uploading straight from the browser
+so a multi-megabyte file never passes through a request body: the **visit photo**
+(`capture-fields.tsx`) and the **materials upload** (`material-upload-form.tsx`). Because Rule 12
+makes a photo mandatory, `HttpOnly` means a rep cannot log **any** visit at all.
+
+The failure is worth understanding because of its shape: server-rendered pages keep working, so login
+and navigation look healthy, and the app only breaks at the moment a rep standing in front of a school
+tries to save their work.
+
+A control run confirmed the cause rather than inferring it — the identical upload returns `200` with
+`HttpOnly` off and `403` with it on, changing nothing else.
+
+So it stays off as a **known `@supabase/ssr` constraint**, not an oversight. Standing in for it: a
+nonce-based CSP with `strict-dynamic` that refuses inline and third-party script — which is what an
+XSS would need in order to read the cookie in the first place — plus `SameSite=Lax`, `Secure` in
+production, and HSTS. Worth revisiting if `@supabase/ssr` ever reads the session server-side only.
+
+### F1: login rate-limiting — deferred to the custom domain
+
+Both tests found it, and it is the same finding under two names: the external report calls it **F1**,
+our Phase 10 report calls it **P1**. There is no per-IP throttle in front of the login form. It is
+**deferred on purpose**, not overlooked. Cloudflare's free WAF closes it with a rate-limit rule once the app is on
+a custom domain, which costs nothing and adds no host-specific code to the app — and adding an
+application-level limiter now would mean either a new dependency or a KV binding, both of which the
+portability rule exists to keep out.
+
+Interim mitigation, already in place: Supabase Auth applies its own per-project throttling and returns
+`429`, which the sign-in action surfaces as *"Too many attempts."*; sign-in failures are
+indistinguishable ("Invalid email or password") so the form is not an account-enumeration oracle; and
+accounts are admin-created, so there is no public sign-up surface to spray.
+
+See "Custom domain" above for the steps. **The rule is the last step of that move, not a separate
+task.**
+
+### The pattern note that outlives these findings
+
+**`proxy.ts` returns early for `/api/*`.** Page routes are behind the session gate; API routes are
+not — the proxy refreshes the session and then hands the request straight to the route, because
+redirecting a `fetch()` to an HTML login page would answer JSON with a document.
+
+So **every future `/api/*` route must authenticate itself** — check a session, check a role, or check
+a secret — or it is public to the internet. F2 was exactly this mistake made once. `/api/health` is
+now the worked example of the rule, not an exception to it.

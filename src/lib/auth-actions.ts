@@ -3,21 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { loginSchema } from "@/lib/validation/auth";
+import { loginSchema, safeNextPath } from "@/lib/validation/auth";
 
 export interface LoginState {
   error: string | null;
-}
-
-/**
- * Only same-origin, single-slash paths are accepted, so a crafted
- * `?next=//evil.example` cannot turn our login into an open redirect.
- */
-function safeNext(value: FormDataEntryValue | null): string {
-  if (typeof value !== "string") return "/";
-  if (!value.startsWith("/")) return "/";
-  if (value.startsWith("//") || value.includes("\\")) return "/";
-  return value;
 }
 
 export async function signIn(
@@ -35,7 +24,9 @@ export async function signIn(
     return { error: "Enter a valid email address and your password." };
   }
 
-  const next = safeNext(formData.get("next"));
+  // Re-checked here, not trusted from the field the page rendered: this action
+  // is reachable without that page ever running.
+  const next = safeNextPath(formData.get("next"));
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
 
