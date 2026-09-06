@@ -4,7 +4,7 @@ import { ErrorState } from "@/components/states";
 import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { requireAdmin } from "@/lib/admin";
-import { getTeamWeek } from "@/lib/weekly";
+import { getTeamTargets } from "@/lib/targets";
 import { openLoopsByMember } from "@/lib/visits";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
 
@@ -37,7 +37,7 @@ export default async function TeamPage(props: PageProps<"/team">) {
   const weekStart = normaliseWeekParam(first(searchParams.week));
 
   const [team, openLoops] = await Promise.all([
-    getTeamWeek(weekStart),
+    getTeamTargets("weekly", weekStart),
     openLoopsByMember(),
   ]);
 

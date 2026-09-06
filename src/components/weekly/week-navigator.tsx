@@ -13,15 +13,15 @@ import { addWeeks, formatWeekRange, weekLabel } from "@/lib/weeks";
 export function WeekNavigator({
   weekStart,
   member,
-  basePath = "/weekly",
+  basePath = "/targets",
 }: {
   weekStart: string;
   /** Carried through so an admin drilling into a rep stays on that rep. */
   member?: string;
   /**
-   * The route the arrows stay on. Defaults to /weekly because that is where
+   * The route the arrows stay on. Defaults to /targets because that is where
    * most of them live, but /team renders this too and reads ?week= itself —
-   * hardcoding /weekly here used to walk an admin off Team on the first click.
+   * hardcoding one route here used to walk an admin off Team on the first click.
    */
   basePath?: string;
 }) {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { mondayOf } from "@/lib/weeks";
+import { PERIODS, periodStartOf } from "@/lib/periods";
 
 /**
  * The eight weekly metrics, and — the part that actually matters — where each
@@ -61,6 +61,19 @@ export const METRICS = [
     source: "visits",
     activity: "admission",
     lifecycle: null,
+  },
+  /**
+   * The ninth metric, and the only one that is not a count of rows.
+   *
+   * "Covered" means distinct institutes reached in the period, so four visits
+   * to one school count once. tallyVisitMetrics() cannot produce it — that
+   * function counts matching rows — so it carries its own source and is filled
+   * in by the caller, exactly as `meetings` is.
+   */
+  {
+    key: "institutes_covered",
+    label: "Institutes Covered",
+    source: "distinct-institutes",
   },
 ] as const;
 
@@ -146,6 +159,47 @@ export function percentOf(achieved: number, target: number): number {
   return Math.min(100, Math.round((achieved / target) * 100));
 }
 
+/** How much of a commitment is still outstanding. Never negative. */
+export function remaining(achieved: number, target: number): number {
+  return Math.max(0, target - achieved);
+}
+
+/**
+ * The plain-language state of one metric, which is a different question from
+ * toneFor().
+ *
+ * toneFor() answers "how is this going" on a four-point colour scale, where
+ * being halfway is meaningfully better than being nowhere. This answers "has
+ * it been started, and is it finished" — three states, no judgement about pace.
+ * They are kept apart because collapsing them would mean a row 60% of the way
+ * through either loses its amber or gains a "Completed" it has not earned.
+ *
+ * A target of zero with nothing achieved is "Not Started" rather than
+ * "Completed": committing to nothing is not an achievement.
+ */
+export type ProgressStatus = "not-started" | "in-progress" | "completed";
+
+export const STATUS_LABELS: Record<ProgressStatus, string> = {
+  "not-started": "Not Started",
+  "in-progress": "In Progress",
+  completed: "Completed",
+};
+
+export const STATUS_BADGE: Record<
+  ProgressStatus,
+  "success" | "warning" | "neutral"
+> = {
+  "not-started": "neutral",
+  "in-progress": "warning",
+  completed: "success",
+};
+
+export function progressStatus(achieved: number, target: number): ProgressStatus {
+  if (target > 0 && achieved >= target) return "completed";
+  if (achieved > 0) return "in-progress";
+  return "not-started";
+}
+
 export const TONE_BAR: Record<ProgressTone, string> = {
   met: "bg-success",
   progressing: "bg-warning",
@@ -203,39 +257,61 @@ const count = z
   .refine((v) => /^\d{1,3}$/.test(v), "Whole numbers from 0 to 999.")
   .transform(Number);
 
-const weekStart = z
-  .string()
-  .refine((v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && mondayOf(v) === v, {
-    message: "That is not the start of a week.",
-  });
-
-export const weeklyTargetsSchema = z.object({
-  week_start: weekStart,
-  meetings: count,
-  sessions_set: count,
-  sessions_done: count,
-  campus_visits_set: count,
-  campus_visits_done: count,
-  olympiad: count,
-  application: count,
-  admission: count,
+/**
+ * A period_start has to sit on the grid its period implies, which is the same
+ * rule the targets_period_start_aligned CHECK enforces (migration 0013). Both
+ * sides say it so a rep gets a sentence rather than a constraint rejection.
+ */
+const periodStart = z.string().refine((v) => /^\d{4}-\d{2}-\d{2}$/.test(v), {
+  message: "That is not a date.",
 });
 
-export type WeeklyTargetsInput = z.infer<typeof weeklyTargetsSchema>;
+export const targetsSchema = z
+  .object({
+    period: z.enum(PERIODS, { message: "Choose a period." }),
+    period_start: periodStart,
+    meetings: count,
+    sessions_set: count,
+    sessions_done: count,
+    campus_visits_set: count,
+    campus_visits_done: count,
+    olympiad: count,
+    application: count,
+    admission: count,
+    institutes_covered: count,
+  })
+  .superRefine((value, ctx) => {
+    if (periodStartOf(value.period, value.period_start) !== value.period_start) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["period_start"],
+        message:
+          value.period === "weekly"
+            ? "That is not the start of a week."
+            : value.period === "monthly"
+              ? "That is not the start of a month."
+              : "That is not a valid date.",
+      });
+    }
+  });
+
+export type TargetsInput = z.infer<typeof targetsSchema>;
 
 export const reopenSchema = z.object({
   member: z.uuid("That member could not be identified."),
-  week_start: weekStart,
+  period: z.enum(PERIODS, { message: "Choose a period." }),
+  period_start: periodStart,
 });
 
 /** Shared so the browser and the server action read the form identically. */
-export function weeklyFormDataToInput(formData: FormData) {
+export function targetsFormDataToInput(formData: FormData) {
   const text = (key: string) => {
     const value = formData.get(key);
     return typeof value === "string" ? value : "";
   };
   return {
-    week_start: text("week_start"),
+    period: text("period"),
+    period_start: text("period_start"),
     ...(Object.fromEntries(METRIC_KEYS.map((key) => [key, text(key)])) as Record<
       MetricKey,
       string

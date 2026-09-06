@@ -8,26 +8,37 @@ import type { FormState } from "@/lib/visit-form-state";
 import {
   METRIC_KEYS,
   reopenSchema,
+  targetsFormDataToInput,
+  targetsSchema,
   weeklyFieldErrors,
-  weeklyFormDataToInput,
-  weeklyTargetsSchema,
 } from "@/lib/validation/weekly";
-import { isFutureWeek } from "@/lib/weeks";
+import { isFuturePeriod, shiftPeriod, type Period } from "@/lib/periods";
 
 /**
- * Rule 6 — the weekly lock.
+ * Rule 6 — the target lock, now for all three periods.
  *
- * The trigger on weekly_targets is the authority: it refuses any edit to a
- * locked week, allows only an admin to unlock one, and stamps submitted_at and
- * reopened_by/reopened_at itself so the audit trail cannot be forged from the
- * client. Everything here exists to turn those refusals into sentences.
+ * The trigger on public.targets is the authority: it refuses any edit to a
+ * locked period, allows only an admin to unlock one, and stamps submitted_at
+ * and reopened_by/reopened_at itself so the audit trail cannot be forged from
+ * the client. Everything here exists to turn those refusals into sentences.
+ *
+ * The rule is deliberately the same for a day, a week and a month. Submitting
+ * is opt-in — saving a draft never locks anything — so a rep only locks a day
+ * if they mean to, and one rule is one thing to reason about instead of three.
  */
 
 const CHECK_VIOLATION = "23514";
 const INSUFFICIENT_PRIVILEGE = "42501";
 
 const LOCKED_MESSAGE =
-  "This week is locked. Ask an admin to reopen it before making changes.";
+  "This period is locked. Ask an admin to reopen it before making changes.";
+
+/** How far ahead a rep may commit, per period. Beyond this is a typo, not a plan. */
+const MAX_AHEAD: Record<Period, number> = {
+  daily: 31,
+  weekly: 8,
+  monthly: 6,
+};
 
 async function requireUser() {
   const supabase = await createClient();
@@ -45,12 +56,22 @@ function mapLockError(error: { code?: string }, fallback: string): string {
   return toFriendlyMessage(error, fallback);
 }
 
+/** How many whole periods `periodStart` sits ahead of the current one. */
+function periodsAhead(period: Period, periodStart: string): number {
+  let cursor = shiftPeriod(period, periodStart, 0);
+  for (let steps = 0; steps <= MAX_AHEAD[period] + 1; steps += 1) {
+    if (!isFuturePeriod(period, cursor)) return steps;
+    cursor = shiftPeriod(period, cursor, -1);
+  }
+  return MAX_AHEAD[period] + 1;
+}
+
 /**
- * Saves the eight numbers, either as a working draft or as the final
+ * Saves the nine numbers, either as a working draft or as the final
  * commitment. `locked` is never sent as false on an existing row — that is
  * reopening, which is an admin's action and lives below.
  */
-async function writeWeek(
+async function writeTargets(
   formData: FormData,
   { submit }: { submit: boolean },
 ): Promise<FormState> {
@@ -59,7 +80,7 @@ async function writeWeek(
     return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
   }
 
-  const parsed = weeklyTargetsSchema.safeParse(weeklyFormDataToInput(formData));
+  const parsed = targetsSchema.safeParse(targetsFormDataToInput(formData));
   if (!parsed.success) {
     return {
       error: "Please check the highlighted numbers.",
@@ -68,16 +89,13 @@ async function writeWeek(
   }
   const input = parsed.data;
 
-  // A commitment is a promise about the week ahead or the week in hand. Letting
-  // someone submit a week that has not started yet is fine; letting them submit
-  // one years out is not, and the picker cannot reach it anyway.
-  if (isFutureWeek(input.week_start) && submit) {
-    const weeksAhead =
-      (new Date(`${input.week_start}T00:00:00Z`).getTime() - Date.now()) /
-      (7 * 86_400_000);
-    if (weeksAhead > 8) {
+  // A commitment is a promise about the period ahead or the one in hand.
+  // Committing to something a little ahead is fine; committing years out is
+  // not, and the picker cannot reach it anyway.
+  if (submit && isFuturePeriod(input.period, input.period_start)) {
+    if (periodsAhead(input.period, input.period_start) > MAX_AHEAD[input.period]) {
       return {
-        error: "You can only commit to a week within the next couple of months.",
+        error: "You can only commit to a period in the near future.",
         fieldErrors: {},
       };
     }
@@ -85,56 +103,58 @@ async function writeWeek(
 
   const payload: Record<string, unknown> = {
     member: user.id,
-    week_start: input.week_start,
+    period: input.period,
+    period_start: input.period_start,
   };
   for (const key of METRIC_KEYS) payload[key] = input[key];
   if (submit) payload.locked = true;
 
   const { error } = await supabase
-    .from("weekly_targets")
-    .upsert(payload, { onConflict: "member,week_start" });
+    .from("targets")
+    .upsert(payload, { onConflict: "member,period,period_start" });
 
   if (error) {
-    logError(submit ? "weekly:submit" : "weekly:save", error);
+    logError(submit ? "targets:submit" : "targets:save", error);
     return {
       error: mapLockError(
         error,
         submit
-          ? "We could not submit this week. Please try again."
+          ? "We could not submit this period. Please try again."
           : "We could not save these numbers. Please try again.",
       ),
       fieldErrors: {},
     };
   }
 
-  revalidatePath("/weekly");
+  revalidatePath("/targets");
   revalidatePath("/");
   return { error: null, fieldErrors: {}, ok: true };
 }
 
-export async function saveWeeklyTargets(
+export async function saveTargets(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  return writeWeek(formData, { submit: false });
+  return writeTargets(formData, { submit: false });
 }
 
-export async function submitWeeklyTargets(
+export async function submitTargets(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  return writeWeek(formData, { submit: true });
+  return writeTargets(formData, { submit: true });
 }
 
 /**
- * Rule 6's other half: an admin reopens a locked week so the rep can revise it.
+ * Rule 6's other half: an admin reopens a locked period so the rep can revise
+ * it.
  *
  * Checked here so a rep gets a sentence rather than a rejection, and checked
  * again by the trigger, which is what actually stops a rep who reaches the
  * action directly. reopened_by and reopened_at are stamped by the trigger from
  * auth.uid(), never sent from here.
  */
-export async function reopenWeek(
+export async function reopenPeriod(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
@@ -143,45 +163,47 @@ export async function reopenWeek(
     return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
   }
   if (user.role !== "admin" || user.profileStatus !== "ready") {
-    return { error: "Only an admin can reopen a week.", fieldErrors: {} };
+    return { error: "Only an admin can reopen a period.", fieldErrors: {} };
   }
 
   const parsed = reopenSchema.safeParse({
     member: String(formData.get("member") ?? ""),
-    week_start: String(formData.get("week_start") ?? ""),
+    period: String(formData.get("period") ?? ""),
+    period_start: String(formData.get("period_start") ?? ""),
   });
   if (!parsed.success) {
     return {
-      error: "We could not tell which week to reopen.",
+      error: "We could not tell which period to reopen.",
       fieldErrors: weeklyFieldErrors(parsed.error),
     };
   }
 
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("weekly_targets")
+    .from("targets")
     .update({ locked: false })
     .eq("member", parsed.data.member)
-    .eq("week_start", parsed.data.week_start)
+    .eq("period", parsed.data.period)
+    .eq("period_start", parsed.data.period_start)
     .eq("locked", true)
     .select("id");
 
   if (error) {
-    logError("weekly:reopen", error);
+    logError("targets:reopen", error);
     return {
-      error: mapLockError(error, "We could not reopen that week. Please try again."),
+      error: mapLockError(error, "We could not reopen that period. Please try again."),
       fieldErrors: {},
     };
   }
 
   if (!data || data.length === 0) {
     return {
-      error: "That week is not locked, so there is nothing to reopen.",
+      error: "That period is not locked, so there is nothing to reopen.",
       fieldErrors: {},
     };
   }
 
-  revalidatePath("/weekly");
+  revalidatePath("/targets");
   revalidatePath("/");
   return { error: null, fieldErrors: {}, ok: true };
 }

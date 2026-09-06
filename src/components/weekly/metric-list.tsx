@@ -4,8 +4,8 @@ import { EmptyState } from "@/components/states";
 import { METRICS, type MetricCounts } from "@/lib/validation/weekly";
 
 /**
- * All eight metrics, read-only: the rep's Dashboard summary and the admin's
- * drill-in both show exactly this, so neither can drift from the Weekly tab.
+ * All nine metrics, read-only: the rep's Dashboard summary and the admin's
+ * drill-in both show exactly this, so neither can drift from the Targets tab.
  */
 export function MetricList({
   title,
@@ -17,7 +17,7 @@ export function MetricList({
   title: string;
   targets: MetricCounts;
   achieved: MetricCounts;
-  /** False when no weekly_targets row exists yet for this member and week. */
+  /** False when no targets row exists yet for this member and period. */
   committed: boolean;
   emptyAction?: React.ReactNode;
 }) {
@@ -40,8 +40,8 @@ export function MetricList({
           </div>
         ) : (
           <EmptyState
-            title="No commitment for this week yet"
-            description="Set the eight numbers on the Weekly tab and the bars will fill in as the week goes."
+            title="No commitment for this period yet"
+            description="Set the numbers on the Targets tab and the bars will fill in as the period goes."
             action={emptyAction}
           />
         )}

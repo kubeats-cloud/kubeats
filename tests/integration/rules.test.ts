@@ -99,6 +99,32 @@ const has0008 = configured
  * without the storage policies, or the policies without the bucket limits,
  * would each look fine until someone uploaded something they should not.
  */
+/**
+ * Migration 0013 generalises weekly_targets into targets, keyed by period. The
+ * suite below is what would catch a period whose achieved figures are counted
+ * over the wrong range — a bug that looks like nothing at all until a rep's
+ * month quietly reports their week's numbers.
+ */
+const has0013 = configured
+  ? await admin
+      .from("targets")
+      .select("id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0013) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0013 is not applied to this project.",
+      "    The targets suite is being SKIPPED, not passing — nothing here is",
+      "    checking daily/weekly/monthly targets or their achieved ranges.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
 const has0012 = configured
   ? await admin
       .from("materials")
@@ -350,7 +376,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .from("visit-photos")
           .remove(files.map((f) => `${member.id}/${f.name}`));
       }
-      await admin.from("weekly_targets").delete().eq("member", member.id);
+      await admin.from("targets").delete().eq("member", member.id);
       await admin.from("visits").delete().eq("member", member.id);
       await admin.from("daily_plans").delete().eq("member", member.id);
       await admin.from("profiles").delete().eq("id", member.id);
@@ -765,13 +791,14 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
   /* ---------------------------------------------------------------- */
 
-  describe("Rule 6 — the weekly lock", () => {
+  describe.skipIf(!has0013)("Rule 6 — the target lock", () => {
     const week = mondayOf(iso());
 
     beforeAll(async () => {
-      const { error } = await repA.db.from("weekly_targets").insert({
+      const { error } = await repA.db.from("targets").insert({
         member: repA.id,
-        week_start: week,
+        period: "weekly",
+        period_start: week,
         meetings: 5,
         locked: true,
       });
@@ -780,10 +807,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     it("stamps the submission time itself", async () => {
       const { data } = await admin
-        .from("weekly_targets")
+        .from("targets")
         .select("locked, submitted_at")
         .eq("member", repA.id)
-        .eq("week_start", week)
+        .eq("period", "weekly").eq("period_start", week)
         .single();
 
       expect(data?.locked).toBe(true);
@@ -792,37 +819,37 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     it("refuses an edit once the week is locked", async () => {
       const { error } = await repA.db
-        .from("weekly_targets")
+        .from("targets")
         .update({ meetings: 99 })
         .eq("member", repA.id)
-        .eq("week_start", week);
+        .eq("period", "weekly").eq("period_start", week);
 
       expect(error?.code).toBe(CHECK_VIOLATION);
     });
 
     it("refuses to let the rep unlock their own week", async () => {
       const { error } = await repA.db
-        .from("weekly_targets")
+        .from("targets")
         .update({ locked: false })
         .eq("member", repA.id)
-        .eq("week_start", week);
+        .eq("period", "weekly").eq("period_start", week);
 
       expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
     });
 
     it("lets an admin reopen it, and records who and when", async () => {
       const { error } = await boss.db
-        .from("weekly_targets")
+        .from("targets")
         .update({ locked: false })
         .eq("member", repA.id)
-        .eq("week_start", week);
+        .eq("period", "weekly").eq("period_start", week);
       expect(error).toBeNull();
 
       const { data } = await admin
-        .from("weekly_targets")
+        .from("targets")
         .select("locked, reopened_by, reopened_at, meetings")
         .eq("member", repA.id)
-        .eq("week_start", week)
+        .eq("period", "weekly").eq("period_start", week)
         .single();
 
       expect(data?.locked).toBe(false);
@@ -835,10 +862,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     it("lets the rep edit again once it is reopened", async () => {
       const { error } = await repA.db
-        .from("weekly_targets")
+        .from("targets")
         .update({ meetings: 7 })
         .eq("member", repA.id)
-        .eq("week_start", week);
+        .eq("period", "weekly").eq("period_start", week);
 
       expect(error).toBeNull();
     });
@@ -866,13 +893,13 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(data).toHaveLength(0);
     });
 
-    it("hides rep A's weekly targets from rep B", async () => {
+    it.skipIf(!has0013)("hides rep A's targets from rep B", async () => {
       const { data } = await repB.db
-        .from("weekly_targets")
+        .from("targets")
         .select("id")
         .eq("member", repA.id);
 
-      expect(data).toHaveLength(0);
+      expect(data ?? []).toHaveLength(0);
     });
 
     it("stops rep B writing a visit in rep A's name", async () => {
@@ -1923,6 +1950,235 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .from("materials")
         .insert(rowFor(boss.id, path));
       expect(error?.code).toBe("23505");
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0013)("targets — one mechanism, three periods", () => {
+    /**
+     * The point of these is the RANGE. All three periods read the same two
+     * sources (Rule 7: meetings from daily_plans, the rest from visits) and
+     * differ only in the dates they count over, so the failure worth catching
+     * is a month quietly reporting a week's numbers.
+     */
+    let subject: Member;
+    let houseId: string;
+    const day = iso();
+    const week = mondayOf(day);
+    const month = `${day.slice(0, 7)}-01`;
+
+    beforeAll(async () => {
+      subject = await makeMember("rep", "targets");
+      const { data, error } = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} targets school`, type: "school" })
+        .select("id")
+        .single();
+      if (error) throw new Error(`institute: ${error.message}`);
+      houseId = data.id;
+    });
+
+    afterAll(async () => {
+      if (!configured || !has0013 || !subject) return;
+      await admin.from("targets").delete().eq("member", subject.id);
+      await admin.from("visits").delete().eq("member", subject.id);
+      await admin.from("daily_plans").delete().eq("member", subject.id);
+      await admin.from("profiles").delete().eq("id", subject.id);
+      await admin.auth.admin.deleteUser(subject.id);
+    });
+
+    it("accepts a commitment for each of the three periods", async () => {
+      for (const [period, start] of [
+        ["daily", day],
+        ["weekly", week],
+        ["monthly", month],
+      ] as const) {
+        const { error } = await subject.db.from("targets").insert({
+          member: subject.id,
+          period,
+          period_start: start,
+          meetings: 3,
+          institutes_covered: 2,
+        });
+        expect(error, period).toBeNull();
+      }
+    });
+
+    it("refuses a period_start off its own grid", async () => {
+      // The generalisation of weekly_targets_week_starts_monday. A Wednesday is
+      // a fine day and a hopeless week.
+      const wednesday = "2026-09-16";
+      const weekly = await subject.db
+        .from("targets")
+        .insert({ member: subject.id, period: "weekly", period_start: wednesday });
+      expect(weekly.error?.code).toBe(CHECK_VIOLATION);
+
+      const monthly = await subject.db
+        .from("targets")
+        .insert({ member: subject.id, period: "monthly", period_start: wednesday });
+      expect(monthly.error?.code).toBe(CHECK_VIOLATION);
+
+      // ...and the same date is perfectly valid as a day.
+      const daily = await subject.db
+        .from("targets")
+        .insert({ member: subject.id, period: "daily", period_start: wednesday });
+      expect(daily.error).toBeNull();
+    });
+
+    it("refuses a period it does not know", async () => {
+      // The `else false` in targets_period_start_aligned matters here: without
+      // it the CASE would return NULL and a CHECK lets NULL through.
+      const { error } = await subject.db
+        .from("targets")
+        .insert({ member: subject.id, period: "quarterly", period_start: month });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("lets one member hold all three periods at once", async () => {
+      const { data } = await admin
+        .from("targets")
+        .select("period")
+        .eq("member", subject.id)
+        .in("period", ["daily", "weekly", "monthly"]);
+      const periods = new Set((data ?? []).map((r) => r.period));
+      expect(periods.has("daily")).toBe(true);
+      expect(periods.has("weekly")).toBe(true);
+      expect(periods.has("monthly")).toBe(true);
+    });
+
+    it("applies Rule 6's lock to a day exactly as to a week", async () => {
+      const lockDay = iso(-3);
+      await subject.db.from("targets").insert({
+        member: subject.id,
+        period: "daily",
+        period_start: lockDay,
+        meetings: 2,
+        locked: true,
+      });
+
+      const { data: row } = await admin
+        .from("targets")
+        .select("locked, submitted_at")
+        .eq("member", subject.id)
+        .eq("period", "daily")
+        .eq("period_start", lockDay)
+        .single();
+      expect(row?.locked).toBe(true);
+      expect(row?.submitted_at).not.toBeNull(); // stamped by the trigger
+
+      const edit = await subject.db
+        .from("targets")
+        .update({ meetings: 99 })
+        .eq("member", subject.id)
+        .eq("period", "daily")
+        .eq("period_start", lockDay);
+      expect(edit.error?.code).toBe(CHECK_VIOLATION);
+
+      const selfUnlock = await subject.db
+        .from("targets")
+        .update({ locked: false })
+        .eq("member", subject.id)
+        .eq("period", "daily")
+        .eq("period_start", lockDay);
+      expect(selfUnlock.error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+
+      const adminUnlock = await boss.db
+        .from("targets")
+        .update({ locked: false })
+        .eq("member", subject.id)
+        .eq("period", "daily")
+        .eq("period_start", lockDay);
+      expect(adminUnlock.error).toBeNull();
+
+      const { data: after } = await admin
+        .from("targets")
+        .select("locked, reopened_by")
+        .eq("member", subject.id)
+        .eq("period", "daily")
+        .eq("period_start", lockDay)
+        .single();
+      expect(after?.locked).toBe(false);
+      expect(after?.reopened_by).toBe(boss.id);
+    });
+
+    it("counts achieved figures over each period's own range", async () => {
+      // Two visits: one today, one 20 days back. The day sees one; the month
+      // sees both whenever the older one fell in the same calendar month. That
+      // gap between the ranges is the whole feature.
+      const old = iso(-20);
+      const oldInSameMonth = old.slice(0, 7) === day.slice(0, 7);
+
+      await admin.from("visits").insert([
+        {
+          institute_id: houseId,
+          member: subject.id,
+          activity: "olympiad",
+          date: day,
+          photo_url: photoFor(subject.id),
+        },
+        {
+          institute_id: houseId,
+          member: subject.id,
+          activity: "olympiad",
+          date: old,
+          photo_url: photoFor(subject.id),
+        },
+      ]);
+
+      const inRange = async (start: string, end: string) => {
+        const { data } = await admin
+          .from("visits")
+          .select("id")
+          .eq("member", subject.id)
+          .gte("date", start)
+          .lte("date", end);
+        return (data ?? []).length;
+      };
+
+      expect(await inRange(day, day)).toBe(1);
+
+      const monthEnd = new Date(
+        Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
+      )
+        .toISOString()
+        .slice(0, 10);
+      expect(await inRange(month, monthEnd)).toBe(oldInSameMonth ? 2 : 1);
+    });
+
+    it("counts institutes covered as distinct, not as visits", async () => {
+      // Three visits, two schools. "Covered" has to say two, which is why it
+      // cannot come from tallyVisitMetrics().
+      const { data: second } = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} second school`, type: "school" })
+        .select("id")
+        .single();
+
+      await admin.from("visits").insert({
+        institute_id: second!.id,
+        member: subject.id,
+        activity: "olympiad",
+        date: day,
+        photo_url: photoFor(subject.id),
+      });
+
+      const { data } = await admin
+        .from("visits")
+        .select("institute_id")
+        .eq("member", subject.id)
+        .eq("date", day);
+
+      expect((data ?? []).length).toBe(3);
+      expect(new Set((data ?? []).map((r) => r.institute_id)).size).toBe(2);
+    });
+
+    it("keeps one member's targets away from another rep", async () => {
+      const { data } = await repB.db
+        .from("targets")
+        .select("id")
+        .eq("member", subject.id);
+      expect(data ?? []).toHaveLength(0);
     });
   });
 });

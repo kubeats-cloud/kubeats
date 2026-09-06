@@ -8,27 +8,30 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import {
-  saveWeeklyTargets,
-  submitWeeklyTargets,
-} from "@/lib/weekly-actions";
+import { Badge } from "@/components/ui/badge";
+import { saveTargets, submitTargets } from "@/lib/target-actions";
+import { PERIOD_NOUN, type Period } from "@/lib/periods";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import {
   METRICS,
+  STATUS_BADGE,
+  STATUS_LABELS,
   TONE_BAR,
   type MetricCounts,
   type MetricKey,
   percentOf,
+  progressStatus,
+  remaining,
+  targetsFormDataToInput,
+  targetsSchema,
   toneFor,
   weeklyFieldErrors,
-  weeklyFormDataToInput,
-  weeklyTargetsSchema,
 } from "@/lib/validation/weekly";
 
 /**
- * The rep's commitment for one week.
+ * The rep's commitment for one period — a day, a week or a month.
  *
- * The eight numbers are the promise; the bars underneath are what has actually
+ * The nine numbers are the promise; the bars underneath are what has actually
  * happened, and they update as the rep types, so the size of a commitment is
  * felt against real progress rather than typed into a vacuum.
  *
@@ -36,14 +39,16 @@ import {
  * before locking.
  */
 export function TargetsForm({
-  weekStart,
+  period,
+  periodStart,
   targets,
   achieved,
   locked,
   submittedAt,
   reopenedAt,
 }: {
-  weekStart: string;
+  period: Period;
+  periodStart: string;
   targets: MetricCounts;
   achieved: MetricCounts;
   locked: boolean;
@@ -53,8 +58,8 @@ export function TargetsForm({
   const [serverState, formAction, isPending] = useActionState(
     async (prev: FormState, formData: FormData) =>
       formData.get("intent") === "submit"
-        ? submitWeeklyTargets(prev, formData)
-        : saveWeeklyTargets(prev, formData),
+        ? submitTargets(prev, formData)
+        : saveTargets(prev, formData),
     EMPTY_STATE,
   );
   const [clientState, setClientState] = useState<FormState>(EMPTY_STATE);
@@ -64,6 +69,7 @@ export function TargetsForm({
     ) as Record<MetricKey, string>,
   );
   const [confirming, setConfirming] = useState(false);
+  const noun = PERIOD_NOUN[period];
 
   const error = serverState.error ?? clientState.error;
   const fieldErrors = serverState.error
@@ -71,8 +77,8 @@ export function TargetsForm({
     : clientState.fieldErrors;
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    const parsed = weeklyTargetsSchema.safeParse(
-      weeklyFormDataToInput(new FormData(event.currentTarget)),
+    const parsed = targetsSchema.safeParse(
+      targetsFormDataToInput(new FormData(event.currentTarget)),
     );
     if (!parsed.success) {
       event.preventDefault();
@@ -88,7 +94,8 @@ export function TargetsForm({
 
   return (
     <form action={formAction} onSubmit={handleSubmit} className="space-y-4">
-      <input type="hidden" name="week_start" value={weekStart} />
+      <input type="hidden" name="period" value={period} />
+      <input type="hidden" name="period_start" value={periodStart} />
 
       {locked && (
         <p
@@ -111,7 +118,7 @@ export function TargetsForm({
         >
           <UnlockIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
           <span>
-            An admin reopened this week on{" "}
+            An admin reopened this {noun} on{" "}
             {formatDate(reopenedAt)}. Revise the numbers and
             submit again.
           </span>
@@ -121,7 +128,7 @@ export function TargetsForm({
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            {locked ? "Your commitment" : "Commit to this week"}
+            {locked ? "Your commitment" : `Commit to this ${noun}`}
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-5 sm:grid-cols-2">
@@ -151,7 +158,7 @@ export function TargetsForm({
                 />
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-muted-foreground text-xs">
-                    Achieved: {done}
+                    Achieved: {done} · Remaining: {remaining(done, target)}
                   </span>
                   <span className="text-xs font-semibold tabular-nums">
                     {target > 0 ? `${percentOf(done, target)}%` : "—"}
@@ -162,6 +169,9 @@ export function TargetsForm({
                   indicatorClassName={TONE_BAR[tone]}
                   aria-label={`${metric.label}: ${done} of ${target}`}
                 />
+                <Badge variant={STATUS_BADGE[progressStatus(done, target)]}>
+                  {STATUS_LABELS[progressStatus(done, target)]}
+                </Badge>
                 {fieldError && <p className="text-danger text-xs">{fieldError}</p>}
               </div>
             );
@@ -185,8 +195,8 @@ export function TargetsForm({
               <p className="flex items-start gap-2 text-sm">
                 <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" aria-hidden />
                 <span>
-                  Once submitted, this week locks. You will need an admin to
-                  reopen it before you can change anything.
+                  Once submitted, this {noun} locks. You will need an admin
+                  to reopen it before you can change anything.
                 </span>
               </p>
               <div className="flex gap-2">
@@ -197,7 +207,7 @@ export function TargetsForm({
                   className="h-11 flex-1"
                   disabled={isPending}
                 >
-                  {isPending ? "Submitting…" : "Yes, lock this week"}
+                  {isPending ? "Submitting…" : `Yes, lock this ${noun}`}
                 </Button>
                 <Button
                   type="button"
