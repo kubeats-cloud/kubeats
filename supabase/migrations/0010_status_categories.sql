@@ -14,6 +14,10 @@
 --      two functions, so the database can tell one from the other. Open means
 --      the institute is still in play; closed means that loop is finished.
 --
+--   3. Rule 5 widened by one status: 'Invited principal for event' now requires
+--      a follow-up date, exactly as 'Pending for management approval' has since
+--      0001. Both are open loops waiting on someone else's answer.
+--
 -- WHY A TABLE AND NOT A CASE EXPRESSION
 --
 -- public.institute_statuses is the database's single source of truth for the
@@ -175,43 +179,86 @@ comment on column public.institutes.status is
 
 
 -- -----------------------------------------------------------------------------
--- 4. Rule 5 is deliberately untouched
+-- 4. Rule 5 - an invitation now demands a date to chase on
 --
--- The follow-up constraints still name only the statuses they always named:
--- 'Pending for management approval' requires a follow-up date, and the two
--- 'scheduled' statuses forbid one because they carry their own expected date.
+-- 'Invited principal for event' joins 'Pending for management approval' as a
+-- status that requires a follow-up date. What the two have in common is not
+-- that they are open, but that they are waiting on someone else's answer with
+-- nothing scheduled that would bring them back on its own - no session, no
+-- campus visit, no date in anyone's diary. Without a follow-up they simply go
+-- quiet, which is the failure this constraint exists to prevent.
 --
--- None of the three new statuses joins either list. An invitation SHOULD carry
--- a follow-up - nobody is booked to come back to you - but a rep who does not
--- yet know when they will chase it must still be able to log the visit, so
--- that is a prompt in the form and not a constraint here. 'RSVP received' and
--- 'Will not come' are closed, so a follow-up is not required; it stays
--- permitted, because "they said no, try again next intake" is a real note to
+-- The constraint is RENAMED as it is widened: 0001 called it
+-- visits_follow_up_required_for_approval, and that name stops being true the
+-- moment it covers a second status. Both names are dropped below, so this runs
+-- cleanly whether or not an earlier version of 0010 has already been applied.
+--
+-- Nothing existing can fail the revalidation. A visit already logged against
+-- 'Pending for management approval' necessarily carries a follow_up_date,
+-- because the constraint being replaced demanded one; and no row can name
+-- 'Invited principal for event' yet, because the vocabulary only started
+-- accepting it a few statements ago.
+--
+-- The two closed statuses are deliberately NOT here. 'RSVP received' and 'Will
+-- not come' finish the loop, so a follow-up is not required - but it stays
+-- permitted, because "they said no, ask again next intake" is a real note to
 -- leave and forbidding it would lose it.
+--
+-- The other half of Rule 5 is untouched: the two 'scheduled' statuses still
+-- forbid a follow-up, because they carry their own expected date.
 -- -----------------------------------------------------------------------------
+alter table public.visits
+  drop constraint if exists visits_follow_up_required_for_approval;
+alter table public.visits
+  drop constraint if exists visits_follow_up_required_when_awaiting;
+
+alter table public.visits add constraint visits_follow_up_required_when_awaiting check (
+  status_set_to is null
+  or status_set_to not in (
+    'Pending for management approval',
+    'Invited principal for event'
+  )
+  or follow_up_date is not null
+);
+
+comment on constraint visits_follow_up_required_when_awaiting on public.visits is
+  'Rule 5: a status that waits on someone else''s answer must carry a date to '
+  'chase on. Mirrored by FOLLOW_UP_REQUIRED_FOR in src/lib/validation/visit.ts.';
 
 
 -- -----------------------------------------------------------------------------
--- 5. Prove the two SQL copies agree
+-- 5. Prove the copies agree
 --
--- The vocabulary is now written down three times in this file: the lookup
--- table and the two CHECK constraints. That is deliberate - a CHECK cannot
--- contain a subquery, so it cannot read the table - but it is exactly the kind
--- of duplication that rots. This block compares them and refuses to leave the
--- database in a state where they disagree.
+-- Statuses are now named in four places in this file: the lookup table, the two
+-- vocabulary CHECKs, and Rule 5's required list. That is deliberate - a CHECK
+-- cannot contain a subquery, so none of them can read the table - but it is
+-- exactly the kind of duplication that rots. This block compares them and
+-- refuses to leave the database in a state where they disagree.
 --
--- Both directions are checked: every status in the table must appear in each
--- constraint, and each constraint must list no more literals than the table has
--- rows. The status values contain no apostrophes, so matching quoted literals
--- with a regex is safe here.
+-- Both directions are checked, twice over:
+--
+--   * every status in the table appears in each vocabulary CHECK, and neither
+--     CHECK lists more literals than the table has rows;
+--   * Rule 5's CHECK names both awaiting statuses, both are real statuses, and
+--     it names no third one.
+--
+-- The status values contain no apostrophes, so matching quoted literals with a
+-- regex is safe here.
 -- -----------------------------------------------------------------------------
 do $$
 declare
   institutes_def  text;
   visits_def      text;
+  required_def    text;
   table_count     integer;
   institutes_n    integer;
   visits_n        integer;
+  required_n      integer;
+  awaiting        text[] := array[
+                     'Pending for management approval',
+                     'Invited principal for event'
+                   ];
+  awaiting_status text;
   row_status      record;
   problems        text[] := '{}';
 begin
@@ -219,11 +266,13 @@ begin
     from pg_constraint where conname = 'institutes_status_valid';
   select pg_get_constraintdef(oid) into visits_def
     from pg_constraint where conname = 'visits_status_set_to_valid';
+  select pg_get_constraintdef(oid) into required_def
+    from pg_constraint where conname = 'visits_follow_up_required_when_awaiting';
 
-  if institutes_def is null or visits_def is null then
+  if institutes_def is null or visits_def is null or required_def is null then
     raise exception
-      'Status vocabulary check: a CHECK constraint is missing (institutes=%, visits=%).',
-      institutes_def is not null, visits_def is not null;
+      'Status vocabulary check: a CHECK constraint is missing (institutes=%, visits=%, follow-up=%).',
+      institutes_def is not null, visits_def is not null, required_def is not null;
   end if;
 
   select count(*) into table_count from public.institute_statuses;
@@ -251,9 +300,31 @@ begin
       visits_n, table_count);
   end if;
 
+  -- Rule 5's required list must name the two awaiting statuses and nothing
+  -- else. Both directions again: each one present, and no third smuggled in.
+  foreach awaiting_status in array awaiting loop
+    if position(quote_literal(awaiting_status) in required_def) = 0 then
+      problems := problems || format(
+        'visits_follow_up_required_when_awaiting does not require a follow-up for %L',
+        awaiting_status);
+    end if;
+    if (select count(*) from public.institute_statuses where status = awaiting_status) = 0 then
+      problems := problems || format('%L is not a known status at all', awaiting_status);
+    end if;
+  end loop;
+
+  select count(*) into required_n from regexp_matches(required_def, '''([^'']+)''', 'g');
+  if required_n <> array_length(awaiting, 1) then
+    problems := problems || format(
+      'visits_follow_up_required_when_awaiting names %s statuses, expected %s',
+      required_n, array_length(awaiting, 1));
+  end if;
+
   if array_length(problems, 1) > 0 then
     raise exception 'Status vocabulary has drifted: %', array_to_string(problems, '; ');
   end if;
 
-  raise notice 'Status vocabulary: % statuses, both CHECK constraints agree.', table_count;
+  raise notice
+    'Status vocabulary: % statuses, both CHECK constraints agree; % of them require a follow-up.',
+    table_count, array_length(awaiting, 1);
 end $$;

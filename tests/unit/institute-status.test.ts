@@ -12,7 +12,6 @@ import {
 import {
   followUpHidden,
   followUpRequired,
-  followUpSuggested,
   visitSchema,
 } from "@/lib/validation/visit";
 
@@ -37,6 +36,25 @@ const EXPECTED: Record<string, "open" | "closed"> = {
   "Invited principal for event": "open",
   "RSVP received": "closed",
   "Will not come": "closed",
+};
+
+/**
+ * Rule 5 for all nine, written out the same way and for the same reason.
+ *
+ * "required" is not the same as "open": four of the five open statuses do not
+ * demand a follow-up. What the two required ones share is that they wait on
+ * someone else's answer with nothing scheduled to bring them back.
+ */
+const EXPECTED_FOLLOW_UP: Record<string, "hidden" | "required" | "optional"> = {
+  "First meeting done": "optional",
+  "Session scheduled": "hidden",
+  "Session done": "optional",
+  "Campus visit scheduled": "hidden",
+  "Campus visit done": "optional",
+  "Pending for management approval": "required",
+  "Invited principal for event": "required",
+  "RSVP received": "optional",
+  "Will not come": "optional",
 };
 
 const baseVisit = {
@@ -120,32 +138,42 @@ describe("statusCategory", () => {
   });
 });
 
-describe("Rule 5 still holds, with the three new statuses folded in", () => {
-  it("leaves the original hidden and required statuses alone", () => {
-    expect(followUpHidden("Session scheduled")).toBe(true);
-    expect(followUpHidden("Campus visit scheduled")).toBe(true);
+describe("Rule 5, with the three new statuses folded in", () => {
+  it("gives every one of the nine the follow-up rule the spec asks for", () => {
+    for (const status of INSTITUTE_STATUSES) {
+      const expected = EXPECTED_FOLLOW_UP[status];
+      expect(followUpHidden(status), `${status} hidden`).toBe(
+        expected === "hidden",
+      );
+      expect(followUpRequired(status), `${status} required`).toBe(
+        expected === "required",
+      );
+    }
+  });
+
+  it("requires a chase date for an invitation, as it does for approval", () => {
+    expect(followUpRequired("Invited principal for event")).toBe(true);
     expect(followUpRequired("Pending for management approval")).toBe(true);
   });
 
-  it("neither hides nor requires a follow-up for the three new statuses", () => {
-    for (const status of [
-      "Invited principal for event",
-      "RSVP received",
-      "Will not come",
-    ]) {
+  it("never both hides and requires the same status", () => {
+    for (const status of INSTITUTE_STATUSES) {
+      expect(followUpHidden(status) && followUpRequired(status), status).toBe(
+        false,
+      );
+    }
+  });
+
+  it("leaves the two closed statuses optional", () => {
+    for (const status of ["RSVP received", "Will not come"]) {
       expect(followUpHidden(status), status).toBe(false);
       expect(followUpRequired(status), status).toBe(false);
     }
   });
 
-  it("suggests a follow-up for an invitation, and only for that", () => {
-    expect(followUpSuggested("Invited principal for event")).toBe(true);
-    for (const status of INSTITUTE_STATUSES.filter(
-      (s) => s !== "Invited principal for event",
-    )) {
-      expect(followUpSuggested(status), status).toBe(false);
-    }
-    expect(followUpSuggested(null)).toBe(false);
+  it("asks nothing of a visit that changes no status", () => {
+    expect(followUpHidden(null)).toBe(false);
+    expect(followUpRequired(null)).toBe(false);
   });
 });
 
@@ -163,12 +191,50 @@ describe("visitSchema accepts the widened vocabulary", () => {
     }
   });
 
-  it("lets an invitation save with no follow-up date", () => {
+  it("refuses an invitation with no follow-up date", () => {
     const result = visitSchema.safeParse({
       ...baseVisit,
       status_set_to: "Invited principal for event",
     });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path[0] === "follow_up_date");
+      expect(issue?.message).toBe(
+        'A follow-up date is required for "Invited principal for event".',
+      );
+    }
+  });
+
+  it("takes an invitation once it carries one", () => {
+    const result = visitSchema.safeParse({
+      ...baseVisit,
+      status_set_to: "Invited principal for event",
+      follow_up_date: "2026-09-20",
+    });
     expect(result.success).toBe(true);
+  });
+
+  it("still names the right status when approval is the one missing a date", () => {
+    // The message is built from the status now rather than hardcoded, so this
+    // guards against it naming the wrong one.
+    const result = visitSchema.safeParse({
+      ...baseVisit,
+      status_set_to: "Pending for management approval",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path[0] === "follow_up_date");
+      expect(issue?.message).toBe(
+        'A follow-up date is required for "Pending for management approval".',
+      );
+    }
+  });
+
+  it("lets a closed status save with no follow-up at all", () => {
+    for (const status of ["RSVP received", "Will not come"]) {
+      const result = visitSchema.safeParse({ ...baseVisit, status_set_to: status });
+      expect(result.success, status).toBe(true);
+    }
   });
 
   it("lets a closed status carry a follow-up anyway", () => {

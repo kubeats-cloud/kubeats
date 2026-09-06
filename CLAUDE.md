@@ -143,6 +143,14 @@ already claimed the easy 0.9 MiB between them; see README for both.
   itself refuses to apply if its lookup table and its two CHECK constraints
   disagree. Nothing may decide open-vs-closed for itself; ask one of those two.
   Note that null is neither open nor closed: "no status yet" is its own thing.
+- Rule 5's "required" list is not the same as the open category, and must not be
+  collapsed into it: only "Pending for management approval" and "Invited
+  principal for event" demand a follow-up date, because those two wait on
+  someone else's answer with nothing scheduled to bring them back. It is
+  `FOLLOW_UP_REQUIRED_FOR` in `src/lib/validation/visit.ts` and the
+  `visits_follow_up_required_when_awaiting` CHECK — renamed in 0010 from 0001's
+  `visits_follow_up_required_for_approval`, which stopped being true once it
+  covered a second status.
 - Every visit must carry a photo (Rule 12, migration 0006). The rule is stated
   three times on purpose: the shared zod schema, `log_visit()` raising `FO007`,
   and the `visits_photo_required` CHECK, which is the one that holds against a

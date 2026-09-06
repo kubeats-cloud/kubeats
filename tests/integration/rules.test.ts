@@ -6,6 +6,7 @@ import {
   isOpenStatus,
   statusCategory,
 } from "@/lib/validation/institute";
+import { followUpHidden, followUpRequired } from "@/lib/validation/visit";
 
 /**
  * The rules that live in Postgres.
@@ -1267,46 +1268,78 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
             date: iso(),
             photo_url: photoFor(repA.id),
             status_set_to: status,
+            // Rule 5: an invitation must carry a chase date, so this is about
+            // the vocabulary only once that is satisfied.
+            follow_up_date: status === "Invited principal for event" ? iso(7) : null,
           });
           expect(error, status).toBeNull();
         }
       });
 
-      it("leaves Rule 5 exactly as it was", async () => {
-        const visit = (status: string, followUp: string | null) => ({
-          institute_id: instituteId,
-          member: repA.id,
-          activity: "olympiad" as const,
-          date: iso(),
-          photo_url: photoFor(repA.id),
-          status_set_to: status,
-          follow_up_date: followUp,
-        });
+      const visitWith = (status: string, followUp: string | null) => ({
+        institute_id: instituteId,
+        member: repA.id,
+        activity: "olympiad" as const,
+        date: iso(),
+        photo_url: photoFor(repA.id),
+        status_set_to: status,
+        follow_up_date: followUp,
+      });
 
-        // Unchanged: approval still demands a date...
-        const approval = await admin
-          .from("visits")
-          .insert(visit("Pending for management approval", null));
-        expect(approval.error?.code).toBe(CHECK_VIOLATION);
+      it("demands a follow-up date for both awaiting statuses", async () => {
+        // The database's half of Rule 5. Approval has behaved this way since
+        // 0001; the invitation joins it in 0010, for the same reason — nothing
+        // is scheduled that would bring either back on its own.
+        for (const status of [
+          "Pending for management approval",
+          "Invited principal for event",
+        ]) {
+          const { error } = await admin.from("visits").insert(visitWith(status, null));
+          expect(error?.code, status).toBe(CHECK_VIOLATION);
+        }
+      });
 
-        // ...and a "scheduled" status still forbids one.
-        const scheduled = await admin
-          .from("visits")
-          .insert(visit("Session scheduled", "2026-10-01"));
-        expect(scheduled.error?.code).toBe(CHECK_VIOLATION);
+      it("takes both awaiting statuses once a date is supplied", async () => {
+        for (const status of [
+          "Pending for management approval",
+          "Invited principal for event",
+        ]) {
+          const { error } = await admin
+            .from("visits")
+            .insert(visitWith(status, iso(7)));
+          expect(error, status).toBeNull();
+        }
+      });
 
-        // New: an invitation saves without one, because a rep who does not yet
-        // know when they will chase it must not be stuck.
-        const invited = await admin
-          .from("visits")
-          .insert(visit("Invited principal for event", null));
-        expect(invited.error).toBeNull();
+      it("requires a follow-up for exactly the statuses the app does", async () => {
+        // The app decides what a rep is asked for; this constraint decides what
+        // may be stored. A status the app lets through but the database rejects
+        // is a rep staring at a save that will not work, so the two lists are
+        // compared status by status rather than trusted.
+        for (const status of INSTITUTE_STATUSES) {
+          if (followUpHidden(status)) continue; // covered below, on its own terms
+          const { error } = await admin.from("visits").insert(visitWith(status, null));
+          expect(Boolean(error), `${status} without a follow-up`).toBe(
+            followUpRequired(status),
+          );
+        }
+      });
 
-        // New: a closed status may still carry one — "ask again next intake".
-        const declined = await admin
+      it("still forbids a follow-up on the two scheduled statuses", async () => {
+        for (const status of ["Session scheduled", "Campus visit scheduled"]) {
+          const { error } = await admin
+            .from("visits")
+            .insert(visitWith(status, iso(7)));
+          expect(error?.code, status).toBe(CHECK_VIOLATION);
+        }
+      });
+
+      it("lets a closed status carry a follow-up anyway", async () => {
+        // "They said no, ask again next intake" is a real note to leave.
+        const { error } = await admin
           .from("visits")
-          .insert(visit("Will not come", "2027-01-15"));
-        expect(declined.error).toBeNull();
+          .insert(visitWith("Will not come", iso(120)));
+        expect(error).toBeNull();
       });
     },
   );

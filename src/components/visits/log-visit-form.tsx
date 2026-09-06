@@ -29,7 +29,6 @@ import {
   ACTIVITIES,
   followUpHidden,
   followUpRequired,
-  followUpSuggested,
   hasLifecycle,
   fieldLabel,
   visitFieldErrors,
@@ -79,7 +78,6 @@ export function LogVisitForm({
   const status = statusSetTo === NO_CHANGE ? null : statusSetTo;
   const hideFollowUp = followUpHidden(status);
   const needFollowUp = followUpRequired(status);
-  const suggestFollowUp = followUpSuggested(status);
 
   const error = serverState.error ?? clientState.error;
   const fieldErrors = serverState.error
@@ -332,12 +330,6 @@ export function LogVisitForm({
             </p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              {suggestFollowUp && (
-                <p className="text-muted-foreground text-xs sm:col-span-2">
-                  Nobody is booked to come back to you on an invitation — set a
-                  date to chase the RSVP.
-                </p>
-              )}
               <div className="space-y-2">
                 <Label htmlFor="follow-up-date">
                   Follow-up date {needFollowUp ? "(required)" : "(optional)"}
@@ -348,6 +340,10 @@ export function LogVisitForm({
                   className="h-11"
                   value={followUpDate}
                   onChange={(event) => setFollowUpDate(event.target.value)}
+                  // aria-required rather than required: the form runs the
+                  // shared schema itself, and the native bubble would fire
+                  // first and say something we did not write.
+                  aria-required={needFollowUp || undefined}
                   aria-invalid={fieldErrors.follow_up_date ? true : undefined}
                 />
                 {fieldError("follow_up_date")}
