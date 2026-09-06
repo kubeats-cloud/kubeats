@@ -99,6 +99,24 @@ export function placeLookupContact(): string | null {
   return value && value.trim() !== "" ? value.trim() : null;
 }
 
+/**
+ * Optional: a shared secret that unlocks the deep (database-touching) answer
+ * from /api/health.
+ *
+ * That endpoint is deliberately public — a monitor has to reach it without a
+ * session — which is exactly why the public answer is static. Anyone can poll
+ * it, so it must not spend a database round trip or disclose whether Postgres
+ * is reachable. Set this and a monitor presenting the header gets the real
+ * check; leave it unset and the deep check simply does not exist.
+ *
+ * Optional rather than required for the same reason as the contact above: a
+ * deployment should not fail to boot over a monitoring convenience.
+ */
+export function healthCheckToken(): string | null {
+  const value = process.env.HEALTH_CHECK_TOKEN;
+  return value && value.trim() !== "" ? value.trim() : null;
+}
+
 let cachedServer: ServerEnv | undefined;
 
 /**

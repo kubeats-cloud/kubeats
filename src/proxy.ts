@@ -152,7 +152,13 @@ export const config = {
      * it and handed back the login page's HTML. Chrome then reported
      * "Manifest: Line 1, column 1, Syntax error", which says nothing at all
      * about the actual cause.
+     *
+     * .well-known is excluded for the same reason plus one more: security.txt
+     * has to be readable by a stranger, and it is fetched by scanners that
+     * would otherwise make us refresh a session — and spend a Supabase call —
+     * on every probe. Excluding it here means those requests never reach any
+     * of our code.
      */
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|\.well-known/|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
   ],
 };

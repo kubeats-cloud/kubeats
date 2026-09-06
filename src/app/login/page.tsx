@@ -2,18 +2,9 @@ import Image from "next/image";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
+import { safeNextPath } from "@/lib/validation/auth";
 import { LoginForm } from "./login-form";
 
-/**
- * Only same-origin, single-slash paths survive, matching the check the sign-in
- * action repeats server-side.
- */
-function safeNext(value: string | string[] | undefined): string {
-  if (typeof value !== "string") return "/";
-  if (!value.startsWith("/")) return "/";
-  if (value.startsWith("//") || value.includes("\\")) return "/";
-  return value;
-}
 
 export default async function LoginPage(props: PageProps<"/login">) {
   // proxy.ts already bounces signed-in users, but that gate is optimistic;
@@ -22,7 +13,7 @@ export default async function LoginPage(props: PageProps<"/login">) {
   if (user) redirect("/");
 
   const searchParams = await props.searchParams;
-  const next = safeNext(searchParams.next);
+  const next = safeNextPath(searchParams.next);
 
   return (
     <main className="flex flex-1 items-center justify-center px-5 py-10">
