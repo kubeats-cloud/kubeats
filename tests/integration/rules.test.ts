@@ -33,6 +33,13 @@ const INSUFFICIENT_PRIVILEGE = "42501";
 /** Every row these tests create carries this, so cleanup can find them. */
 const TAG = `test:${Date.now().toString(36)}`;
 
+/**
+ * Migration 0016 requires every institute to carry at least one board, the same
+ * rule instituteSchema has always applied in the app. These fixtures predate it
+ * and were creating boardless institutes, which the database now refuses.
+ */
+const BOARDS = ["CBSE"];
+
 const admin = configured
   ? createClient(url!, serviceKey!, { auth: { persistSession: false } })
   : (null as unknown as SupabaseClient);
@@ -348,6 +355,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       .insert({
         name: `${TAG} School`,
         type: "school",
+        boards: BOARDS,
         city: "Bengaluru",
         state: "Karnataka",
         registered_by: repA.id,
@@ -554,7 +562,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       // failed before migration 0008.
       const institute = await admin
         .from("institutes")
-        .insert({ name: `${TAG} app_today school`, type: "school" })
+        .insert({ name: `${TAG} app_today school`, type: "school", boards: BOARDS })
         .select("id")
         .single();
       const houseId = institute.data!.id as string;
@@ -607,7 +615,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       // The gate did not get looser, only consistent.
       const institute = await admin
         .from("institutes")
-        .insert({ name: `${TAG} yesterday school`, type: "school" })
+        .insert({ name: `${TAG} yesterday school`, type: "school", boards: BOARDS })
         .select("id")
         .single();
       const houseId = institute.data!.id as string;
@@ -1222,6 +1230,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .insert({
           name: `${TAG} Second School`,
           type: "coaching",
+          boards: BOARDS,
           city: "Bengaluru",
           state: "Karnataka",
           registered_by: repA.id,
@@ -1482,7 +1491,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const makeInstitute = async (label: string) => {
       const { data, error } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school", registered_by: repA.id })
+        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, registered_by: repA.id })
         .select("id")
         .single();
       if (error) throw new Error(`institute: ${error.message}`);
@@ -1709,7 +1718,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const closedInstitute = async (label: string, status: string) => {
       const { data, error } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school", registered_by: repA.id })
+        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, registered_by: repA.id })
         .select("id")
         .single();
       if (error) throw new Error(`institute: ${error.message}`);
@@ -2007,7 +2016,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       subject = await makeMember("rep", "targets");
       const { data, error } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} targets school`, type: "school" })
+        .insert({ name: `${TAG} targets school`, type: "school", boards: BOARDS })
         .select("id")
         .single();
       if (error) throw new Error(`institute: ${error.message}`);
@@ -2188,7 +2197,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const coverDay = iso(-6);
       const { data: second } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} second school`, type: "school" })
+        .insert({ name: `${TAG} second school`, type: "school", boards: BOARDS })
         .select("id")
         .single();
 
@@ -2252,7 +2261,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const plan = async (label: string, date = day) => {
       const { data: house, error: hErr } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school" })
+        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS })
         .select("id")
         .single();
       if (hErr) throw new Error(`institute: ${hErr.message}`);
@@ -2273,7 +2282,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     beforeAll(async () => {
       const { data } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} presence base`, type: "school" })
+        .insert({ name: `${TAG} presence base`, type: "school", boards: BOARDS })
         .select("id")
         .single();
       houseId = data!.id;
