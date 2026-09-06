@@ -14,6 +14,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
+import {
+  CheckInButton,
+  CheckOutButton,
+  CloseWithoutCheckoutButton,
+} from "@/components/dashboard/check-buttons";
 import { addToDailyPlan, removeFromDailyPlan } from "@/lib/visit-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import type { PickerInstitute, PlanEntry } from "@/lib/visits";
@@ -27,6 +32,11 @@ import {
   institutePickerLabel,
   reopeningInstitute,
 } from "@/lib/validation/institute";
+import {
+  formatDuration,
+  visitMinutes,
+  visitStatusOf,
+} from "@/lib/validation/checkin";
 
 /**
  * Today's plan, which the Dashboard owns (see CLAUDE.md).
@@ -228,10 +238,29 @@ export function DailyPlan({
                     </Badge>
                   )}
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <Button asChild className="h-11">
-                    <Link href={`/log?plan=${entry.id}`}>Log</Link>
-                  </Button>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  {/* The presence guarantee, in the order it happens: check in,
+                      then log, then check out. Log is not offered before
+                      check-in because the database would refuse it anyway
+                      (FO009) — better to not present a button that cannot work
+                      than to explain the refusal afterwards. */}
+                  {visitStatusOf({
+                    checkinAt: entry.checkinAt,
+                    checkoutAt: entry.checkoutAt,
+                    checkoutMissing: entry.checkoutMissing,
+                  }) === "Scheduled" ? (
+                    <CheckInButton
+                      planId={entry.id}
+                      instituteName={entry.instituteName}
+                    />
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <Badge variant="warning">In progress</Badge>
+                      <Button asChild className="h-11">
+                        <Link href={`/log?plan=${entry.id}`}>Log</Link>
+                      </Button>
+                    </div>
+                  )}
                   {/* An assignment is not the rep's to dismiss — it came from
                       an admin, and quietly deleting it would lose the ask. */}
                   {!entry.assignedBy && (
@@ -270,10 +299,48 @@ export function DailyPlan({
                       : ""}
                   </p>
                 </div>
-                <Badge variant="success" className="shrink-0">
-                  <CheckCircle2Icon className="size-3" aria-hidden />
-                  Held
-                </Badge>
+                {/* Logged, so the closing report is done. What remains is
+                    leaving — or, on a visit left open from an earlier day,
+                    admitting the check-out is not coming. */}
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge variant="success">
+                    <CheckCircle2Icon className="size-3" aria-hidden />
+                    Held
+                  </Badge>
+                  {visitStatusOf({
+                    checkinAt: entry.checkinAt,
+                    checkoutAt: entry.checkoutAt,
+                    checkoutMissing: entry.checkoutMissing,
+                  }) === "In Progress" && (
+                    <>
+                      <CheckOutButton
+                        planId={entry.id}
+                        instituteName={entry.instituteName}
+                      />
+                      <CloseWithoutCheckoutButton
+                        planId={entry.id}
+                        instituteName={entry.instituteName}
+                      />
+                    </>
+                  )}
+                  {entry.checkoutAt && (
+                    <span className="text-muted-foreground text-xs">
+                      {formatDuration(
+                        visitMinutes({
+                          checkinAt: entry.checkinAt,
+                          checkoutAt: entry.checkoutAt,
+                          checkoutMissing: entry.checkoutMissing,
+                        }),
+                      )}{" "}
+                      on site
+                    </span>
+                  )}
+                  {entry.checkoutMissing && (
+                    <span className="text-muted-foreground text-xs">
+                      Closed, time not recorded
+                    </span>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

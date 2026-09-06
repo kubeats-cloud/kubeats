@@ -2,8 +2,13 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/states";
 import { SectionTitle } from "@/components/section-title";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import type { ActivityReport, PeriodBucket } from "@/lib/activity-report";
+import {
+  VISIT_STATUS_BADGE,
+  formatCoords,
+  formatDuration,
+} from "@/lib/validation/checkin";
 import { FileTextIcon } from "lucide-react";
 
 /**
@@ -93,6 +98,7 @@ export function ActivitySummary({ report }: { report: ActivityReport }) {
     byInstitute,
     byMonth,
     byYear,
+    plannedVisits,
   } = report;
 
   const activityMax = Math.max(...byActivity.map((a) => a.visits), 0);
@@ -215,6 +221,93 @@ export function ActivitySummary({ report }: { report: ActivityReport }) {
               </div>
             ))}
           </Card>
+        )}
+      </div>
+
+      <div>
+        <SectionTitle>Field presence</SectionTitle>
+        {plannedVisits.length === 0 ? (
+          <EmptyState
+            icon={FileTextIcon}
+            title="No planned visits in this period"
+            description="Check-in and check-out times, locations and time on site appear here for every planned visit."
+          />
+        ) : (
+          /* Wide on purpose, and scrolling inside its own box rather than
+             pushing the page sideways. */
+          <div className="border-border overflow-x-auto rounded-md border">
+            <table className="w-full min-w-[46rem] text-sm">
+              <thead className="bg-muted/50 text-muted-foreground text-xs">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Scheduled</th>
+                  <th className="px-3 py-2 text-left font-medium">Institute</th>
+                  <th className="px-3 py-2 text-left font-medium">Checked in</th>
+                  <th className="px-3 py-2 text-left font-medium">Checked out</th>
+                  <th className="px-3 py-2 text-left font-medium">On site</th>
+                  <th className="px-3 py-2 text-left font-medium">Status</th>
+                  <th className="px-3 py-2 text-left font-medium">Report</th>
+                </tr>
+              </thead>
+              <tbody className="divide-border divide-y">
+                {plannedVisits.map((visit) => {
+                  const inAt = formatCoords(visit.checkinLat, visit.checkinLng);
+                  const outAt = formatCoords(visit.checkoutLat, visit.checkoutLng);
+                  return (
+                    <tr key={visit.id}>
+                      <td className="px-3 py-2 align-top whitespace-nowrap">
+                        {formatDate(visit.date)}
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <span className="block max-w-48 truncate">
+                          {visit.instituteName}
+                        </span>
+                        <span className="text-muted-foreground block max-w-48 truncate text-xs">
+                          {visit.purpose}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 align-top whitespace-nowrap">
+                        {visit.checkinAt ? formatDateTime(visit.checkinAt) : "—"}
+                        <span className="text-muted-foreground block text-xs">
+                          {visit.checkinAt
+                            ? (inAt ?? "location unavailable")
+                            : ""}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 align-top whitespace-nowrap">
+                        {visit.checkoutAt ? formatDateTime(visit.checkoutAt) : "—"}
+                        <span className="text-muted-foreground block text-xs">
+                          {visit.checkoutAt
+                            ? (outAt ?? "location unavailable")
+                            : ""}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 align-top whitespace-nowrap tabular-nums">
+                        {formatDuration(visit.minutes)}
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <Badge variant={VISIT_STATUS_BADGE[visit.status]}>
+                          {visit.status}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        {visit.reportFiled === null ? (
+                          <span className="text-muted-foreground text-xs">
+                            Not logged
+                          </span>
+                        ) : (
+                          <Badge
+                            variant={visit.reportFiled ? "success" : "neutral"}
+                          >
+                            {visit.reportFiled ? "Filed" : "No report"}
+                          </Badge>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

@@ -64,6 +64,18 @@ export interface PlanEntry {
   /** Set when an admin put this on the rep's plan rather than the rep. */
   assignedBy: string | null;
   assignedByName: string | null;
+
+  /**
+   * Check-in / check-out (migration 0014). Every coordinate may be null: a
+   * denied permission or no signal still records the arrival.
+   */
+  checkinAt: string | null;
+  checkinLat: number | null;
+  checkinLng: number | null;
+  checkoutAt: string | null;
+  checkoutLat: number | null;
+  checkoutLng: number | null;
+  checkoutMissing: boolean;
 }
 
 /**
@@ -79,7 +91,9 @@ export async function getTodayPlan(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("daily_plans")
-    .select("id, institute_id, purpose, meetings_actual, follow_up_date, assigned_by")
+    .select(
+      "id, institute_id, purpose, meetings_actual, follow_up_date, assigned_by, checkin_at, checkin_lat, checkin_lng, checkout_at, checkout_lat, checkout_lng, checkout_missing",
+    )
     .eq("member", memberId)
     .eq("date", todayISO())
     .order("created_at", { ascending: false });
@@ -97,12 +111,31 @@ export async function getTodayPlan(
 
   return {
     ok: true,
-    entries: rows.map(({ assigned_by, ...r }) => ({
-      ...r,
-      instituteName: names.get(r.institute_id) ?? "Unknown institute",
-      assignedBy: assigned_by,
-      assignedByName: assigned_by ? (assigners.get(assigned_by) ?? null) : null,
-    })),
+    entries: rows.map(
+      ({
+        assigned_by,
+        checkin_at,
+        checkin_lat,
+        checkin_lng,
+        checkout_at,
+        checkout_lat,
+        checkout_lng,
+        checkout_missing,
+        ...r
+      }) => ({
+        ...r,
+        instituteName: names.get(r.institute_id) ?? "Unknown institute",
+        assignedBy: assigned_by,
+        assignedByName: assigned_by ? (assigners.get(assigned_by) ?? null) : null,
+        checkinAt: checkin_at,
+        checkinLat: checkin_lat,
+        checkinLng: checkin_lng,
+        checkoutAt: checkout_at,
+        checkoutLat: checkout_lat,
+        checkoutLng: checkout_lng,
+        checkoutMissing: checkout_missing ?? false,
+      }),
+    ),
   };
 }
 
