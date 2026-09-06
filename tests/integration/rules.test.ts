@@ -2147,28 +2147,49 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("counts institutes covered as distinct, not as visits", async () => {
-      // Three visits, two schools. "Covered" has to say two, which is why it
-      // cannot come from tallyVisitMetrics().
+      // Self-contained on its own date. Leaning on rows another test inserted
+      // makes the count depend on test order, which is how this one was wrong
+      // the first time.
+      const coverDay = iso(-6);
       const { data: second } = await admin
         .from("institutes")
         .insert({ name: `${TAG} second school`, type: "school" })
         .select("id")
         .single();
 
-      await admin.from("visits").insert({
-        institute_id: second!.id,
-        member: subject.id,
-        activity: "olympiad",
-        date: day,
-        photo_url: photoFor(subject.id),
-      });
+      // Three visits, two schools: the first school twice.
+      await admin.from("visits").insert([
+        {
+          institute_id: houseId,
+          member: subject.id,
+          activity: "olympiad",
+          date: coverDay,
+          photo_url: photoFor(subject.id),
+        },
+        {
+          institute_id: houseId,
+          member: subject.id,
+          activity: "application",
+          date: coverDay,
+          photo_url: photoFor(subject.id),
+        },
+        {
+          institute_id: second!.id,
+          member: subject.id,
+          activity: "olympiad",
+          date: coverDay,
+          photo_url: photoFor(subject.id),
+        },
+      ]);
 
       const { data } = await admin
         .from("visits")
         .select("institute_id")
         .eq("member", subject.id)
-        .eq("date", day);
+        .eq("date", coverDay);
 
+      // Three rows, but "covered" is two — the distinction the ninth metric
+      // exists for.
       expect((data ?? []).length).toBe(3);
       expect(new Set((data ?? []).map((r) => r.institute_id)).size).toBe(2);
     });
