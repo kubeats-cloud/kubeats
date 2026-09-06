@@ -37,8 +37,15 @@ Clean, modern, mobile-first utility app.
 
 ### Screen ownership
 
-Six screens, and no others: Dashboard, Institutes, Log Visit, Pending, Weekly,
-plus Settings for admins only.
+A rep has six screens: Dashboard, Institutes, Log Visit, Pending, Weekly and
+Materials. An admin has a workspace instead — Overview, Review, Assign, Team,
+Institutes, Settings — plus Data and Manage materials, which are deliberately
+off the bar and reached from Settings or Overview.
+
+This said "six screens, and no others" through Phase 9, when a rep had five and
+`/materials` did not exist. It is a statement about restraint, not a hard count:
+a new tab has to earn its place in a thumb-reachable bar, which is why the two
+admin tools that get used a few times a year are one tap deeper instead.
 
 **The Dashboard owns the daily-plan create-and-track flow.** There is no Daily
 tab. On the Dashboard a rep adds today's planned visits (institute + purpose
@@ -215,6 +222,18 @@ already claimed the easy 0.9 MiB between them; see README for both.
   `tests/integration/rules.test.ts` fails loudly if only one of them moves.
   There is exactly one `todayISO()` in `src/` — `visits.ts` re-exports it, and
   a second copy is how the two halves drifted the first time.
+- The materials library (Feature A, migration 0012) inverts the visit-photos
+  shape: one private bucket the whole team READS, that only an admin may write.
+  Size and type are enforced four times — the browser, the server action, the
+  `materials_*_valid` CHECKs, and the bucket's own `file_size_limit` /
+  `allowed_mime_types`, which is the layer a forged form cannot reach.
+  **Materials are never compressed**, unlike visit photos: a poster or a fee
+  sheet has to stay print-quality, so the 5 MiB cap is the only thing between
+  the library and the 1 GB free tier. There is no retention job — a material
+  stays until an admin deletes it. Deleting removes the storage object first and
+  the row second, because a file with no row is invisible and permanent, while a
+  row with no file merely renders as unavailable; the housekeeping query at the
+  foot of 0012 lists both kinds of orphan.
 - Visit photos are deleted automatically after
   `public.visit_photo_retention_days()` days (migration 0003, scheduled in
   0004). The visit rows, coordinates and timestamps are kept forever, so a row
