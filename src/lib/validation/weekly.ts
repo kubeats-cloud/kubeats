@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PERIODS, periodStartOf } from "@/lib/periods";
+import { TARGET_PERIODS, periodStartOf } from "@/lib/periods";
 
 /**
  * The eight weekly metrics, and — the part that actually matters — where each
@@ -268,7 +268,7 @@ const periodStart = z.string().refine((v) => /^\d{4}-\d{2}-\d{2}$/.test(v), {
 
 export const targetsSchema = z
   .object({
-    period: z.enum(PERIODS, { message: "Choose a period." }),
+    period: z.enum(TARGET_PERIODS, { message: "Choose a period." }),
     period_start: periodStart,
     meetings: count,
     sessions_set: count,
@@ -299,7 +299,7 @@ export type TargetsInput = z.infer<typeof targetsSchema>;
 
 export const reopenSchema = z.object({
   member: z.uuid("That member could not be identified."),
-  period: z.enum(PERIODS, { message: "Choose a period." }),
+  period: z.enum(TARGET_PERIODS, { message: "Choose a period." }),
   period_start: periodStart,
 });
 

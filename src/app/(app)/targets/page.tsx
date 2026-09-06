@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { PageColumn } from "@/components/layout/page-column";
 import { redirect } from "next/navigation";
-import { ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, ChartColumnIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
@@ -14,9 +14,10 @@ import { getTargets, memberName } from "@/lib/targets";
 import { completionPercent } from "@/lib/validation/weekly";
 import {
   PERIOD_NOUN,
-  isPeriod,
+  TARGET_PERIODS,
+  isTargetPeriod,
   normalisePeriodStart,
-  type Period,
+  type TargetPeriod,
 } from "@/lib/periods";
 
 export const metadata = { title: "Targets" };
@@ -34,7 +35,7 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
   // weekly rather than erroring — that is the one this screen has always been,
   // and a hand-edited URL should land somewhere sensible.
   const periodParam = first(searchParams.period);
-  const period: Period = isPeriod(periodParam) ? periodParam : "weekly";
+  const period: TargetPeriod = isTargetPeriod(periodParam) ? periodParam : "weekly";
   const periodStart = normalisePeriodStart(period, first(searchParams.start));
 
   // An admin may look at one rep's targets; everyone else only ever sees their
@@ -83,6 +84,22 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
         }
       />
 
+      {/* The screen about what you are aiming for is the natural place to ask
+          what you actually did. /report is out of the nav bar on purpose — see
+          lib/nav.ts — so this is how a rep reaches their own history. */}
+      <Button asChild variant="outline" className="mb-4 h-11">
+        <Link
+          href={
+            viewingOther
+              ? `/report?period=monthly&member=${memberId}`
+              : "/report?period=monthly"
+          }
+        >
+          <ChartColumnIcon className="size-4" aria-hidden />
+          {viewingOther ? "Their activity report" : "My activity report"}
+        </Link>
+      </Button>
+
       {viewingOther && (
         <Button asChild variant="outline" className="mb-4 h-11">
           <Link href="/">
@@ -95,6 +112,7 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
       <PeriodControls
         period={period}
         periodStart={periodStart}
+        options={TARGET_PERIODS}
         member={viewingOther ? memberId : undefined}
       />
 

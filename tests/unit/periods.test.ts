@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   PERIODS,
+  PERIOD_NOUN,
+  REPORT_PERIODS,
+  TARGET_PERIODS,
   isPeriod,
+  isReportPeriod,
+  isTargetPeriod,
   monthEndOf,
   monthStartOf,
   normalisePeriodStart,
@@ -151,9 +156,12 @@ describe("normalisePeriodStart", () => {
 });
 
 describe("isPeriod", () => {
-  it("accepts the three and refuses everything else", () => {
+  it("accepts the four the helpers understand and refuses everything else", () => {
+    // Four since the activity report arrived: yearly is a real period for
+    // reading history, just not one you can commit a target to.
     for (const p of PERIODS) expect(isPeriod(p), p).toBe(true);
-    for (const bad of ["quarterly", "yearly", "", null, undefined, 7]) {
+    expect(PERIODS).toHaveLength(4);
+    for (const bad of ["quarterly", "fortnightly", "", null, undefined, 7]) {
       expect(isPeriod(bad), String(bad)).toBe(false);
     }
   });
@@ -188,5 +196,60 @@ describe("the metric set", () => {
   it("carries the ninth metric the targets table has a column for", () => {
     expect(METRIC_KEYS).toContain("institutes_covered");
     expect(METRIC_KEYS).toHaveLength(9);
+  });
+});
+
+describe("the yearly period (feature 1's report)", () => {
+  it("snaps to 1 January and covers the whole year", () => {
+    expect(periodStartOf("yearly", "2026-09-16")).toBe("2026-01-01");
+    expect(periodRange("yearly", "2026-01-01")).toEqual({
+      start: "2026-01-01",
+      end: "2026-12-31",
+    });
+  });
+
+  it("steps a year and stays on 1 January", () => {
+    expect(shiftPeriod("yearly", "2026-01-01", -1)).toBe("2025-01-01");
+    expect(shiftPeriod("yearly", "2026-01-01", 1)).toBe("2027-01-01");
+  });
+
+  it("covers a leap year end to end", () => {
+    const range = periodRange("yearly", periodStartOf("yearly", "2028-06-15"));
+    expect(range).toEqual({ start: "2028-01-01", end: "2028-12-31" });
+  });
+
+  it("is idempotent and does not drift when stepped either way", () => {
+    const start = periodStartOf("yearly", "2026-09-16");
+    expect(periodStartOf("yearly", start)).toBe(start);
+    expect(shiftPeriod("yearly", shiftPeriod("yearly", start, -1), 1)).toBe(start);
+  });
+});
+
+describe("the two period vocabularies", () => {
+  it("offers weekly to targets and yearly to the report, never the reverse", () => {
+    // The split is what stops a yearly row reaching public.targets, whose
+    // targets_period_valid CHECK would refuse it anyway.
+    expect(TARGET_PERIODS).toEqual(["daily", "weekly", "monthly"]);
+    expect(REPORT_PERIODS).toEqual(["daily", "monthly", "yearly"]);
+    expect(TARGET_PERIODS).not.toContain("yearly");
+    expect(REPORT_PERIODS).not.toContain("weekly");
+  });
+
+  it("recognises each vocabulary's own members and no others", () => {
+    for (const p of TARGET_PERIODS) expect(isTargetPeriod(p), p).toBe(true);
+    for (const p of REPORT_PERIODS) expect(isReportPeriod(p), p).toBe(true);
+    expect(isTargetPeriod("yearly")).toBe(false);
+    expect(isReportPeriod("weekly")).toBe(false);
+    expect(isTargetPeriod("quarterly")).toBe(false);
+    expect(isReportPeriod("quarterly")).toBe(false);
+  });
+
+  it("keeps both vocabularies inside the one set the helpers understand", () => {
+    for (const p of [...TARGET_PERIODS, ...REPORT_PERIODS]) {
+      expect(PERIODS, p).toContain(p);
+      // Every period the screens can offer must have a range and a noun.
+      expect(periodRange(p, periodStartOf(p, "2026-09-16")).end, p).toBeTruthy();
+      expect(PERIOD_NOUN[p], p).toBeTruthy();
+    }
   });
 });

@@ -18,7 +18,8 @@ export type NavIconName =
   | "assign"
   | "team"
   | "data"
-  | "materials";
+  | "materials"
+  | "report";
 
 export interface NavItem {
   href: string;
@@ -52,6 +53,12 @@ export const REP_NAV: NavItem[] = [
  * flush, which is destructive and used a few times a year, and a bar item is
  * for the things you reach for daily. It is one tap from Settings and from
  * Overview, which is the right distance for a tool that deletes things.
+ *
+ * `/report` is out of both bars for the same reason, and the nav test enforces
+ * the six. It is reached from Targets — the screen about what you are aiming
+ * for is the natural place to ask what you actually did — and from the admin
+ * Overview. A seventh tab would have cost every other tab width on the phones
+ * this app is actually used on.
  */
 export const ADMIN_NAV: NavItem[] = [
   { href: "/", label: "Overview", icon: "dashboard" },

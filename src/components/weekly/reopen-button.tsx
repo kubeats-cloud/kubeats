@@ -4,7 +4,7 @@ import { useActionState, useState } from "react";
 import { UnlockIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { reopenPeriod } from "@/lib/target-actions";
-import { PERIOD_NOUN, type Period } from "@/lib/periods";
+import { PERIOD_NOUN, type TargetPeriod } from "@/lib/periods";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 
 /**
@@ -21,7 +21,7 @@ export function ReopenButton({
   memberName,
 }: {
   member: string;
-  period: Period;
+  period: TargetPeriod;
   periodStart: string;
   memberName: string;
 }) {

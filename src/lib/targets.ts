@@ -2,7 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
-import { periodRange, type Period } from "@/lib/periods";
+import { periodRange, type TargetPeriod } from "@/lib/periods";
 import {
   METRIC_KEYS,
   ZERO_COUNTS,
@@ -33,7 +33,7 @@ import {
 export interface TargetRecord {
   id: string | null;
   member: string;
-  period: Period;
+  period: TargetPeriod;
   period_start: string;
   locked: boolean;
   submitted_at: string | null;
@@ -49,7 +49,7 @@ export interface TargetView {
 /** A period with no row yet: nothing committed, nothing locked. */
 function emptyRecord(
   member: string,
-  period: Period,
+  period: TargetPeriod,
   periodStart: string,
 ): TargetRecord {
   return {
@@ -88,7 +88,7 @@ function toRecord(row: RawRow): TargetRecord {
   return {
     id: row.id,
     member: row.member,
-    period: row.period as Period,
+    period: row.period as TargetPeriod,
     period_start: row.period_start,
     locked: row.locked,
     submitted_at: row.submitted_at,
@@ -113,7 +113,7 @@ function achievedFrom(visits: CountableVisit[], meetingsHeld: number): MetricCou
 
 export async function getTargets(
   memberId: string,
-  period: Period,
+  period: TargetPeriod,
   periodStart: string,
 ): Promise<{ ok: true; view: TargetView } | { ok: false }> {
   const supabase = await createClient();
@@ -188,7 +188,7 @@ export interface TeamMemberTargets {
  * call from an admin surface; a rep calling it would simply see themselves.
  */
 export async function getTeamTargets(
-  period: Period,
+  period: TargetPeriod,
   periodStart: string,
 ): Promise<{ ok: true; members: TeamMemberTargets[] } | { ok: false }> {
   const supabase = await createClient();

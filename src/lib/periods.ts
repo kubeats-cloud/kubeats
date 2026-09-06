@@ -19,13 +19,37 @@
 import { formatDate, formatMonthYear, todayISO } from "@/lib/dates";
 import { mondayOf, weekCountEnd, formatWeekRange, weekLabel } from "@/lib/weeks";
 
-export const PERIODS = ["daily", "weekly", "monthly"] as const;
+/**
+ * Four periods, and two vocabularies over them.
+ *
+ * The date arithmetic below is the same question for all four, so it is written
+ * once. What differs is which periods a given screen offers:
+ *
+ *   PERIODS         all four — what the helpers here understand
+ *   TARGET_PERIODS  daily, weekly, monthly — what public.targets accepts, and
+ *                   what targets_period_valid enforces. There is no yearly
+ *                   target: nobody commits to a year of numbers in this app.
+ *   REPORT_PERIODS  daily, monthly, yearly — how the activity report is read.
+ *                   No weekly, because month-and-year is how the client asked
+ *                   to see history, and a fourth tab nobody uses is clutter.
+ *
+ * Keeping them as separate lists over one union is what stops a yearly row
+ * reaching the targets table, which the database would refuse anyway.
+ */
+export const PERIODS = ["daily", "weekly", "monthly", "yearly"] as const;
 export type Period = (typeof PERIODS)[number];
+
+export const TARGET_PERIODS = ["daily", "weekly", "monthly"] as const;
+export type TargetPeriod = (typeof TARGET_PERIODS)[number];
+
+export const REPORT_PERIODS = ["daily", "monthly", "yearly"] as const;
+export type ReportPeriod = (typeof REPORT_PERIODS)[number];
 
 export const PERIOD_LABELS: Record<Period, string> = {
   daily: "Daily",
   weekly: "Weekly",
   monthly: "Monthly",
+  yearly: "Yearly",
 };
 
 /** For sentences: "Commit to this day", "reopened this month". */
@@ -33,10 +57,23 @@ export const PERIOD_NOUN: Record<Period, string> = {
   daily: "day",
   weekly: "week",
   monthly: "month",
+  yearly: "year",
 };
 
 export function isPeriod(value: unknown): value is Period {
   return typeof value === "string" && (PERIODS as readonly string[]).includes(value);
+}
+
+export function isTargetPeriod(value: unknown): value is TargetPeriod {
+  return (
+    typeof value === "string" && (TARGET_PERIODS as readonly string[]).includes(value)
+  );
+}
+
+export function isReportPeriod(value: unknown): value is ReportPeriod {
+  return (
+    typeof value === "string" && (REPORT_PERIODS as readonly string[]).includes(value)
+  );
 }
 
 const DAY_MS = 86_400_000;
@@ -70,6 +107,18 @@ export function monthEndOf(dateISO: string): string {
   return toISO(next);
 }
 
+/** The 1st of January of the year containing `dateISO`. */
+export function yearStartOf(dateISO: string = todayISO()): string {
+  const date = parseISO(dateISO) ?? parseISO(todayISO())!;
+  return `${toISO(date).slice(0, 4)}-01-01`;
+}
+
+/** The 31st of December of the year containing `dateISO`. */
+export function yearEndOf(dateISO: string): string {
+  const date = parseISO(dateISO) ?? parseISO(todayISO())!;
+  return `${toISO(date).slice(0, 4)}-12-31`;
+}
+
 /**
  * Snaps any date onto the grid its period requires, matching the
  * targets_period_start_aligned CHECK in migration 0013.
@@ -87,6 +136,8 @@ export function periodStartOf(period: Period, dateISO: string = todayISO()): str
       return mondayOf(safe);
     case "monthly":
       return monthStartOf(safe);
+    case "yearly":
+      return yearStartOf(safe);
   }
 }
 
@@ -110,6 +161,8 @@ export function periodRange(
       return { start: periodStart, end: weekCountEnd(periodStart) };
     case "monthly":
       return { start: periodStart, end: monthEndOf(periodStart) };
+    case "yearly":
+      return { start: periodStart, end: yearEndOf(periodStart) };
   }
 }
 
@@ -129,6 +182,8 @@ export function shiftPeriod(
       return toISO(
         new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + by, 1)),
       );
+    case "yearly":
+      return toISO(new Date(Date.UTC(date.getUTCFullYear() + by, 0, 1)));
   }
 }
 
@@ -158,6 +213,8 @@ export function formatPeriodRange(period: Period, periodStart: string): string {
       return formatWeekRange(periodStart);
     case "monthly":
       return formatMonthYear(periodStart);
+    case "yearly":
+      return periodStart.slice(0, 4);
   }
 }
 
@@ -166,12 +223,15 @@ export function periodLabel(period: Period, periodStart: string): string {
   if (period === "weekly") return weekLabel(periodStart);
 
   const current = currentPeriodStart(period);
-  if (periodStart === current) return period === "daily" ? "Today" : "This month";
+  const noun = period === "daily" ? "day" : period === "monthly" ? "month" : "year";
+  if (periodStart === current) {
+    return period === "daily" ? "Today" : `This ${noun}`;
+  }
   if (periodStart === shiftPeriod(period, current, -1)) {
-    return period === "daily" ? "Yesterday" : "Last month";
+    return period === "daily" ? "Yesterday" : `Last ${noun}`;
   }
   if (periodStart === shiftPeriod(period, current, 1)) {
-    return period === "daily" ? "Tomorrow" : "Next month";
+    return period === "daily" ? "Tomorrow" : `Next ${noun}`;
   }
   return formatPeriodRange(period, periodStart);
 }
