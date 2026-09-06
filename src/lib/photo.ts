@@ -11,6 +11,12 @@
  */
 
 import { formatDateTime } from "@/lib/dates";
+import {
+  AREA_UNAVAILABLE,
+  LOCATION_UNAVAILABLE,
+  STAMP_PRECISION,
+  formatCoordinates,
+} from "@/lib/location-display";
 
 const MAX_DIMENSION = 1000;
 const QUALITY = 0.5;
@@ -22,9 +28,15 @@ export interface PhotoStamp {
   /**
    * An approximate area name, when one could be found. Additional to the
    * coordinates and never a substitute: the numbers are the record, this is
-   * the line a person can read. Null omits it entirely rather than printing a
-   * placeholder, so a photo taken where the lookup failed simply looks like a
-   * photo taken before this existed.
+   * the line a person can read.
+   *
+   * Null now stamps "Area unavailable" rather than dropping the line. It used
+   * to be omitted, which left a reader unable to tell a failed lookup from a
+   * photo taken before area names existed at all — and, worse, left a gap where
+   * somebody might later think to put the institute's name. The line is always
+   * there and always says which of the two it is.
+   *
+   * Note what this field is NOT: it is never the institute. See location-display.ts.
    */
   place?: string | null;
 }
@@ -59,13 +71,6 @@ async function loadBitmap(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   });
 }
 
-function formatCoords(stamp: PhotoStamp): string {
-  if (stamp.latitude === null || stamp.longitude === null) {
-    return "Location unavailable";
-  }
-  return `${stamp.latitude.toFixed(5)}, ${stamp.longitude.toFixed(5)}`;
-}
-
 export async function preparePhoto(
   /** A picked file, or a frame captured from the in-app camera. */
   file: Blob,
@@ -90,11 +95,13 @@ export async function preparePhoto(
   if ("close" in source) source.close();
 
   // --- the stamp -----------------------------------------------------------
-  const place = stamp.place?.trim();
+  // Coordinates exact, area approximate, time exact. That is the whole of a
+  // location; nothing else may join this list.
   const lines = [
     "KUbeats",
-    formatCoords(stamp),
-    ...(place ? [place] : []),
+    formatCoordinates(stamp.latitude, stamp.longitude, STAMP_PRECISION) ??
+      LOCATION_UNAVAILABLE,
+    stamp.place?.trim() || AREA_UNAVAILABLE,
     formatDateTime(stamp.takenAt),
   ];
 

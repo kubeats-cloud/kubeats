@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatCoordinates } from "@/lib/location-display";
 
 /**
  * Check-in / check-out: what the state means, and how long someone was there.
@@ -62,14 +63,14 @@ export function formatDuration(minutes: number | null): string {
   return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
 
-/** "23.0225, 72.5714", or a plain statement that the device could not say. */
-export function formatCoords(
-  lat: number | null,
-  lng: number | null,
-): string | null {
-  if (lat === null || lng === null) return null;
-  return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-}
+/**
+ * "23.0225, 72.5714", or null when the device could not say.
+ *
+ * Kept as a named re-export because this is where check-in code looks for it;
+ * the formatting itself lives in location-display.ts with every other location
+ * string, so there is one definition of what a location looks like.
+ */
+export const formatCoords = formatCoordinates;
 
 /**
  * Coordinates as they arrive from a form.
@@ -96,6 +97,21 @@ export const checkPointSchema = z.object({
   plan_id: z.uuid("That planned visit could not be identified."),
   latitude: optionalCoord(90),
   longitude: optionalCoord(180),
+  /**
+   * Metres. Optional, and never a reason to refuse a check-in — including when
+   * the key is missing altogether, which is what a page cached from before this
+   * shipped will post.
+   */
+  accuracy: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? null : v))
+    .nullable()
+    .refine((v) => v === null || (Number.isFinite(Number(v)) && Number(v) >= 0), {
+      message: "That accuracy could not be read.",
+    })
+    .transform((v) => (v === null ? null : Number(v))),
 });
 
 export type CheckPointInput = z.infer<typeof checkPointSchema>;
@@ -110,5 +126,6 @@ export function checkPointFormDataToInput(formData: FormData) {
     plan_id: text("plan_id"),
     latitude: text("latitude"),
     longitude: text("longitude"),
+    accuracy: text("accuracy"),
   };
 }

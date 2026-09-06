@@ -129,6 +129,27 @@ export const visitSchema = z
     latitude: optionalCoord(90),
     longitude: optionalCoord(180),
     /**
+     * How good those coordinates are, in metres. Optional like the coordinates
+     * themselves, and never a reason to refuse a visit — it exists so a
+     * network fix can be told apart from a satellite one after the fact, which
+     * it could not be before.
+     *
+     * It is also the only key here that tolerates being absent entirely. During
+     * a deploy a rep's cached page posts a form with no accuracy field at all,
+     * and a required key would turn that into "could not be read" on a visit
+     * that is otherwise perfect.
+     */
+    accuracy: z
+      .string()
+      .trim()
+      .optional()
+      .transform((x) => (x === undefined || x === "" ? null : x))
+      .nullable()
+      .refine((x) => x === null || (Number.isFinite(Number(x)) && Number(x) >= 0), {
+        message: "That accuracy could not be read.",
+      })
+      .transform((x) => (x === null ? null : Number(x))),
+    /**
      * Rule 12 — a visit is not evidence without its photograph, so this is the
      * one part of "proof" that blocks. The location beside it still does not:
      * a rep in a basement staff room with no GPS lock must not be stuck, but a
@@ -224,6 +245,7 @@ export function visitFormDataToInput(formData: FormData) {
     expected_date: text("expected_date"),
     latitude: text("latitude"),
     longitude: text("longitude"),
+    accuracy: text("accuracy"),
     photo_path: text("photo_path"),
     notes: text("notes"),
     status_set_to: text("status_set_to"),

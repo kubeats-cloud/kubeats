@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { LOCATION_UNAVAILABLE, formatArea } from "@/lib/location-display";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/states";
 import { SectionTitle } from "@/components/section-title";
@@ -9,6 +10,11 @@ import {
   formatCoords,
   formatDuration,
 } from "@/lib/validation/checkin";
+import {
+  ACCURACY_BADGE,
+  accuracyBand,
+  describeAccuracy,
+} from "@/lib/validation/location";
 import { FileTextIcon } from "lucide-react";
 
 /**
@@ -267,19 +273,43 @@ export function ActivitySummary({ report }: { report: ActivityReport }) {
                       </td>
                       <td className="px-3 py-2 align-top whitespace-nowrap">
                         {visit.checkinAt ? formatDateTime(visit.checkinAt) : "—"}
-                        <span className="text-muted-foreground block text-xs">
-                          {visit.checkinAt
-                            ? (inAt ?? "location unavailable")
-                            : ""}
+                        <span className="text-muted-foreground block text-xs tabular-nums">
+                          {visit.checkinAt ? (inAt ?? LOCATION_UNAVAILABLE) : ""}
                         </span>
+                        {visit.checkinAt && inAt && (
+                          <span className="text-muted-foreground block text-xs">
+                            {formatArea(visit.checkinArea)}
+                          </span>
+                        )}
+                        {visit.checkinAt && (
+                          <span className="block text-xs">
+                            <Badge
+                              variant={ACCURACY_BADGE[accuracyBand(visit.checkinAccuracy)]}
+                            >
+                              {describeAccuracy(visit.checkinAccuracy)}
+                            </Badge>
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 align-top whitespace-nowrap">
                         {visit.checkoutAt ? formatDateTime(visit.checkoutAt) : "—"}
-                        <span className="text-muted-foreground block text-xs">
-                          {visit.checkoutAt
-                            ? (outAt ?? "location unavailable")
-                            : ""}
+                        <span className="text-muted-foreground block text-xs tabular-nums">
+                          {visit.checkoutAt ? (outAt ?? LOCATION_UNAVAILABLE) : ""}
                         </span>
+                        {visit.checkoutAt && outAt && (
+                          <span className="text-muted-foreground block text-xs">
+                            {formatArea(visit.checkoutArea)}
+                          </span>
+                        )}
+                        {visit.checkoutAt && (
+                          <span className="block text-xs">
+                            <Badge
+                              variant={ACCURACY_BADGE[accuracyBand(visit.checkoutAccuracy)]}
+                            >
+                              {describeAccuracy(visit.checkoutAccuracy)}
+                            </Badge>
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 align-top whitespace-nowrap tabular-nums">
                         {formatDuration(visit.minutes)}

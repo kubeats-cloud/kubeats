@@ -1,4 +1,5 @@
 import "server-only";
+import { areaFor } from "@/lib/place-cache";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
@@ -32,6 +33,16 @@ export interface VisitReport {
   expected_date: string | null;
   latitude: number | null;
   longitude: number | null;
+  /**
+   * The approximate area those coordinates fall in, recovered from the shared
+   * place cache. Null when nobody ever looked that square up, which the view
+   * renders as "Area unavailable".
+   *
+   * It is NOT the institute's registered address — that is institute.area, a
+   * different fact about a different thing, and the two are labelled so they
+   * cannot be read as one.
+   */
+  area: string | null;
   notes: string | null;
   reported_at: string | null;
   photo: VisitPhoto | null;
@@ -131,6 +142,12 @@ export async function getVisitReport(visitId: string): Promise<VisitReport | nul
 
   const value = <T>(key: string): T => row[key] as T;
 
+  // Cache read only. Never a fresh geocode from a page load.
+  const area = await areaFor(
+    value<number | null>("latitude"),
+    value<number | null>("longitude"),
+  );
+
   return {
     id: value("id"),
     member: row.member,
@@ -141,6 +158,7 @@ export async function getVisitReport(visitId: string): Promise<VisitReport | nul
     expected_date: value("expected_date"),
     latitude: value("latitude"),
     longitude: value("longitude"),
+    area,
     notes: value("notes"),
     reported_at: value("reported_at"),
     photo: row.photo_url ? (photos.get(row.photo_url) ?? { status: "expired" }) : null,

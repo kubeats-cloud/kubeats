@@ -29,6 +29,35 @@ describe("visitSchema", () => {
     expect(visitSchema.safeParse(baseVisit).success).toBe(true);
   });
 
+  it("carries the accuracy of the fix when there is one", () => {
+    const result = visitSchema.safeParse({
+      ...baseVisit,
+      latitude: "23.0225",
+      longitude: "72.5714",
+      accuracy: "137",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.accuracy).toBe(137);
+  });
+
+  it("saves a visit whose form carries no accuracy field at all", () => {
+    // baseVisit has no accuracy key, which is what a page cached from before
+    // this shipped will post. Accuracy is a diagnostic and never a gate, so an
+    // otherwise perfect visit must not fail on it.
+    const result = visitSchema.safeParse(baseVisit);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.accuracy).toBeNull();
+  });
+
+  it("refuses an accuracy that is not a length", () => {
+    for (const accuracy of ["north", "-5"]) {
+      expect(
+        visitSchema.safeParse({ ...baseVisit, accuracy }).success,
+        accuracy,
+      ).toBe(false);
+    }
+  });
+
   it("refuses a visit with no photo (Rule 12)", () => {
     const result = visitSchema.safeParse({ ...baseVisit, photo_path: "" });
     expect(result.success).toBe(false);

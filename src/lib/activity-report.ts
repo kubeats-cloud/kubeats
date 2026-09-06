@@ -1,4 +1,6 @@
 import "server-only";
+import { areasFor } from "@/lib/place-cache";
+import { cellFor } from "@/lib/places";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
@@ -67,9 +69,15 @@ export interface PlannedVisit {
   checkinAt: string | null;
   checkinLat: number | null;
   checkinLng: number | null;
+  checkinAccuracy: number | null;
+  /** Approximate area for the check-in position, from the shared place cache. */
+  checkinArea: string | null;
   checkoutAt: string | null;
   checkoutLat: number | null;
   checkoutLng: number | null;
+  checkoutAccuracy: number | null;
+  /** Approximate area for the check-out position. Never the institute's own. */
+  checkoutArea: string | null;
   status: VisitStatus;
   /** Minutes on site, or null when a check-out never happened. */
   minutes: number | null;
@@ -134,9 +142,11 @@ interface RawPlan {
   checkin_at: string | null;
   checkin_lat: number | null;
   checkin_lng: number | null;
+  checkin_accuracy: number | null;
   checkout_at: string | null;
   checkout_lat: number | null;
   checkout_lng: number | null;
+  checkout_accuracy: number | null;
   checkout_missing: boolean | null;
   institutes: { name: string | null } | null;
 }
@@ -193,7 +203,7 @@ export async function getActivityReport(
     supabase
       .from("daily_plans")
       .select(
-        "id, date, purpose, institute_id, checkin_at, checkin_lat, checkin_lng, checkout_at, checkout_lat, checkout_lng, checkout_missing, institutes(name)",
+        "id, date, purpose, institute_id, checkin_at, checkin_lat, checkin_lng, checkin_accuracy, checkout_at, checkout_lat, checkout_lng, checkout_accuracy, checkout_missing, institutes(name)",
       )
       .eq("member", memberId)
       .gte("date", start)
@@ -279,7 +289,20 @@ export async function getActivityReport(
     reportByKey.set(`${visit.date}|${visit.institute_id}`, visit.reported_at !== null);
   }
 
-  const plannedVisits: PlannedVisit[] = ((plannedRows.data ?? []) as unknown as RawPlan[]).map(
+  const planRows = (plannedRows.data ?? []) as unknown as RawPlan[];
+
+  // One cache read for the whole table. Read-only: an admin opening a report
+  // never triggers a geocode, however many rows are on it.
+  const areas = await areasFor(
+    planRows.flatMap((plan) => [
+      { latitude: plan.checkin_lat, longitude: plan.checkin_lng },
+      { latitude: plan.checkout_lat, longitude: plan.checkout_lng },
+    ]),
+  );
+  const areaAt = (lat: number | null, lng: number | null) =>
+    lat === null || lng === null ? null : (areas.get(cellFor(lat, lng)) ?? null);
+
+  const plannedVisits: PlannedVisit[] = planRows.map(
     (plan) => {
       const state = {
         checkinAt: plan.checkin_at,
@@ -294,9 +317,13 @@ export async function getActivityReport(
         checkinAt: plan.checkin_at,
         checkinLat: plan.checkin_lat,
         checkinLng: plan.checkin_lng,
+        checkinAccuracy: plan.checkin_accuracy,
+        checkinArea: areaAt(plan.checkin_lat, plan.checkin_lng),
         checkoutAt: plan.checkout_at,
         checkoutLat: plan.checkout_lat,
         checkoutLng: plan.checkout_lng,
+        checkoutAccuracy: plan.checkout_accuracy,
+        checkoutArea: areaAt(plan.checkout_lat, plan.checkout_lng),
         status: visitStatusOf(state),
         minutes: visitMinutes(state),
         reportFiled: reportByKey.get(`${plan.date}|${plan.institute_id}`) ?? null,

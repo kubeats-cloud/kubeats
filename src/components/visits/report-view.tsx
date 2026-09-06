@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { formatArea, formatCoordinates } from "@/lib/location-display";
 import { formatDate } from "@/lib/dates";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
@@ -13,6 +14,8 @@ import type { VisitReport } from "@/lib/closing-report";
  * not much of a record.
  */
 export function ReportView({ report }: { report: VisitReport }) {
+  const coords = formatCoordinates(report.latitude, report.longitude);
+
   const row = (label: string, value: React.ReactNode) =>
     value === null || value === undefined || value === "" ? null : (
       <div className="flex items-start justify-between gap-4 py-2">
@@ -56,18 +59,32 @@ export function ReportView({ report }: { report: VisitReport }) {
             {row("Date", formatDate(report.date))}
             {row("Rep", report.memberName)}
             {row("Institute", report.institute?.name)}
+            {/* The school's registered address, from the institute record. It
+                sits with the other institute facts and is labelled for what it
+                is: it is NOT evidence of where anybody stood, and it used to be
+                called "Where" directly above the GPS row, which read as though
+                the two were the same claim. */}
             {row(
-              "Where",
+              "Institute address",
               [report.institute?.area, report.institute?.city, report.institute?.state]
                 .filter(Boolean)
                 .join(", ") || null,
             )}
             {row("Boards", chips(report.institute?.boards ?? null))}
+            {/* Where the phone actually was: exact coordinates, and the
+                approximate area they fall in. Nothing else belongs here. */}
             {row(
-              "Location",
-              report.latitude !== null && report.longitude !== null
-                ? `${report.latitude.toFixed(4)}, ${report.longitude.toFixed(4)}`
-                : "Not captured",
+              "GPS location",
+              coords ? (
+                <span className="block text-right">
+                  <span className="block tabular-nums">{coords}</span>
+                  <span className="text-muted-foreground block text-xs">
+                    {formatArea(report.area)}
+                  </span>
+                </span>
+              ) : (
+                "Not captured"
+              ),
             )}
             {row(
               "Photo",
