@@ -7,6 +7,7 @@ import {
   statusCategory,
 } from "@/lib/validation/institute";
 import { followUpHidden, followUpRequired } from "@/lib/validation/visit";
+import { visitMinutes, visitStatusOf } from "@/lib/validation/checkin";
 
 /**
  * The rules that live in Postgres.
@@ -99,6 +100,30 @@ const has0008 = configured
  * without the storage policies, or the policies without the bucket limits,
  * would each look fine until someone uploaded something they should not.
  */
+/**
+ * Migration 0014 adds check-in / check-out. It is deliberately NOT applied yet
+ * — the feature is built and held until there is hosting room — so this suite
+ * is expected to skip on a project that is up to date with main.
+ */
+const has0014 = configured
+  ? await admin
+      .from("daily_plans")
+      .select("checkin_at")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0014) {
+  console.warn(
+    [
+      "",
+      "  i migration 0014 is not applied. The check-in/out suite is SKIPPED,",
+      "    which is expected: that feature is built but deliberately unshipped.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
 /**
  * Migration 0013 generalises weekly_targets into targets, keyed by period. The
  * suite below is what would catch a period whose achieved figures are counted
@@ -2200,6 +2225,241 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .select("id")
         .eq("member", subject.id);
       expect(data ?? []).toHaveLength(0);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0014)("check-in / check-out — the presence record", () => {
+    /**
+     * Feature 2, built but unshipped. The two things worth proving are the two
+     * that field reality attacks: a check-in must survive having no location at
+     * all, and a visit must never be able to get permanently stuck.
+     */
+    let houseId: string;
+    const day = iso();
+
+    const plan = async (label: string, date = day) => {
+      const { data: house, error: hErr } = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} ${label}`, type: "school" })
+        .select("id")
+        .single();
+      if (hErr) throw new Error(`institute: ${hErr.message}`);
+      const { data, error } = await repA.db
+        .from("daily_plans")
+        .insert({
+          member: repA.id,
+          date,
+          institute_id: house.id,
+          purpose: `${TAG} ${label}`,
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(`plan: ${error.message}`);
+      return { planId: data.id as string, instituteId: house.id as string };
+    };
+
+    beforeAll(async () => {
+      const { data } = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} presence base`, type: "school" })
+        .select("id")
+        .single();
+      houseId = data!.id;
+    });
+
+    it("derives the same status the app does, for all four shapes", async () => {
+      // The database and src/lib/validation/checkin.ts must never disagree:
+      // one is what the report reads, the other is what the Dashboard renders.
+      const cases: [string | null, string | null, boolean, string][] = [
+        [null, null, false, "Scheduled"],
+        ["2026-09-06T09:00:00Z", null, false, "In Progress"],
+        ["2026-09-06T09:00:00Z", "2026-09-06T10:00:00Z", false, "Completed"],
+        ["2026-09-06T09:00:00Z", null, true, "Completed"],
+      ];
+      for (const [checkin, checkout, missing, expected] of cases) {
+        const { data, error } = await admin.rpc("plan_visit_status", {
+          p_checkin_at: checkin,
+          p_checkout_at: checkout,
+          p_checkout_missing: missing,
+        });
+        expect(error, expected).toBeNull();
+        expect(data, `${checkin}/${checkout}/${missing}`).toBe(expected);
+        expect(
+          visitStatusOf({
+            checkinAt: checkin,
+            checkoutAt: checkout,
+            checkoutMissing: missing,
+          }),
+        ).toBe(expected);
+      }
+    });
+
+    it("computes the same duration the app does, and null when open", async () => {
+      const { data: minutes } = await admin.rpc("plan_visit_minutes", {
+        p_checkin_at: "2026-09-06T09:00:00Z",
+        p_checkout_at: "2026-09-06T10:25:00Z",
+      });
+      expect(minutes).toBe(85);
+      expect(
+        visitMinutes({
+          checkinAt: "2026-09-06T09:00:00Z",
+          checkoutAt: "2026-09-06T10:25:00Z",
+          checkoutMissing: false,
+        }),
+      ).toBe(85);
+
+      const { data: open } = await admin.rpc("plan_visit_minutes", {
+        p_checkin_at: "2026-09-06T09:00:00Z",
+        p_checkout_at: null,
+      });
+      expect(open).toBeNull();
+    });
+
+    it("ACCEPTS a check-in with no location at all", async () => {
+      // The escape valve, at the layer that actually enforces things. A denied
+      // permission must never stop a rep recording that they arrived.
+      const { planId } = await plan("no gps");
+      const { error } = await repA.db
+        .from("daily_plans")
+        .update({ checkin_at: new Date().toISOString() })
+        .eq("id", planId);
+      expect(error).toBeNull();
+
+      const { data } = await admin
+        .from("daily_plans")
+        .select("checkin_at, checkin_lat")
+        .eq("id", planId)
+        .single();
+      expect(data?.checkin_at).not.toBeNull();
+      expect(data?.checkin_lat).toBeNull();
+    });
+
+    it("refuses a check-out with no check-in, and one that precedes it", async () => {
+      const { planId } = await plan("bad order");
+      const noCheckin = await repA.db
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("id", planId);
+      expect(noCheckin.error?.code).toBe(CHECK_VIOLATION);
+
+      await repA.db
+        .from("daily_plans")
+        .update({ checkin_at: "2026-09-06T10:00:00Z" })
+        .eq("id", planId);
+      const before = await repA.db
+        .from("daily_plans")
+        .update({ checkout_at: "2026-09-06T09:00:00Z" })
+        .eq("id", planId);
+      expect(before.error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses a row that both has a check-out and claims one is missing", async () => {
+      const { planId } = await plan("contradiction");
+      await repA.db
+        .from("daily_plans")
+        .update({
+          checkin_at: "2026-09-06T09:00:00Z",
+          checkout_at: "2026-09-06T10:00:00Z",
+        })
+        .eq("id", planId);
+      const { error } = await repA.db
+        .from("daily_plans")
+        .update({ checkout_missing: true })
+        .eq("id", planId);
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("lets a stuck visit be closed without a check-out", async () => {
+      const { planId } = await plan("forgot");
+      await repA.db
+        .from("daily_plans")
+        .update({ checkin_at: "2026-09-06T09:00:00Z" })
+        .eq("id", planId);
+
+      const { error } = await repA.db
+        .from("daily_plans")
+        .update({ checkout_missing: true })
+        .eq("id", planId);
+      expect(error).toBeNull();
+
+      const { data } = await admin
+        .from("daily_plans")
+        .select("checkin_at, checkout_at, checkout_missing")
+        .eq("id", planId)
+        .single();
+      expect(
+        visitStatusOf({
+          checkinAt: data!.checkin_at,
+          checkoutAt: data!.checkout_at,
+          checkoutMissing: data!.checkout_missing,
+        }),
+      ).toBe("Completed");
+      expect(
+        visitMinutes({
+          checkinAt: data!.checkin_at,
+          checkoutAt: data!.checkout_at,
+          checkoutMissing: data!.checkout_missing,
+        }),
+      ).toBeNull();
+    });
+
+    it("lets an admin close a rep's forgotten visit", async () => {
+      const { planId } = await plan("admin closes");
+      await repA.db
+        .from("daily_plans")
+        .update({ checkin_at: "2026-09-06T09:00:00Z" })
+        .eq("id", planId);
+
+      const { error } = await boss.db
+        .from("daily_plans")
+        .update({ checkout_missing: true })
+        .eq("id", planId);
+      expect(error).toBeNull();
+    });
+
+    it("refuses a meeting on a planned visit nobody checked in to", async () => {
+      // The presence guarantee. enforce_meeting_gate still requires the plan
+      // row; this adds that the rep has to have actually turned up.
+      const { planId, instituteId } = await plan("no checkin meeting");
+      const { error } = await repA.db.rpc("log_visit", {
+        p_institute_id: instituteId,
+        p_activity: "meeting",
+        p_photo_url: photoFor(repA.id),
+        p_daily_plan_id: planId,
+      });
+      expect(error?.code).toBe("FO009");
+    });
+
+    it("accepts the same meeting once the rep has checked in", async () => {
+      const { planId, instituteId } = await plan("checked in meeting");
+      await repA.db
+        .from("daily_plans")
+        .update({ checkin_at: new Date().toISOString() })
+        .eq("id", planId);
+
+      const { error } = await repA.db.rpc("log_visit", {
+        p_institute_id: instituteId,
+        p_activity: "meeting",
+        p_photo_url: photoFor(repA.id),
+        p_daily_plan_id: planId,
+      });
+      expect(error).toBeNull();
+    });
+
+    it("leaves the other activities alone", async () => {
+      // Sessions and the one-shots do not run off the daily plan, so they are
+      // exempt from the presence guarantee exactly as they are exempt from the
+      // meeting gate.
+      const { error } = await repA.db.from("visits").insert({
+        institute_id: houseId,
+        member: repA.id,
+        activity: "olympiad",
+        date: day,
+        photo_url: photoFor(repA.id),
+      });
+      expect(error).toBeNull();
     });
   });
 });

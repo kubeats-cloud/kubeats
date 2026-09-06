@@ -5,6 +5,11 @@ import { logError } from "@/lib/errors";
 import { periodRange, type Period } from "@/lib/periods";
 import { ACTIVITIES, activityLabelFor } from "@/lib/validation/visit";
 import { TYPE_LABELS, type InstituteType } from "@/lib/validation/institute";
+import {
+  visitMinutes,
+  visitStatusOf,
+  type VisitStatus,
+} from "@/lib/validation/checkin";
 
 /**
  * One rep's field activity, aggregated.
@@ -46,6 +51,32 @@ export interface PeriodBucket {
   visits: number;
 }
 
+/**
+ * One planned visit with its field-presence record (migration 0014).
+ *
+ * Status and duration are derived here from the timestamps, never read from a
+ * stored column — the database derives them the same way through
+ * plan_visit_status() and plan_visit_minutes(), and a third copy would be a
+ * third chance to disagree.
+ */
+export interface PlannedVisit {
+  id: string;
+  date: string;
+  instituteName: string;
+  purpose: string;
+  checkinAt: string | null;
+  checkinLat: number | null;
+  checkinLng: number | null;
+  checkoutAt: string | null;
+  checkoutLat: number | null;
+  checkoutLng: number | null;
+  status: VisitStatus;
+  /** Minutes on site, or null when a check-out never happened. */
+  minutes: number | null;
+  /** Whether the visit logged against this plan carries a closing report. */
+  reportFiled: boolean | null;
+}
+
 export interface ActivityReport {
   memberId: string;
   memberName: string;
@@ -75,6 +106,9 @@ export interface ActivityReport {
   byMonth: PeriodBucket[];
   /** Every year this rep has logged anything in, oldest first. */
   byYear: PeriodBucket[];
+
+  /** Planned visits in the period, with their check-in/out record. */
+  plannedVisits: PlannedVisit[];
 }
 
 const MONTH_LABELS = [
@@ -90,6 +124,21 @@ interface RawVisit {
   reported_at: string | null;
   institute_id: string;
   institutes: { name: string | null; type: string | null } | null;
+}
+
+interface RawPlan {
+  id: string;
+  date: string;
+  purpose: string;
+  institute_id: string;
+  checkin_at: string | null;
+  checkin_lat: number | null;
+  checkin_lng: number | null;
+  checkout_at: string | null;
+  checkout_lat: number | null;
+  checkout_lng: number | null;
+  checkout_missing: boolean | null;
+  institutes: { name: string | null } | null;
 }
 
 /**
@@ -111,7 +160,7 @@ export async function getActivityReport(
   const { start, end } = periodRange(period, periodStart);
   const year = periodStart.slice(0, 4);
 
-  const [inRange, plansHeld, yearVisits, allVisits] = await Promise.all([
+  const [inRange, plansHeld, yearVisits, allVisits, plannedRows] = await Promise.all([
     // The selected period, with everything the breakdowns need.
     supabase
       .from("visits")
@@ -140,6 +189,16 @@ export async function getActivityReport(
       .lte("date", `${year}-12-31`),
     // The year-by-year rollup, over everything this rep has ever logged.
     supabase.from("visits").select("date").eq("member", memberId),
+    // The planned visits themselves, which is where the presence record lives.
+    supabase
+      .from("daily_plans")
+      .select(
+        "id, date, purpose, institute_id, checkin_at, checkin_lat, checkin_lng, checkout_at, checkout_lat, checkout_lng, checkout_missing, institutes(name)",
+      )
+      .eq("member", memberId)
+      .gte("date", start)
+      .lte("date", end)
+      .order("date", { ascending: false }),
   ]);
 
   for (const [context, result] of [
@@ -147,6 +206,7 @@ export async function getActivityReport(
     ["report:plans", plansHeld],
     ["report:year", yearVisits],
     ["report:all", allVisits],
+    ["report:plans", plannedRows],
   ] as const) {
     if (result.error) {
       logError(context, result.error);
@@ -211,6 +271,39 @@ export async function getActivityReport(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, visits]) => ({ key, label: key, visits }));
 
+  // A plan's closing-report state comes from the visit logged against it:
+  // same member, same day, same institute, which is exactly what makes a plan
+  // row unique. Null means nothing was logged against that plan at all.
+  const reportByKey = new Map<string, boolean>();
+  for (const visit of visits) {
+    reportByKey.set(`${visit.date}|${visit.institute_id}`, visit.reported_at !== null);
+  }
+
+  const plannedVisits: PlannedVisit[] = ((plannedRows.data ?? []) as unknown as RawPlan[]).map(
+    (plan) => {
+      const state = {
+        checkinAt: plan.checkin_at,
+        checkoutAt: plan.checkout_at,
+        checkoutMissing: plan.checkout_missing ?? false,
+      };
+      return {
+        id: plan.id,
+        date: plan.date,
+        instituteName: plan.institutes?.name ?? "Unknown institute",
+        purpose: plan.purpose,
+        checkinAt: plan.checkin_at,
+        checkinLat: plan.checkin_lat,
+        checkinLng: plan.checkin_lng,
+        checkoutAt: plan.checkout_at,
+        checkoutLat: plan.checkout_lat,
+        checkoutLng: plan.checkout_lng,
+        status: visitStatusOf(state),
+        minutes: visitMinutes(state),
+        reportFiled: reportByKey.get(`${plan.date}|${plan.institute_id}`) ?? null,
+      };
+    },
+  );
+
   const pending = visits.filter(isPending).length;
   const reported = visits.filter((v) => v.reported_at !== null).length;
 
@@ -231,6 +324,7 @@ export async function getActivityReport(
       byInstitute,
       byMonth,
       byYear,
+      plannedVisits,
     },
   };
 }
