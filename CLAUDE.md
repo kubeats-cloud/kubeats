@@ -31,8 +31,9 @@ Clean, modern, mobile-first utility app.
   generous spacing.
 - Every screen has clear loading, empty, and error states. Dark mode is out of
   scope for v1.
-- The six institute status badges and the target-progress bars are colour-coded
-  per the semantic palette above.
+- The nine institute status badges and the target-progress bars are colour-coded
+  per the semantic palette above. Badge colour tracks the outcome, not the
+  open/closed category — "First meeting done" is green and still open.
 
 ### Screen ownership
 
@@ -132,6 +133,24 @@ already claimed the easy 0.9 MiB between them; see README for both.
   0002); it runs SECURITY INVOKER, so RLS and every trigger still apply. It
   raises `FO001`-`FO007` for the cases a rep can cause, and `src/lib/visit-actions.ts`
   maps those codes — never the message text — to sentences.
+- Rule 4's status vocabulary is nine values, each carrying an OPEN or CLOSED
+  category. `INSTITUTE_STATUS_CATALOGUE` in `src/lib/validation/institute.ts` is
+  the app's single source of truth for the mapping; `public.institute_statuses`
+  plus `institute_status_category()` (migration 0010) is the database's, so a
+  query can tell open from closed without the app. **They have to be changed
+  together** — the `institute_status_category` suite in
+  `tests/integration/rules.test.ts` fails if only one of them moves, and 0010
+  itself refuses to apply if its lookup table and its two CHECK constraints
+  disagree. Nothing may decide open-vs-closed for itself; ask one of those two.
+  Note that null is neither open nor closed: "no status yet" is its own thing.
+- Rule 5's "required" list is not the same as the open category, and must not be
+  collapsed into it: only "Pending for management approval" and "Invited
+  principal for event" demand a follow-up date, because those two wait on
+  someone else's answer with nothing scheduled to bring them back. It is
+  `FOLLOW_UP_REQUIRED_FOR` in `src/lib/validation/visit.ts` and the
+  `visits_follow_up_required_when_awaiting` CHECK — renamed in 0010 from 0001's
+  `visits_follow_up_required_for_approval`, which stopped being true once it
+  covered a second status.
 - Every visit must carry a photo (Rule 12, migration 0006). The rule is stated
   three times on purpose: the shared zod schema, `log_visit()` raising `FO007`,
   and the `visits_photo_required` CHECK, which is the one that holds against a

@@ -9,7 +9,9 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -18,7 +20,11 @@ import { CaptureFields } from "@/components/visits/capture-fields";
 import { createVisit } from "@/lib/visit-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import type { PickerInstitute, PlanEntry } from "@/lib/visits";
-import { INSTITUTE_STATUSES } from "@/lib/validation/institute";
+import {
+  CATEGORY_LABELS,
+  STATUS_CATEGORIES,
+  statusesInCategory,
+} from "@/lib/validation/institute";
 import {
   ACTIVITIES,
   followUpHidden,
@@ -295,12 +301,19 @@ export function LogVisitForm({
               <SelectTrigger className="h-11 w-full">
                 <SelectValue />
               </SelectTrigger>
+              {/* Grouped by category so it is obvious which choices leave the
+                  institute in play and which close the loop. */}
               <SelectContent>
                 <SelectItem value={NO_CHANGE}>No change</SelectItem>
-                {INSTITUTE_STATUSES.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
+                {STATUS_CATEGORIES.map((category) => (
+                  <SelectGroup key={category}>
+                    <SelectLabel>{CATEGORY_LABELS[category]}</SelectLabel>
+                    {statusesInCategory(category).map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 ))}
               </SelectContent>
             </Select>
@@ -327,6 +340,10 @@ export function LogVisitForm({
                   className="h-11"
                   value={followUpDate}
                   onChange={(event) => setFollowUpDate(event.target.value)}
+                  // aria-required rather than required: the form runs the
+                  // shared schema itself, and the native bubble would fire
+                  // first and say something we did not write.
+                  aria-required={needFollowUp || undefined}
                   aria-invalid={fieldErrors.follow_up_date ? true : undefined}
                 />
                 {fieldError("follow_up_date")}

@@ -49,14 +49,30 @@ export const FOLLOW_UP_HIDDEN_FOR = [
   "Campus visit scheduled",
 ] as const;
 
-export const FOLLOW_UP_REQUIRED_FOR = "Pending for management approval";
+/**
+ * The open loops that are waiting on someone else's answer.
+ *
+ * Neither has anything scheduled that would bring it back on its own — no
+ * session, no campus visit, no date in anyone's diary — so without a date to
+ * chase on, both simply go quiet. That is what makes them different from the
+ * other open statuses, and why these two alone demand a follow-up.
+ *
+ * Mirrored by the visits_follow_up_required_when_awaiting CHECK (migration
+ * 0010), which is what actually holds against a direct insert.
+ */
+export const FOLLOW_UP_REQUIRED_FOR = [
+  "Pending for management approval",
+  "Invited principal for event",
+] as const;
 
 export function followUpHidden(status: string | null): boolean {
   return status !== null && (FOLLOW_UP_HIDDEN_FOR as readonly string[]).includes(status);
 }
 
 export function followUpRequired(status: string | null): boolean {
-  return status === FOLLOW_UP_REQUIRED_FOR;
+  return (
+    status !== null && (FOLLOW_UP_REQUIRED_FOR as readonly string[]).includes(status)
+  );
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -177,7 +193,7 @@ export const visitSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["follow_up_date"],
-        message: 'A follow-up date is required for "Pending for management approval".',
+        message: `A follow-up date is required for "${value.status_set_to}".`,
       });
     }
     if (
