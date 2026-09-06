@@ -19,7 +19,7 @@ const CODE_MESSAGES: Record<string, string> = {
   // Postgres
   "23505": "That already exists.",
   "23503": "Something this depends on is missing, or it is still in use.",
-  "23514": "That is not allowed — please check the details and try again.",
+  "23514": "That is not allowed. Please check the details and try again.",
   "42501": "You do not have permission to do that.",
   // PostgREST
   PGRST116: "We could not find that.",

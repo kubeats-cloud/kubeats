@@ -210,8 +210,8 @@ describe("newMemberSchema", () => {
 
 describe("fieldLabel", () => {
   it("names a person by their position, counting from one", () => {
-    expect(fieldLabel("people.0.name")).toBe("Person 1 — name");
-    expect(fieldLabel("people.2.contact_number")).toBe("Person 3 — mobile");
+    expect(fieldLabel("people.0.name")).toBe("Person 1: name");
+    expect(fieldLabel("people.2.contact_number")).toBe("Person 3: mobile");
   });
 
   it("uses the words printed beside the field, not the column name", () => {

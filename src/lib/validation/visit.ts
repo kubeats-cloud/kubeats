@@ -350,7 +350,7 @@ export function fieldLabel(key: string): string {
   if (person) {
     const which = Number(person[1]) + 1;
     const part = FIELD_LABELS[person[2]] ?? person[2].replace(/_/g, " ");
-    return `Person ${which} — ${part}`;
+    return `Person ${which}: ${part}`;
   }
   return FIELD_LABELS[key] ?? titleCase(key);
 }

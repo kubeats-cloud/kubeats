@@ -55,7 +55,7 @@ export default async function ManageMaterialsPage() {
 
       <FormSection
         title="Upload a material"
-        description="The file is stored as uploaded — nothing is compressed, so print quality is kept."
+        description="The file is stored as uploaded. Nothing is compressed, so print quality is kept."
         className="mb-6"
       >
         <MaterialUploadForm userId={gate.user.id} />

@@ -119,7 +119,7 @@ export function ReportView({ report }: { report: VisitReport }) {
             {row(
               "Follow-up",
               report.follow_up_action
-                ? `${report.follow_up_action}${report.follow_up_date ? ` — by ${formatDate(report.follow_up_date)}` : ""}`
+                ? `${report.follow_up_action}${report.follow_up_date ? ` by ${formatDate(report.follow_up_date)}` : ""}`
                 : null,
             )}
           </dl>

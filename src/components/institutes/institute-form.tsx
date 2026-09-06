@@ -289,7 +289,7 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
           {/* Rule 10: class 11 is ticks only. */}
           <fieldset>
             <legend className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
-              Class 11 — which streams run
+              Class 11: which streams run
             </legend>
             <div className="flex flex-wrap gap-x-6 gap-y-3">
               {STREAMS.map((stream) => (
@@ -313,7 +313,7 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
           {/* Rule 10: class 12 is ticks plus an approximate count. */}
           <fieldset>
             <legend className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">
-              Class 12 — streams and approximate students
+              Class 12: streams and approximate students
             </legend>
             <div className="space-y-3">
               {STREAMS.map((stream) => {

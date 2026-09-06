@@ -208,7 +208,7 @@ function AddRow({
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     if (!nameLooksValid(value, MAX_NAME)) {
       event.preventDefault();
-      setClientError("Enter a name — letters or numbers, up to 120 characters.");
+      setClientError("Enter a name using letters or numbers, up to 120 characters.");
       return;
     }
     setClientError(null);

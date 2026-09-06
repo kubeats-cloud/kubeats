@@ -267,14 +267,14 @@ describe("institutePickerLabel — finding a finished institute again (feature D
 
   it("spells out the status when the loop is closed", () => {
     expect(institutePickerLabel({ ...base, status: "RSVP received" })).toBe(
-      "Horizon International School · Ahmedabad — RSVP received (closed)",
+      "Horizon International School · Ahmedabad (closed: RSVP received)",
     );
   });
 
   it("marks every closed status and no open one", () => {
     for (const status of INSTITUTE_STATUSES) {
       const label = institutePickerLabel({ ...base, status });
-      expect(label.includes("(closed)"), status).toBe(isClosedStatus(status));
+      expect(label.includes("(closed:"), status).toBe(isClosedStatus(status));
       // The status itself is only worth the space when it changes what the
       // rep is about to do.
       expect(label.includes(status), status).toBe(isClosedStatus(status));
@@ -293,7 +293,7 @@ describe("institutePickerLabel — finding a finished institute again (feature D
     );
     expect(
       institutePickerLabel({ name: "Zenith", city: null, status: "Will not come" }),
-    ).toBe("Zenith — Will not come (closed)");
+    ).toBe("Zenith (closed: Will not come)");
   });
 
   it("does not mark a status it does not recognise", () => {
