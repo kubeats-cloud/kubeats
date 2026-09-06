@@ -19,7 +19,8 @@
     "backup:verify": "node scripts/verify-backup.mjs",
     "restore": "node scripts/restore.mjs",
     "cf:preview": "npm run build && wrangler dev",
-    "cf:deploy": "npm run build && wrangler deploy"
+    "cf:deploy": "npm run build && wrangler deploy",
+    "docs:guide": "node scripts/build-user-guide.mjs && node scripts/build-quick-reference.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
@@ -44,6 +45,7 @@
     "@types/node": "^24.13.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "docx": "^9.7.1",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
