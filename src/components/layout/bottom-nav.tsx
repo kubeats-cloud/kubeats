@@ -7,6 +7,7 @@ import {
   ClipboardCheckIcon,
   ClockIcon,
   DatabaseIcon,
+  FileTextIcon,
   LayoutDashboardIcon,
   PlusIcon,
   SendIcon,
@@ -25,6 +26,8 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   log: PlusIcon,
   pending: ClockIcon,
   weekly: TargetIcon,
+  // The shared library: a document, because that is what every item in it is.
+  materials: FileTextIcon,
   settings: SettingsIcon,
   // The admin workspace. Each one names what the screen is for rather than
   // decorating it: a checked clipboard for reading the team's work, a paper

@@ -95,6 +95,31 @@ const has0008 = configured
   : false;
 
 /**
+ * Migration 0012 adds the materials library and its private bucket. The table
+ * without the storage policies, or the policies without the bucket limits,
+ * would each look fine until someone uploaded something they should not.
+ */
+const has0012 = configured
+  ? await admin
+      .from("materials")
+      .select("id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0012) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0012 is not applied to this project.",
+      "    The materials suite is being SKIPPED, not passing — which means",
+      "    nothing here is checking that only an admin can add to the library.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
+/**
  * Migration 0011 adds institute_status_history and the two triggers that fill
  * it. The table existing without its trigger would record nothing and look
  * fine, so these tests are the only thing that can tell the difference.
@@ -1751,6 +1776,153 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       // purpose rather than erroring. The constraint underneath still holds.
       const second = await repA.db.from("daily_plans").insert(entry);
       expect(second.error?.code).toBe("23505");
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0012)("materials — everyone reads, only an admin writes", () => {
+    /**
+     * Feature A. The library inverts the visit-photos shape: one collection the
+     * whole team reads, that only an admin may add to. Both halves are tested,
+     * for the table and for the bucket, because the app's own requireAdmin()
+     * check is a courtesy — these policies are the actual boundary.
+     */
+    const PNG = Uint8Array.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG magic, enough to store
+    ]);
+    const paths: string[] = [];
+
+    const objectPath = (ownerId: string) => {
+      const path = `${ownerId}/${crypto.randomUUID()}.png`;
+      paths.push(path);
+      return path;
+    };
+
+    const rowFor = (ownerId: string, path: string) => ({
+      title: `${TAG} poster`,
+      category: "Poster",
+      file_path: path,
+      file_name: "poster.png",
+      file_type: "image/png",
+      file_size: PNG.length,
+      uploaded_by: ownerId,
+    });
+
+    afterAll(async () => {
+      if (!configured || !has0012) return;
+      await admin.from("materials").delete().like("title", `${TAG}%`);
+      if (paths.length) await admin.storage.from("materials").remove(paths);
+    });
+
+    it("lets an admin add a material", async () => {
+      const path = objectPath(boss.id);
+      const upload = await boss.db.storage
+        .from("materials")
+        .upload(path, PNG, { contentType: "image/png" });
+      expect(upload.error).toBeNull();
+
+      const { error } = await boss.db.from("materials").insert(rowFor(boss.id, path));
+      expect(error).toBeNull();
+    });
+
+    it("lets every rep read the library", async () => {
+      const { data, error } = await repA.db
+        .from("materials")
+        .select("id, title")
+        .like("title", `${TAG}%`);
+      expect(error).toBeNull();
+      expect((data ?? []).length).toBeGreaterThan(0);
+    });
+
+    it("refuses a rep adding a row", async () => {
+      const { error } = await repA.db
+        .from("materials")
+        .insert(rowFor(repA.id, `${repA.id}/${crypto.randomUUID()}.png`));
+      expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+    });
+
+    it("refuses a rep uploading into the bucket", async () => {
+      // The storage half. Without this an ordinary rep could fill the bucket
+      // even though they could not create the row describing it.
+      const { error } = await repA.db.storage
+        .from("materials")
+        .upload(`${repA.id}/${crypto.randomUUID()}.png`, PNG, {
+          contentType: "image/png",
+        });
+      expect(error).not.toBeNull();
+    });
+
+    it("refuses a rep editing or deleting someone else's material", async () => {
+      const { data: existing } = await admin
+        .from("materials")
+        .select("id")
+        .like("title", `${TAG}%`)
+        .limit(1)
+        .single();
+
+      // No UPDATE or DELETE policy applies to a rep, so both are no-ops rather
+      // than errors under PostgREST — the row surviving is the assertion.
+      await repA.db
+        .from("materials")
+        .update({ title: `${TAG} hijacked` })
+        .eq("id", existing!.id);
+      await repA.db.from("materials").delete().eq("id", existing!.id);
+
+      const { data: after } = await admin
+        .from("materials")
+        .select("title")
+        .eq("id", existing!.id)
+        .maybeSingle();
+      expect(after?.title).toBe(`${TAG} poster`);
+    });
+
+    it("lets a rep read the stored object, which is the point of the library", async () => {
+      const path = paths[0];
+      const { data, error } = await repA.db.storage
+        .from("materials")
+        .createSignedUrl(path, 60);
+      expect(error).toBeNull();
+      expect(data?.signedUrl).toBeTruthy();
+    });
+
+    it("keeps the bucket private", async () => {
+      const { data } = await admin.storage.getBucket("materials");
+      expect(data?.public).toBe(false);
+      expect(data?.file_size_limit).toBe(5242880);
+      expect(data?.allowed_mime_types).toContain("application/pdf");
+    });
+
+    it("refuses a category outside the six", async () => {
+      const path = `${boss.id}/${crypto.randomUUID()}.png`;
+      const { error } = await boss.db
+        .from("materials")
+        .insert({ ...rowFor(boss.id, path), category: "Newsletter" });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses a file type outside the four", async () => {
+      const path = `${boss.id}/${crypto.randomUUID()}.zip`;
+      const { error } = await boss.db
+        .from("materials")
+        .insert({ ...rowFor(boss.id, path), file_type: "application/zip" });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses a row claiming a file over the cap", async () => {
+      const path = `${boss.id}/${crypto.randomUUID()}.png`;
+      const { error } = await boss.db
+        .from("materials")
+        .insert({ ...rowFor(boss.id, path), file_size: 5242881 });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses two rows pointing at one stored object", async () => {
+      const path = paths[0];
+      const { error } = await boss.db
+        .from("materials")
+        .insert(rowFor(boss.id, path));
+      expect(error?.code).toBe("23505");
     });
   });
 });

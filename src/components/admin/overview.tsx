@@ -6,6 +6,7 @@ import {
   ClipboardCheckIcon,
   ClockIcon,
   DatabaseIcon,
+  FileTextIcon,
   SendIcon,
   UsersIcon,
 } from "lucide-react";
@@ -152,6 +153,11 @@ export function AdminOverview({ data }: { data: OverviewData }) {
               <Shortcut href="/assign" icon={SendIcon} label="Assign a visit" />
               <Shortcut href="/team" icon={UsersIcon} label="Team progress" />
               <Shortcut href="/data" icon={DatabaseIcon} label="Data and backups" />
+              <Shortcut
+                href="/materials/manage"
+                icon={FileTextIcon}
+                label="Materials library"
+              />
             </div>
           </div>
         </div>

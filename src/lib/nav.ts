@@ -17,7 +17,8 @@ export type NavIconName =
   | "review"
   | "assign"
   | "team"
-  | "data";
+  | "data"
+  | "materials";
 
 export interface NavItem {
   href: string;
@@ -43,6 +44,7 @@ export const REP_NAV: NavItem[] = [
   { href: "/log", label: "Log Visit", icon: "log" },
   { href: "/pending", label: "Pending", icon: "pending" },
   { href: "/weekly", label: "Weekly", icon: "weekly" },
+  { href: "/materials", label: "Materials", icon: "materials" },
 ];
 
 /**
@@ -70,7 +72,16 @@ export const ADMIN_NAV: NavItem[] = [
 export const REP_ONLY_PATHS = ["/log", "/pending"] as const;
 
 /** The mirror: admin workspace routes a rep may not reach. */
-export const ADMIN_ONLY_PATHS = ["/review", "/assign", "/team", "/data", "/settings"] as const;
+export const ADMIN_ONLY_PATHS = [
+  "/review",
+  "/assign",
+  "/team",
+  "/data",
+  "/settings",
+  // Only the management half. /materials itself is shared — an admin browses
+  // the same library a rep does, and reaches this from a link on it.
+  "/materials/manage",
+] as const;
 
 function matches(pathname: string, paths: readonly string[]): boolean {
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
