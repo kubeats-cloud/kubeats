@@ -23,6 +23,10 @@ import {
   dailyPlanSummary,
   visitFieldErrors,
 } from "@/lib/validation/visit";
+import {
+  institutePickerLabel,
+  reopeningInstitute,
+} from "@/lib/validation/institute";
 
 /**
  * Today's plan, which the Dashboard owns (see CLAUDE.md).
@@ -102,6 +106,10 @@ export function DailyPlan({
 
   const canAdd = institutes.length > 0 && purposes.length > 0;
 
+  // Non-null only when the selected institute's loop is already finished —
+  // the one case worth saying something about before the rep hits Add.
+  const reopening = reopeningInstitute(institutes, instituteId);
+
   return (
     <Card>
       <CardHeader>
@@ -131,14 +139,24 @@ export function DailyPlan({
                 <SelectContent>
                   {institutes.map((institute) => (
                     <SelectItem key={institute.id} value={institute.id}>
-                      {institute.name}
-                      {institute.city ? ` · ${institute.city}` : ""}
+                      {institutePickerLabel(institute)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <FieldError id="plan-institute-error" message={fieldErrors.institute_id} />
             </div>
+
+            {/* Re-adding a closed institute is how a new cycle of engagement
+                starts. It was always allowed; this says so out loud, and says
+                what it does NOT do — planning never moves a status (rule 4). */}
+            {reopening && (
+              <p className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-xs">
+                <span className="font-medium">{reopening.name}</span> is closed
+                &mdash; {reopening.status}. Adding it starts a fresh cycle. Its
+                status stays as it is until your next visit changes it.
+              </p>
+            )}
 
             <div className="space-y-1.5">
               <Select value={purpose} onValueChange={setPurpose}>

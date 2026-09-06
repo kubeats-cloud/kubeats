@@ -51,6 +51,20 @@ const admin = configured
  */
 const photoFor = (memberId: string) => `${memberId}/${crypto.randomUUID()}.jpg`;
 
+/**
+ * One institute's status journey, oldest first. Shared by the feature C suite
+ * that checks the recording and the feature D suite that checks planning does
+ * NOT record — both are asking the same table the same question.
+ */
+const historyFor = async (instituteId: string) => {
+  const { data } = await admin
+    .from("institute_status_history")
+    .select("status, changed_by, changed_at, visit_id")
+    .eq("institute_id", instituteId)
+    .order("changed_at", { ascending: true });
+  return data ?? [];
+};
+
 const has0005 = configured
   ? await admin
       .from("visit_people")
@@ -1390,15 +1404,6 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       return data.id as string;
     };
 
-    const historyFor = async (id: string) => {
-      const { data } = await admin
-        .from("institute_status_history")
-        .select("status, changed_by, changed_at, visit_id")
-        .eq("institute_id", id)
-        .order("changed_at", { ascending: true });
-      return data ?? [];
-    };
-
     beforeAll(async () => {
       subjectId = await makeInstitute("history subject");
     });
@@ -1603,6 +1608,149 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { error } = await admin.from("institutes").delete().eq("id", id);
       expect(error).toBeNull();
       expect(await historyFor(id)).toHaveLength(0);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0011)("a closed institute starts a new cycle", () => {
+    /**
+     * Feature D. There was never a restriction to remove: no constraint, policy
+     * or filter has ever cared about an institute's status when planning it.
+     * These tests exist to keep it that way — a future "tidy the picker" change
+     * that quietly filtered closed institutes out would break the client's
+     * actual request, and nothing else here would notice.
+     */
+    const closedInstitute = async (label: string, status: string) => {
+      const { data, error } = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} ${label}`, type: "school", registered_by: repA.id })
+        .select("id")
+        .single();
+      if (error) throw new Error(`institute: ${error.message}`);
+      const { error: statusError } = await repA.db
+        .from("institutes")
+        .update({ status })
+        .eq("id", data.id);
+      if (statusError) throw new Error(`status: ${statusError.message}`);
+      return data.id as string;
+    };
+
+    it("can be added to today's plan, like any other", async () => {
+      for (const status of [
+        "Session done",
+        "Campus visit done",
+        "RSVP received",
+        "Will not come",
+      ]) {
+        const id = await closedInstitute(`replan ${status}`, status);
+        const { error } = await repA.db.from("daily_plans").insert({
+          member: repA.id,
+          date: iso(),
+          institute_id: id,
+          purpose: `${TAG} new cycle`,
+        });
+        expect(error, status).toBeNull();
+      }
+    });
+
+    it("keeps its closed status when planned — planning is not a status change", async () => {
+      // Rule 4: status is always set by hand, never derived from activity.
+      // Planning is activity, so it must not move the status, and must not
+      // write a history row either.
+      const id = await closedInstitute("status untouched", "RSVP received");
+      const before = await historyFor(id);
+
+      await repA.db.from("daily_plans").insert({
+        member: repA.id,
+        date: iso(),
+        institute_id: id,
+        purpose: `${TAG} new cycle`,
+      });
+
+      const { data: row } = await admin
+        .from("institutes")
+        .select("status")
+        .eq("id", id)
+        .single();
+      expect(row?.status).toBe("RSVP received");
+      expect(await historyFor(id)).toHaveLength(before.length);
+    });
+
+    it("runs the whole new cycle through, and the journey shows the reopen", async () => {
+      const id = await closedInstitute("full cycle", "Will not come");
+
+      const { data: plan, error: planError } = await repA.db
+        .from("daily_plans")
+        .insert({
+          member: repA.id,
+          date: iso(),
+          institute_id: id,
+          purpose: `${TAG} try again`,
+        })
+        .select("id")
+        .single();
+      expect(planError).toBeNull();
+
+      // The meeting gate accepts it because it is on today's plan — the closed
+      // status is irrelevant to the gate, which is the point.
+      const { error: visitError } = await repA.db.rpc("log_visit", {
+        p_institute_id: id,
+        p_activity: "meeting",
+        p_photo_url: photoFor(repA.id),
+        p_daily_plan_id: plan!.id,
+        p_status_set_to: "First meeting done",
+      });
+      expect(visitError).toBeNull();
+
+      // Feature C records the reopen: closed, then open again.
+      const rows = await historyFor(id);
+      expect(rows.map((r) => r.status)).toEqual(["Will not come", "First meeting done"]);
+      expect(rows[1].visit_id).toBeTruthy();
+
+      const { data: row } = await admin
+        .from("institutes")
+        .select("status")
+        .eq("id", id)
+        .single();
+      expect(row?.status).toBe("First meeting done");
+    });
+
+    it("can be planned again on a later day", async () => {
+      // daily_plans is unique per member+date+institute, so a new day is a new
+      // row without any special handling.
+      const id = await closedInstitute("another day", "Session done");
+      const rows = [iso(), iso(1), iso(2)].map((date) => ({
+        member: repA.id,
+        date,
+        institute_id: id,
+        purpose: `${TAG} recurring`,
+      }));
+
+      const { error } = await repA.db.from("daily_plans").insert(rows);
+      expect(error).toBeNull();
+
+      const { data: planned } = await admin
+        .from("daily_plans")
+        .select("date")
+        .eq("institute_id", id);
+      expect(planned).toHaveLength(3);
+    });
+
+    it("still refuses a second entry for the same institute on the same day", async () => {
+      const id = await closedInstitute("same day twice", "Session done");
+      const entry = {
+        member: repA.id,
+        date: iso(),
+        institute_id: id,
+        purpose: `${TAG} once`,
+      };
+
+      expect((await repA.db.from("daily_plans").insert(entry)).error).toBeNull();
+      // The app upserts on this conflict, which is how re-planning corrects a
+      // purpose rather than erroring. The constraint underneath still holds.
+      const second = await repA.db.from("daily_plans").insert(entry);
+      expect(second.error?.code).toBe("23505");
     });
   });
 });

@@ -23,6 +23,7 @@ import type { PickerInstitute, PlanEntry } from "@/lib/visits";
 import {
   CATEGORY_LABELS,
   STATUS_CATEGORIES,
+  institutePickerLabel,
   statusesInCategory,
 } from "@/lib/validation/institute";
 import {
@@ -230,8 +231,7 @@ export function LogVisitForm({
                 <SelectContent>
                   {institutes.map((institute) => (
                     <SelectItem key={institute.id} value={institute.id}>
-                      {institute.name}
-                      {institute.city ? ` · ${institute.city}` : ""}
+                      {institutePickerLabel(institute)}
                     </SelectItem>
                   ))}
                 </SelectContent>
