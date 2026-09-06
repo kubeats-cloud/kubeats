@@ -102,8 +102,8 @@ export function statusesInCategory(
 
 /** What a person is told each category means. */
 export const CATEGORY_LABELS: Record<StatusCategory, string> = {
-  open: "Open — still in play",
-  closed: "Closed — nothing further owed",
+  open: "Open (still in play)",
+  closed: "Closed (nothing further owed)",
 };
 
 /**
@@ -126,7 +126,7 @@ export function institutePickerLabel(institute: {
 }): string {
   const place = institute.city ? ` · ${institute.city}` : "";
   return isClosedStatus(institute.status)
-    ? `${institute.name}${place} — ${institute.status} (closed)`
+    ? `${institute.name}${place} (closed: ${institute.status})`
     : `${institute.name}${place}`;
 }
 

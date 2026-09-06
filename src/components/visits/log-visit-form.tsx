@@ -238,7 +238,7 @@ export function LogVisitForm({
               </Select>
               {institutes.length === 0 && (
                 <p className="text-muted-foreground text-xs">
-                  No institutes registered yet — add one first.
+                  No institutes registered yet. Add one first.
                 </p>
               )}
               {fieldError("institute_id")}
@@ -254,8 +254,8 @@ export function LogVisitForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Set">Set — scheduled, closes later</SelectItem>
-                  <SelectItem value="Done">Done — it already happened</SelectItem>
+                  <SelectItem value="Set">Set (scheduled, closes later)</SelectItem>
+                  <SelectItem value="Done">Done (it already happened)</SelectItem>
                 </SelectContent>
               </Select>
               {fieldError("lifecycle_status")}
@@ -325,7 +325,7 @@ export function LogVisitForm({
               the rep is never surprised by one. */}
           {hideFollowUp ? (
             <p className="text-muted-foreground text-xs">
-              No separate follow-up needed — the expected date above already
+              No separate follow-up needed. The expected date above already
               covers this.
             </p>
           ) : (

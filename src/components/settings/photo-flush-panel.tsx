@@ -62,7 +62,7 @@ export function PhotoFlushPanel({
             ? "Photos are attached to visits as proof of attendance."
             : `${storedPhotos} ${storedPhotos === 1 ? "visit carries" : "visits carry"} a photo right now.`}{" "}
           Photos are deleted automatically after {retentionDays} days. Use this to
-          clear them sooner — the visits themselves, with their location and
+          clear them sooner. The visits themselves, with their location and
           time, are never touched.
         </p>
 
@@ -148,7 +148,7 @@ export function PhotoFlushPanel({
                   </p>
                   {!confirmed && (
                     <p className="text-xs">
-                      The cutoff changed — check again before deleting.
+                      The cutoff changed. Check again before deleting.
                     </p>
                   )}
                 </>

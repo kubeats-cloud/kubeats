@@ -226,9 +226,9 @@ export function TeamPanel({ members }: { members: TeamMember[] }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="rep">Rep — logs their own visits</SelectItem>
+                  <SelectItem value="rep">Rep (logs their own visits)</SelectItem>
                   <SelectItem value="admin">
-                    Admin — sees the team and these settings
+                    Admin (sees the team and these settings)
                   </SelectItem>
                 </SelectContent>
               </Select>

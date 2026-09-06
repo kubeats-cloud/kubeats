@@ -117,7 +117,7 @@ export async function addState(
     message:
       row.name.toLowerCase() === parsed.data.name.trim().toLowerCase()
         ? `Added ${row.name}.`
-        : `That is ${row.name} here — using the existing entry.`,
+        : `That is ${row.name} here. We used the existing entry.`,
   };
 }
 
@@ -151,7 +151,7 @@ export async function addCity(
     message:
       row.name.toLowerCase() === parsed.data.name.trim().toLowerCase()
         ? `Added ${row.name}.`
-        : `That is ${row.name} here — using the existing entry.`,
+        : `That is ${row.name} here. We used the existing entry.`,
   };
 }
 

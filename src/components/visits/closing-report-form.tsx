@@ -460,7 +460,7 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                     onChange={(e) => digits("students_reached", 5)(e.target.value)}
                   />
                   <p className="text-muted-foreground text-xs">
-                    How many the visit reached overall — often more than attended.
+                    How many the visit reached overall, often more than attended.
                   </p>
                   {problem("students_reached")}
                 </div>
@@ -794,7 +794,7 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
           {/* 7. Follow-up ----------------------------------------------- */}
           <FormSection
             title="Anything to follow up?"
-            description="Say yes only if something is actually owed — it becomes a date you will be held to."
+            description="Say yes only if something is actually owed. It becomes a date you will be held to."
           >
               <div className="flex gap-2">
                 <Button
@@ -959,7 +959,7 @@ function Review({
             {line(
               "Follow-up",
               followUp
-                ? `${field.follow_up_action} — by ${field.follow_up_date}`
+                ? `${field.follow_up_action} by ${field.follow_up_date}`
                 : "None",
             )}
             {line(

@@ -199,7 +199,7 @@ export function DailyPlan({
           <p className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-sm">
             {institutes.length === 0
               ? "Register an institute before planning a visit."
-              : "No meeting purposes have been set up yet — ask an admin to add some."}
+              : "No meeting purposes have been set up yet. Ask an admin to add some."}
           </p>
         )}
 

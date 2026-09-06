@@ -77,7 +77,7 @@ export default async function DataPage() {
 
           <p className="text-muted-foreground leading-relaxed">
             It is deliberately not a button here. Backing up reads every row and
-            every photo in the project, which needs the service-role key — and
+            every photo in the project, which needs the service-role key, and
             that key must never be handed to a browser, not even an
             administrator&rsquo;s. The full procedure, including restoring into a
             new project, is in{" "}

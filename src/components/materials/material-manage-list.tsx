@@ -86,7 +86,7 @@ export function MaterialManageList({
               </div>
               {!material.url && (
                 <p className="text-muted-foreground mt-1 text-xs">
-                  The stored file is missing — removing this clears the record.
+                  The stored file is missing. Removing this clears the record.
                 </p>
               )}
             </div>
