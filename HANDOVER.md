@@ -12,7 +12,7 @@ document that has the full detail; this page is the index, not a copy of them.
 | **Weekly backup + one restore rehearsal** | No automatic backup exists on the free tier; a mistaken delete is otherwise unrecoverable | `docs/BACKUP-RESTORE.md`, "For the client" |
 | **Uptime monitoring** | Nothing polls `/api/health` today, so an outage goes unnoticed. Point a monitor at it for liveness; set `HEALTH_CHECK_TOKEN` if you also want it to check the database | `docs/PHASE-10-Production-Readiness-Audit.md` (M2), and "Security findings & posture" below for F2 |
 | **Deploy size ceiling** | 106 KiB headroom under the 3072 KiB free-plan limit; the next big feature likely needs the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
-| **Edit `security.txt`** | It ships with a placeholder contact address that nobody reads | This document, "Security findings & posture" |
+| **Set the `security.txt` contact** | The file is live but has **no** contact yet, so finding F5 is not closed. Needs the role address the custom domain unlocks | This document, "Security findings & posture" |
 
 None of these is an application code change. They are operational decisions for whoever owns the
 Cloudflare and Supabase accounts after handover.
@@ -113,7 +113,7 @@ the summary; it is not a substitute for either report.
 | --- | --- | --- |
 | **F2** | Public `/api/health` ran a database query on every request, and disclosed latency and DB status | The public answer is now a static `{"ok":true}` that touches nothing (~5 ms instead of ~400 ms). The real check still exists behind `HEALTH_CHECK_TOKEN` + the `x-health-token` header; leave the variable unset and the deep check does not exist at all. |
 | **F3** | The `next` parameter was sanitised when rendered but re-checked only loosely in the sign-in action | `safeNextPath()` in `src/lib/validation/auth.ts` is now the single definition both sides call. It accepts only `^/(?!/)`, rejects backslashes, control characters (CR/LF header-splitting shapes) and absurd lengths, and falls back to `/`. Covered by `tests/unit/safe-next.test.ts`. |
-| **F5** | No security contact published | `public/.well-known/security.txt` (RFC 9116), reachable without a session — `.well-known` is excluded from the proxy matcher so it is never redirected to login and never costs a session refresh. **The contact address is a placeholder: edit it.** |
+| **F5** | No security contact published | **Partly done.** `public/.well-known/security.txt` is live and publicly reachable — `.well-known` is excluded from the proxy matcher, so it is never redirected to login and never costs a session refresh. But `Contact:` is deliberately still unset, so **F5 remains open**: see below. |
 | **F8** | Session cookie is not `HttpOnly` | Attempted, measured, and **reverted** — see below. |
 
 ### F8: why the session cookie is not HttpOnly
@@ -143,6 +143,31 @@ So it stays off as a **known `@supabase/ssr` constraint**, not an oversight. Sta
 nonce-based CSP with `strict-dynamic` that refuses inline and third-party script — which is what an
 XSS would need in order to read the cookie in the first place — plus `SameSite=Lax`, `Secure` in
 production, and HSTS. Worth revisiting if `@supabase/ssr` ever reads the session server-side only.
+
+### F5: why security.txt has no contact yet
+
+The file is served; the `Contact:` line is not set. That is a decision, not an
+oversight, and it means **F5 is not closed**.
+
+A security contact should be a **role address that outlives any one person** —
+`security@<your domain>` — rather than an individual's inbox. security.txt is
+harvested by scrapers within hours of going public, so a personal address put
+here is leaked permanently and cannot be withdrawn, and real reports end up
+routed to someone who may later have nothing to do with the project.
+
+The custom domain is what makes a role address possible, which is why this
+waits on the same move as F1. When the domain lands:
+
+1. uncomment the `Contact:` line in `public/.well-known/security.txt` and set
+   the hostname;
+2. redeploy (an empty commit pushed to `main` is enough);
+3. confirm with `curl https://<domain>/.well-known/security.txt`.
+
+Everything else about the file is already proven in production — the path, the
+proxy exemption, the public reachability and the deploy. Only the address is
+missing. `Expires` is set to 2030-01-01, so the file will not go stale in the
+meantime; RFC 9116 treats an expired file as invalid, so refresh that date
+whenever you next touch it.
 
 ### F1: login rate-limiting — deferred to the custom domain
 

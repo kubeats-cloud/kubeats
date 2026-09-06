@@ -1,12 +1,31 @@
 # KUbeats — security contact
 #
-# RFC 9116. Please edit Contact before this reaches production; the address
-# below is a placeholder and is not monitored.
+# RFC 9116.
+#
+# CONTACT IS DELIBERATELY NOT SET YET.
+#
+# A security contact should be a ROLE address that outlives any one person —
+# security@<the client's domain> — not somebody's personal inbox. This file is
+# fetched by scrapers the moment it is public, so publishing a private address
+# here would leak it permanently and route real reports to an individual who may
+# later have nothing to do with the project.
+#
+# The custom domain is what makes the role address possible. When it lands
+# (HANDOVER.md, "Custom domain"), uncomment the line below, set the hostname,
+# and redeploy:
+#
+# Contact: mailto:security@example.com
+#
+# Until then this file is intentionally incomplete: RFC 9116 requires at least
+# one Contact field, so pen-test finding F5 stays OPEN, not closed. The file is
+# here so the path, the proxy exemption and the deploy are already proven — all
+# that is missing is the address.
 
-Contact: mailto:security@example.com
-Expires: 2027-09-06T00:00:00.000Z
+Expires: 2030-01-01T00:00:00.000Z
 Preferred-Languages: en
 
-# If you are reporting something, it helps to include: the URL or endpoint, the
-# request you sent, what you expected, and what happened instead. Please do not
-# run automated scans against production — ask and we will arrange a window.
+# If you are reporting something and there is no contact above yet, please reach
+# the site owner through whatever channel you already have. It helps to include:
+# the URL or endpoint, the request you sent, what you expected, and what happened
+# instead. Please do not run automated scans against production — ask and we will
+# arrange a window.
