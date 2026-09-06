@@ -143,6 +143,29 @@ describe("checkPointSchema — the escape valve", () => {
     }
   });
 
+  it("records the accuracy when the device reported one", () => {
+    const result = checkPointSchema.safeParse({
+      ...plan,
+      latitude: "23.0225",
+      longitude: "72.5714",
+      accuracy: "12.5",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.accuracy).toBe(12.5);
+  });
+
+  it("accepts a check-in whose form carries no accuracy field at all", () => {
+    // Mid-deploy, a rep's cached page posts the old form. Accuracy is a
+    // diagnostic, so its absence must cost nothing.
+    const result = checkPointSchema.safeParse({
+      ...plan,
+      latitude: "23.0225",
+      longitude: "72.5714",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.accuracy).toBeNull();
+  });
+
   it("still refuses coordinates that are not on the globe", () => {
     expect(
       checkPointSchema.safeParse({ ...plan, latitude: "91", longitude: "0" })

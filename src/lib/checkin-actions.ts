@@ -57,6 +57,7 @@ export async function checkIn(
       checkin_at: new Date().toISOString(),
       checkin_lat: parsed.data.latitude,
       checkin_lng: parsed.data.longitude,
+      checkin_accuracy: parsed.data.accuracy,
     })
     .eq("id", parsed.data.plan_id)
     .eq("member", user.id)
@@ -103,6 +104,7 @@ export async function checkOut(
       checkout_at: new Date().toISOString(),
       checkout_lat: parsed.data.latitude,
       checkout_lng: parsed.data.longitude,
+      checkout_accuracy: parsed.data.accuracy,
     })
     .eq("id", parsed.data.plan_id)
     .eq("member", user.id)

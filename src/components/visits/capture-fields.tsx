@@ -9,7 +9,17 @@ import {
   RotateCcwIcon,
   XIcon,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { asStale, bestFix, nameArea } from "@/lib/geolocate";
+import { formatArea } from "@/lib/location-display";
+import {
+  ACCURACY_BADGE,
+  accuracyBand,
+  describeAccuracy,
+  shouldRetryLocation,
+  type LocationFix,
+} from "@/lib/validation/location";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -51,7 +61,15 @@ import { cn } from "@/lib/utils";
 type GeoState =
   | { status: "idle" }
   | { status: "locating" }
-  | { status: "ready"; latitude: number; longitude: number; accuracy: number }
+  | {
+      status: "ready";
+      latitude: number;
+      longitude: number;
+      /** Metres. Null only when the browser declined to say. */
+      accuracy: number | null;
+      /** True when this is a remembered reading rather than a fresh one. */
+      stale: boolean;
+    }
   | { status: "failed"; message: string };
 
 type PhotoState =
@@ -65,19 +83,12 @@ type PhotoState =
  * after 3.5s; this is a hair longer, and only exists so a route that never
  * answers at all cannot hold a photo hostage.
  */
-const PLACE_TIMEOUT_MS = 4000;
 
 const GEO_MESSAGES: Record<number, string> = {
   1: "Location permission was denied. You can still save the visit.",
   2: "Your location is not available right now. You can still save the visit.",
   3: "Finding your location took too long. You can still save the visit.",
 };
-
-interface Fix {
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-}
 
 export function CaptureFields({ userId }: { userId: string }) {
   // Starts as "locating" because the mount effect asks immediately; setting
@@ -93,38 +104,45 @@ export function CaptureFields({ userId }: { userId: string }) {
   const nativeCameraRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<string | null>(null);
   /** The last good fix, used only when a fresh read fails at capture time. */
-  const lastFix = useRef<Fix | null>(null);
+  const lastFix = useRef<LocationFix | null>(null);
 
-  const applyFix = useCallback((position: GeolocationPosition): Fix => {
-    const fix: Fix = {
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-      accuracy: position.coords.accuracy,
-    };
-    lastFix.current = fix;
+  const applyFix = useCallback((fix: LocationFix): LocationFix => {
+    // Only a LIVE reading is worth remembering as the fallback. Remembering a
+    // stale one would let it be handed on again later, one step further from
+    // the truth each time.
+    if (!fix.stale) lastFix.current = fix;
     setGeo({ status: "ready", ...fix });
     return fix;
   }, []);
 
-  /** Asks the device, without announcing it — see the initial state above. */
-  const requestPosition = useCallback(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
+  /**
+   * Asks the device for its BEST reading, not its first.
+   *
+   * bestFix watches for a few seconds and keeps the most accurate fix it sees,
+   * resolving early once one is good enough. A single getCurrentPosition
+   * returned whatever arrived first, which on a phone is usually the Wi-Fi or
+   * cell fix rather than the satellite one — and that is how a visit in
+   * Ahmedabad came to be recorded in Gandhinagar.
+   */
+  const requestPosition = useCallback(async () => {
+    const result = await bestFix();
+
+    if (result.unsupported) {
       setGeo({
         status: "failed",
-        message: "This device cannot share a location. You can still save the visit.",
+        message:
+          "This device cannot share a location — it may have no GPS. You can still save the visit.",
       });
       return;
     }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => applyFix(position),
-      (error) =>
-        setGeo({
-          status: "failed",
-          message: GEO_MESSAGES[error.code] ?? GEO_MESSAGES[2],
-        }),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
-    );
+    if (!result.fix) {
+      setGeo({
+        status: "failed",
+        message: GEO_MESSAGES[result.errorCode ?? 2] ?? GEO_MESSAGES[2],
+      });
+      return;
+    }
+    applyFix(result.fix);
   }, [applyFix]);
 
   /** The button: says what it is doing, then asks. */
@@ -149,50 +167,66 @@ export function CaptureFields({ userId }: { userId: string }) {
   /**
    * The coordinates to burn into this photo, read now rather than reused from
    * page load — a rep may have walked from the gate to the office since.
-   * maximumAge 0 forces a real reading; the last known fix is the fallback, and
-   * no coordinates at all is still allowed.
+   * maximumAge 0 forces a real reading; a remembered fix is the fallback and is
+   * flagged as one, and no coordinates at all is still allowed.
    */
-  const freshFix = useCallback(async (): Promise<Fix | null> => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      return lastFix.current;
-    }
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        (position) => resolve(applyFix(position)),
-        () => resolve(lastFix.current),
-        { enableHighAccuracy: true, timeout: 7000, maximumAge: 0 },
-      );
-    });
+  const freshFix = useCallback(async (): Promise<LocationFix | null> => {
+    const result = await bestFix();
+    if (result.fix) return applyFix(result.fix);
+
+    // Nothing live. The remembered reading is still better than nothing, but it
+    // is handed back MARKED — this used to fall through silently, so a fix from
+    // wherever the phone had been earlier was indistinguishable from one taken
+    // at the gate.
+    const remembered = asStale(lastFix.current);
+    if (remembered) applyFix(remembered);
+    return remembered;
   }, [applyFix]);
 
   /**
-   * An approximate area name for the stamp, or null. Never throws, never waits
-   * long, and is never a reason a photo does not happen: the server route has
-   * its own timeout, and this one guards against the route itself hanging. If
-   * anything at all goes wrong the stamp simply carries the coordinates and the
-   * time, exactly as it did before this line existed.
+   * The area the current fix falls in, shown under the coordinates.
+   *
+   * Held together with the position it describes rather than on its own, so a
+   * name can never be left sitting under coordinates it does not belong to —
+   * the moment the fix moves, the label stops matching and reads as pending
+   * again. Two outcomes worth telling apart: still looking, and looked and
+   * found nothing. Neither is ever filled in with the institute's name; the
+   * location is what the phone reports, not what was selected above.
    */
-  const namePlace = useCallback(async (fix: Fix | null): Promise<string | null> => {
-    if (!fix) return null;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PLACE_TIMEOUT_MS);
-    try {
-      const response = await fetch("/api/place", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ latitude: fix.latitude, longitude: fix.longitude }),
-        signal: controller.signal,
-      });
-      if (!response.ok) return null;
-      const body = (await response.json()) as { ok: boolean; label?: string | null };
-      return body.ok ? (body.label ?? null) : null;
-    } catch {
-      // Aborted, offline, or the route is unhappy. All the same to us.
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
-  }, []);
+  const [namedArea, setNamedArea] = useState<{
+    key: string;
+    label: string | null;
+  } | null>(null);
+
+  /** The area name for the stamp. Shared with check-in/out so both word it the same. */
+  const namePlace = useCallback(
+    async (fix: LocationFix | null): Promise<string | null> =>
+      fix ? nameArea(fix.latitude, fix.longitude) : null,
+    [],
+  );
+
+  /**
+   * Name the area whenever the position changes, so a rep can see where the app
+   * thinks they are BEFORE they take the photo — not only afterwards, burned
+   * into an image. Coordinates alone are not something a person can check.
+   *
+   * Depends on the coordinates rather than the whole fix, so re-reading the same
+   * spot at a better accuracy does not re-ask for a name it already has.
+   */
+  const lat = geo.status === "ready" ? geo.latitude : null;
+  const lng = geo.status === "ready" ? geo.longitude : null;
+  const areaKey = lat !== null && lng !== null ? `${lat},${lng}` : null;
+
+  useEffect(() => {
+    if (lat === null || lng === null || areaKey === null) return;
+    let cancelled = false;
+    nameArea(lat, lng).then((label) => {
+      if (!cancelled) setNamedArea({ key: areaKey, label });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [areaKey, lat, lng]);
 
   /** The single path every photo takes, from either button. */
   const processAndUpload = useCallback(
@@ -294,6 +328,15 @@ export function CaptureFields({ userId }: { userId: string }) {
       />
       <input
         type="hidden"
+        name="accuracy"
+        value={
+          geo.status === "ready" && geo.accuracy !== null
+            ? String(geo.accuracy)
+            : ""
+        }
+      />
+      <input
+        type="hidden"
         name="photo_path"
         value={photo.status === "ready" ? photo.path : ""}
       />
@@ -324,9 +367,42 @@ export function CaptureFields({ userId }: { userId: string }) {
         </Button>
 
         {geo.status === "ready" && (
-          <p className="text-muted-foreground text-xs">
-            Accurate to about {Math.round(geo.accuracy)} m. Tap to refresh.
-          </p>
+          <div className="space-y-1">
+            {/* The area those coordinates fall in. Approximate by nature and
+                labelled as such; when the free lookup finds nothing it says so
+                rather than borrowing a name from anywhere else. */}
+            <p className="text-muted-foreground text-xs">
+              {namedArea?.key === areaKey
+                ? formatArea(namedArea.label)
+                : "Naming the area…"}
+            </p>
+
+            <p className="flex flex-wrap items-center gap-1.5 text-xs">
+              <Badge variant={ACCURACY_BADGE[accuracyBand(geo.accuracy)]}>
+                {describeAccuracy(geo.accuracy)}
+              </Badge>
+              {geo.stale && <Badge variant="danger">Remembered, not live</Badge>}
+            </p>
+
+            {/* Warn, never block. Rule 12 makes the photo mandatory and leaves
+                the location best-effort on purpose: a rep with no signal must
+                still be able to finish their work. */}
+            {(shouldRetryLocation(geo.accuracy) || geo.stale) && (
+              <p
+                role="status"
+                className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-xs"
+              >
+                {geo.stale
+                  ? "This is an earlier reading, not a live one."
+                  : accuracyBand(geo.accuracy) === "network"
+                    ? "That looks like a network location rather than GPS, so it may be a long way off. If you are indoors, stepping outside usually fixes it."
+                    : "That is only approximate. Tap to try again if you can."}{" "}
+                You can still save either way.
+              </p>
+            )}
+
+            <p className="text-muted-foreground text-xs">Tap to refresh.</p>
+          </div>
         )}
         {geo.status === "failed" && (
           <p

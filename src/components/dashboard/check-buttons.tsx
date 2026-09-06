@@ -3,8 +3,18 @@
 import { useActionState, useState } from "react";
 import { LogInIcon, LogOutIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { checkIn, checkOut, closeWithoutCheckout } from "@/lib/checkin-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
+import { bestFix, nameArea } from "@/lib/geolocate";
+import { formatArea, formatCoordinates } from "@/lib/location-display";
+import {
+  ACCURACY_BADGE,
+  accuracyBand,
+  describeAccuracy,
+  shouldRetryLocation,
+  type LocationFix,
+} from "@/lib/validation/location";
 
 /**
  * Recording arrival and departure at a planned visit.
@@ -21,30 +31,16 @@ import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
  * because a server action has no device to ask.
  */
 
-/** Long enough for a real fix outdoors, short enough not to strand anyone. */
-const FIX_TIMEOUT_MS = 7000;
-
-interface Fix {
-  latitude: number;
-  longitude: number;
-}
-
-async function tryFix(): Promise<Fix | null> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return null;
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      (position) =>
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        }),
-      // Any failure at all resolves to null rather than rejecting: this must
-      // never be the reason a rep cannot record that they arrived.
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: FIX_TIMEOUT_MS, maximumAge: 0 },
-    );
-  });
-}
+/**
+ * The location comes from bestFix, which watches for a few seconds and keeps
+ * the most accurate reading rather than taking the first one offered. A single
+ * getCurrentPosition returns whatever arrives first, and on a phone that is
+ * usually the Wi-Fi or cell fix rather than the satellite one — which is how a
+ * visit in Ahmedabad was once recorded in Gandhinagar.
+ *
+ * It never rejects. A missing location must never be the reason a rep cannot
+ * record that they arrived.
+ */
 
 function CheckButton({
   planId,
@@ -65,16 +61,32 @@ function CheckButton({
 }) {
   const [state, formAction, isPending] = useActionState(action, EMPTY_STATE);
   const [locating, setLocating] = useState(false);
-  const [fix, setFix] = useState<Fix | null>(null);
+  const [fix, setFix] = useState<LocationFix | null>(null);
+  const [noGps, setNoGps] = useState(false);
   const [asked, setAsked] = useState(false);
+  const [area, setArea] = useState<string | null>(null);
+  const [areaPending, setAreaPending] = useState(false);
 
   // Two taps by design, and the first one is the honest part: it says what it
   // is doing while the device thinks, instead of appearing to hang.
   async function locate() {
     setLocating(true);
-    setFix(await tryFix());
+    setArea(null);
+    const result = await bestFix();
+    setFix(result.fix);
+    setNoGps(result.unsupported);
     setAsked(true);
     setLocating(false);
+
+    // Deliberately AFTER the button becomes usable, and never awaited by it.
+    // The area name is a courtesy; a rep must be able to confirm arrival the
+    // moment they have a position, not once a free geocoder has answered.
+    if (result.fix) {
+      setAreaPending(true);
+      const label = await nameArea(result.fix.latitude, result.fix.longitude);
+      setArea(label);
+      setAreaPending(false);
+    }
   }
 
   if (!asked) {
@@ -105,13 +117,64 @@ function CheckButton({
         name="longitude"
         value={fix ? String(fix.longitude) : ""}
       />
-      <Button type="submit" variant={variant} className="h-11" disabled={isPending}>
+      <input
+        type="hidden"
+        name="accuracy"
+        value={fix?.accuracy != null ? String(fix.accuracy) : ""}
+      />
+      {/* The institute names the BUTTON's target — several plan rows can each
+          offer "Confirm check in", so a screen reader needs to tell them apart.
+          It is the button's accessible name rather than loose text after the
+          location, where it used to sit and could be read as the place the GPS
+          had resolved to. */}
+      <Button
+        type="submit"
+        variant={variant}
+        className="h-11"
+        disabled={isPending}
+        aria-label={`Confirm ${label.toLowerCase()} at ${instituteName}`}
+      >
         {icon}
         {isPending ? busyLabel : `Confirm ${label.toLowerCase()}`}
       </Button>
-      {!fix && (
-        <p className="text-muted-foreground max-w-52 text-right text-xs">
-          No location available. The time is still recorded.
+
+      {fix ? (
+        <div className="flex max-w-56 flex-col items-end gap-1">
+          {/* Where the phone is: exact coordinates, approximate area. The
+              institute this visit is for is named on the plan row above and
+              deliberately not repeated here — it is not evidence of position. */}
+          <span className="text-muted-foreground text-right text-xs tabular-nums">
+            {formatCoordinates(fix.latitude, fix.longitude)}
+          </span>
+          <span className="text-muted-foreground text-right text-xs">
+            {areaPending ? "Naming the area…" : formatArea(area)}
+          </span>
+          <Badge variant={ACCURACY_BADGE[accuracyBand(fix.accuracy)]}>
+            {describeAccuracy(fix.accuracy)}
+          </Badge>
+          {/* Warn and offer another go — never block. The timestamp is what the
+              presence guarantee rests on, and it is stamped on the server. */}
+          {shouldRetryLocation(fix.accuracy) && (
+            <p className="text-muted-foreground text-right text-xs">
+              {accuracyBand(fix.accuracy) === "network"
+                ? "Looks like a network location, not GPS. Step outside and try again if you can."
+                : "Only approximate."}{" "}
+              <button
+                type="button"
+                className="underline underline-offset-2"
+                onClick={locate}
+                disabled={locating}
+              >
+                {locating ? "Trying…" : "Try again"}
+              </button>
+            </p>
+          )}
+        </div>
+      ) : (
+        <p className="text-muted-foreground max-w-56 text-right text-xs">
+          {noGps
+            ? "Location is approximate or unavailable — this device may not have GPS. The time is still recorded."
+            : "No location available. The time is still recorded."}
         </p>
       )}
       {state.error && (
@@ -119,7 +182,6 @@ function CheckButton({
           {state.error}
         </p>
       )}
-      <span className="sr-only">{instituteName}</span>
     </form>
   );
 }

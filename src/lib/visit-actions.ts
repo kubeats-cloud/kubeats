@@ -238,6 +238,7 @@ export async function createVisit(
     p_photo_url: input.photo_path,
     p_notes: input.notes,
     p_status_set_to: input.status_set_to,
+    p_accuracy: input.accuracy,
     p_follow_up_date: input.follow_up_date,
     p_follow_up_time: input.follow_up_time,
     p_daily_plan_id: input.daily_plan_id,
