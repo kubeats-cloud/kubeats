@@ -81,6 +81,31 @@ const has0008 = configured
   : false;
 
 /**
+ * Migration 0011 adds institute_status_history and the two triggers that fill
+ * it. The table existing without its trigger would record nothing and look
+ * fine, so these tests are the only thing that can tell the difference.
+ */
+const has0011 = configured
+  ? await admin
+      .from("institute_status_history")
+      .select("id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0011) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0011 is not applied to this project.",
+      "    The status-history suite is being SKIPPED, not passing — which means",
+      "    nothing here is checking that a status change is actually recorded.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
+/**
  * Migration 0010 adds the institute_statuses lookup and the three event
  * statuses. Like 0008's suite, this one is the only thing that can catch the
  * app's catalogue and the database's table disagreeing about which statuses
@@ -1343,4 +1368,241 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       });
     },
   );
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0011)("institute_status_history — the journey is kept", () => {
+    /**
+     * Feature C. The point of these is that the recording happens in the
+     * database, so it cannot be skipped by a caller: every test below changes a
+     * status by a DIFFERENT route and then checks the same table.
+     */
+    let subjectId: string;
+
+    /** A fresh institute per test, so one test's journey is not another's. */
+    const makeInstitute = async (label: string) => {
+      const { data, error } = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} ${label}`, type: "school", registered_by: repA.id })
+        .select("id")
+        .single();
+      if (error) throw new Error(`institute: ${error.message}`);
+      return data.id as string;
+    };
+
+    const historyFor = async (id: string) => {
+      const { data } = await admin
+        .from("institute_status_history")
+        .select("status, changed_by, changed_at, visit_id")
+        .eq("institute_id", id)
+        .order("changed_at", { ascending: true });
+      return data ?? [];
+    };
+
+    beforeAll(async () => {
+      subjectId = await makeInstitute("history subject");
+    });
+
+    it("records a change made by a direct update, and who made it", async () => {
+      const id = await makeInstitute("direct update");
+
+      const { error } = await repA.db
+        .from("institutes")
+        .update({ status: "First meeting done" })
+        .eq("id", id);
+      expect(error).toBeNull();
+
+      const rows = await historyFor(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("First meeting done");
+      // auth.uid() inside the trigger, not anything the client sent.
+      expect(rows[0].changed_by).toBe(repA.id);
+      expect(rows[0].visit_id).toBeNull();
+    });
+
+    it("still maintains 0001's audit columns alongside it", async () => {
+      // Feature C sits beside institutes_touch_status rather than replacing it,
+      // so the pair that already existed has to keep working.
+      const id = await makeInstitute("audit columns");
+      await repA.db.from("institutes").update({ status: "Session scheduled" }).eq("id", id);
+
+      const { data: row } = await admin
+        .from("institutes")
+        .select("status, status_updated_at, status_updated_by")
+        .eq("id", id)
+        .single();
+
+      expect(row?.status).toBe("Session scheduled");
+      expect(row?.status_updated_at).toBeTruthy();
+      expect(row?.status_updated_by).toBe(repA.id);
+
+      const rows = await historyFor(id);
+      expect(rows).toHaveLength(1);
+    });
+
+    it("appends rather than overwrites, so the journey grows", async () => {
+      const id = await makeInstitute("journey");
+
+      for (const status of [
+        "First meeting done",
+        "Invited principal for event",
+        "RSVP received",
+      ]) {
+        const { error } = await repA.db
+          .from("institutes")
+          .update({ status })
+          .eq("id", id);
+        expect(error, status).toBeNull();
+      }
+
+      const rows = await historyFor(id);
+      expect(rows.map((r) => r.status)).toEqual([
+        "First meeting done",
+        "Invited principal for event",
+        "RSVP received",
+      ]);
+      // And the institute itself still holds only the latest.
+      const { data: current } = await admin
+        .from("institutes")
+        .select("status")
+        .eq("id", id)
+        .single();
+      expect(current?.status).toBe("RSVP received");
+    });
+
+    it("records nothing when the status is re-saved unchanged", async () => {
+      const id = await makeInstitute("no-op save");
+      await repA.db.from("institutes").update({ status: "Session done" }).eq("id", id);
+      // Same value again, plus an unrelated edit in the same statement.
+      await repA.db
+        .from("institutes")
+        .update({ status: "Session done", city: "Surat" })
+        .eq("id", id);
+
+      expect(await historyFor(id)).toHaveLength(1);
+    });
+
+    it("records nothing when an edit does not touch the status", async () => {
+      const id = await makeInstitute("unrelated edit");
+      await repA.db.from("institutes").update({ city: "Vadodara" }).eq("id", id);
+      expect(await historyFor(id)).toHaveLength(0);
+    });
+
+    it("links the visit when the change came through log_visit()", async () => {
+      const id = await makeInstitute("via log_visit");
+
+      const { data: visitId, error } = await repA.db.rpc("log_visit", {
+        p_institute_id: id,
+        p_activity: "olympiad",
+        p_photo_url: photoFor(repA.id),
+        p_status_set_to: "Campus visit scheduled",
+      });
+      expect(error).toBeNull();
+      expect(visitId).toBeTruthy();
+
+      const rows = await historyFor(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("Campus visit scheduled");
+      expect(rows[0].changed_by).toBe(repA.id);
+      // The whole point of the transaction-local note.
+      expect(rows[0].visit_id).toBe(visitId);
+    });
+
+    it("does not attribute a direct change to an unrelated earlier visit", async () => {
+      const id = await makeInstitute("no mislink");
+
+      // A visit that sets one status...
+      await repA.db.rpc("log_visit", {
+        p_institute_id: id,
+        p_activity: "olympiad",
+        p_photo_url: photoFor(repA.id),
+        p_status_set_to: "First meeting done",
+      });
+      // ...then a different status set by hand, in its own transaction.
+      await repA.db
+        .from("institutes")
+        .update({ status: "Session done" })
+        .eq("id", id);
+
+      const rows = await historyFor(id);
+      expect(rows).toHaveLength(2);
+      expect(rows[0].visit_id).toBeTruthy();
+      expect(rows[1].status).toBe("Session done");
+      expect(rows[1].visit_id).toBeNull();
+    });
+
+    it("keeps the history when the visit that caused it is deleted", async () => {
+      const id = await makeInstitute("visit deleted");
+      const { data: visitId } = await repA.db.rpc("log_visit", {
+        p_institute_id: id,
+        p_activity: "olympiad",
+        p_photo_url: photoFor(repA.id),
+        p_status_set_to: "Session done",
+      });
+
+      await admin.from("visits").delete().eq("id", visitId as string);
+
+      const rows = await historyFor(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("Session done");
+      expect(rows[0].visit_id).toBeNull(); // set null, not cascaded away
+    });
+
+    it("refuses a status outside the nine, via the vocabulary table", async () => {
+      const { error } = await admin.from("institute_status_history").insert({
+        institute_id: subjectId,
+        status: "Principal said maybe",
+      });
+      // A foreign key to institute_statuses, not a CHECK — so 23503.
+      expect(error?.code).toBe("23503");
+    });
+
+    it("is readable by any signed-in rep — it is the registry's history", async () => {
+      const id = await makeInstitute("shared read");
+      await repA.db.from("institutes").update({ status: "Session done" }).eq("id", id);
+
+      // repB had nothing to do with this institute and still sees its journey,
+      // unlike visits, which stay with their owner.
+      const { data, error } = await repB.db
+        .from("institute_status_history")
+        .select("status")
+        .eq("institute_id", id);
+
+      expect(error).toBeNull();
+      expect(data?.map((r) => r.status)).toEqual(["Session done"]);
+    });
+
+    it("cannot be written, rewritten or erased by a rep", async () => {
+      const id = await makeInstitute("append only");
+      await repA.db.from("institutes").update({ status: "Session done" }).eq("id", id);
+
+      const inserted = await repA.db.from("institute_status_history").insert({
+        institute_id: id,
+        status: "RSVP received",
+      });
+      expect(inserted.error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+
+      // No UPDATE or DELETE policy exists, so both are no-ops rather than
+      // errors under PostgREST — the row surviving is the assertion.
+      await repA.db
+        .from("institute_status_history")
+        .update({ status: "RSVP received" })
+        .eq("institute_id", id);
+      await repA.db.from("institute_status_history").delete().eq("institute_id", id);
+
+      const rows = await historyFor(id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("Session done");
+    });
+
+    it("goes when the institute goes", async () => {
+      const id = await makeInstitute("cascade");
+      await repA.db.from("institutes").update({ status: "Session done" }).eq("id", id);
+      expect(await historyFor(id)).toHaveLength(1);
+
+      const { error } = await admin.from("institutes").delete().eq("id", id);
+      expect(error).toBeNull();
+      expect(await historyFor(id)).toHaveLength(0);
+    });
+  });
 });
