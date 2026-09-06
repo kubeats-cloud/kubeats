@@ -444,6 +444,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         date: iso(),
         institute_id: instituteId,
         purpose: "Other",
+        // 0014: the plan row is no longer enough on its own — a meeting also
+        // needs the rep to have checked in. That rule has its own suite; this
+        // one is still about the gate, so it checks in as setup.
+        checkin_at: new Date().toISOString(),
       });
       expect(planError).toBeNull();
 
@@ -562,6 +566,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           date: iso(), // what the app writes
           institute_id: houseId,
           purpose: `${TAG} same-day`,
+          // 0014: a meeting needs a check-in as well as a plan row.
+          checkin_at: new Date().toISOString(),
         })
         .select("id")
         .single();
@@ -613,6 +619,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           date: iso(-1),
           institute_id: houseId,
           purpose: `${TAG} yesterday`,
+          // 0014: a meeting needs a check-in as well as a plan row.
+          checkin_at: new Date().toISOString(),
         })
         .select("id")
         .single();
@@ -1764,6 +1772,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           date: iso(),
           institute_id: id,
           purpose: `${TAG} try again`,
+          // 0014: a meeting needs a check-in as well as a plan row.
+          checkin_at: new Date().toISOString(),
         })
         .select("id")
         .single();
