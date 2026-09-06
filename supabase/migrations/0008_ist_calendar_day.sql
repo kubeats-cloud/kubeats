@@ -244,7 +244,14 @@ begin
 end;
 $$;
 
-comment on function public.log_visit is
+-- Named with its full argument list. Migration 0015 adds a THIRTEEN-argument
+-- log_visit, and while both exist a bare `comment on function public.log_visit`
+-- has two candidates and fails with 42725, "function name is not unique" -
+-- which is exactly what happened when the whole chain was re-run.
+comment on function public.log_visit(
+  uuid, text, text, date, double precision, double precision,
+  text, text, text, date, time, uuid
+) is
   'Records one visit and its two side effects (plan held, institute status) in a '
   'single transaction. Runs as the calling rep, so RLS and every trigger still '
   'apply. Raises FO001-FO008 for the cases the app turns into sentences. Dates '

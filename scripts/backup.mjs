@@ -23,7 +23,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
-import { BACKUP_TABLES, PHOTO_BUCKET } from "./tables.mjs";
+import { BACKUP_BUCKETS, BACKUP_TABLES, NOT_BACKED_UP, PHOTO_BUCKET } from "./tables.mjs";
 
 const PAGE = 1000;
 
@@ -65,6 +65,61 @@ async function readAll(db, table) {
   return rows;
 }
 
+/**
+ * Every table the database actually exposes, from PostgREST's own OpenAPI
+ * document. Asked for at backup time rather than hard-coded, because the whole
+ * point is to notice a table this script has never heard of.
+ */
+async function livePublicTables(url, key) {
+  const res = await fetch(`${url}/rest/v1/`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  });
+  if (!res.ok) throw new Error(`could not read the API schema: HTTP ${res.status}`);
+  const spec = await res.json();
+  return Object.keys(spec.definitions ?? {}).sort();
+}
+
+/**
+ * THE ANTI-DRIFT CHECK, and the reason it exists.
+ *
+ * visit_people, institute_status_history and materials were each added by a
+ * migration and never added to BACKUP_TABLES. Nothing complained: the backup
+ * succeeded, the verifier passed, and a restore would simply have come back
+ * without every closing-report contact and the entire status audit trail. The
+ * failure mode of a forgotten table is a backup that looks perfect.
+ *
+ * So a table the database has and this script does not know about is a hard
+ * failure, not a warning. Adding it to BACKUP_TABLES or, with a reason, to
+ * NOT_BACKED_UP is a one-line change; losing a table is not recoverable.
+ */
+function assertCoverage(liveTables) {
+  const covered = new Set([
+    ...BACKUP_TABLES.map((t) => t.name),
+    ...NOT_BACKED_UP.map((t) => t.name),
+  ]);
+  const unknown = liveTables.filter((t) => !covered.has(t));
+  const stale = [...covered].filter((t) => !liveTables.includes(t));
+
+  if (unknown.length > 0) {
+    throw new Error(
+      `these tables exist in the database and are in neither list in ` +
+        `scripts/tables.mjs:
+    ${unknown.join(", ")}
+` +
+        `  Add each one to BACKUP_TABLES, or to NOT_BACKED_UP with a reason.`,
+    );
+  }
+  if (stale.length > 0) {
+    console.warn(
+      `  ! scripts/tables.mjs names ${stale.join(", ")}, which the database ` +
+        `does not have.
+    Harmless, but the list has drifted the other way.`,
+    );
+  }
+  return { checked: true, liveTables, backedUp: BACKUP_TABLES.map((t) => t.name),
+    notBackedUp: NOT_BACKED_UP.map((t) => t.name) };
+}
+
 async function main() {
   const { url, key } = loadEnv();
   const db = createClient(url, key, { auth: { persistSession: false } });
@@ -75,6 +130,11 @@ async function main() {
 
   mkdirSync(join(root, "tables"), { recursive: true });
   console.log(`Backing up ${url}\n  into ${root}\n`);
+
+  // Before a single row is written: does this script still know the whole
+  // schema? A table it has never heard of stops the backup here, rather than
+  // producing one that looks complete and is not.
+  const coverage = assertCoverage(await livePublicTables(url, key));
 
   // 1. Table rows -----------------------------------------------------------
   const counts = {};
@@ -113,35 +173,47 @@ async function main() {
   console.log(`  ${"auth users".padEnd(20)} ${users.length} (no password hashes — see the runbook)`);
 
   // 3. Storage --------------------------------------------------------------
+  //
+  // Both private buckets, not just the photos. The materials bucket was added
+  // in migration 0012 and went four months without being backed up; a poster or
+  // a fee sheet exists nowhere else once it is uploaded.
+  const bucketCounts = {};
   let photoCount = 0;
-  let photoBytes = 0;
   if (withPhotos) {
-    mkdirSync(join(root, "storage", PHOTO_BUCKET), { recursive: true });
-    const { data: folders, error } = await db.storage.from(PHOTO_BUCKET).list("");
-    if (error) throw new Error(`storage: ${error.message}`);
+    for (const bucket of BACKUP_BUCKETS) {
+      mkdirSync(join(root, "storage", bucket.name), { recursive: true });
+      const { data: folders, error } = await db.storage.from(bucket.name).list("");
+      if (error) throw new Error(`storage ${bucket.name}: ${error.message}`);
 
-    for (const folder of folders ?? []) {
-      if (folder.name === ".emptyFolderPlaceholder") continue;
-      const { data: files } = await db.storage.from(PHOTO_BUCKET).list(folder.name);
-      for (const file of files ?? []) {
-        const path = `${folder.name}/${file.name}`;
-        const { data: blob, error: downloadError } = await db.storage
-          .from(PHOTO_BUCKET)
-          .download(path);
-        if (downloadError || !blob) {
-          console.warn(`    ! could not download ${path}: ${downloadError?.message}`);
-          continue;
+      let count = 0;
+      let bytesTotal = 0;
+      for (const folder of folders ?? []) {
+        if (folder.name === ".emptyFolderPlaceholder") continue;
+        const { data: files } = await db.storage.from(bucket.name).list(folder.name);
+        for (const file of files ?? []) {
+          if (file.name === ".emptyFolderPlaceholder") continue;
+          const path = `${folder.name}/${file.name}`;
+          const { data: blob, error: downloadError } = await db.storage
+            .from(bucket.name)
+            .download(path);
+          if (downloadError || !blob) {
+            console.warn(`    ! could not download ${bucket.name}/${path}: ${downloadError?.message}`);
+            continue;
+          }
+          mkdirSync(join(root, "storage", bucket.name, folder.name), { recursive: true });
+          const bytes = Buffer.from(await blob.arrayBuffer());
+          writeFileSync(join(root, "storage", bucket.name, path), bytes);
+          count += 1;
+          bytesTotal += bytes.length;
         }
-        mkdirSync(join(root, "storage", PHOTO_BUCKET, folder.name), { recursive: true });
-        const bytes = Buffer.from(await blob.arrayBuffer());
-        writeFileSync(join(root, "storage", PHOTO_BUCKET, path), bytes);
-        photoCount += 1;
-        photoBytes += bytes.length;
       }
+      bucketCounts[bucket.name] = count;
+      if (bucket.name === PHOTO_BUCKET) photoCount = count;
+      console.log(`  ${bucket.label.padEnd(20)} ${count} (${Math.round(bytesTotal / 1024)} KB)`);
     }
-    console.log(`  ${"photos".padEnd(20)} ${photoCount} (${Math.round(photoBytes / 1024)} KB)`);
   } else {
-    console.log(`  ${"photos".padEnd(20)} skipped (--no-photos)`);
+    for (const bucket of BACKUP_BUCKETS) bucketCounts[bucket.name] = null;
+    console.log(`  ${"files".padEnd(20)} skipped (--no-photos)`);
   }
 
   // 4. Manifest -------------------------------------------------------------
@@ -151,6 +223,11 @@ async function main() {
     tables: counts,
     authUsers: users.length,
     photos: withPhotos ? photoCount : null,
+    // Per bucket, so a restore and the verifier can both check every one of
+    // them rather than only the photos.
+    buckets: bucketCounts,
+    // Proof the coverage check ran, so the offline verifier can insist on it.
+    coverage,
     // Read this on restore. These four cannot be in the backup at all.
     notRestorableFromThisBackup: [
       "password hashes — everyone signs in with a new temporary password",
@@ -170,5 +247,9 @@ async function main() {
 
 main().catch((error) => {
   console.error(`\nBackup failed: ${error.message}`);
-  process.exit(1);
+  // exitCode rather than exit(): the coverage check above opens an HTTP
+  // connection, and tearing the process down while that socket is still live
+  // makes libuv abort on Windows with a confusing code instead of a clean 1.
+  // Setting the code and letting Node drain gives the same failure, legibly.
+  process.exitCode = 1;
 });

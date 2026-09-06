@@ -25,7 +25,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BACKUP_TABLES, PHOTO_BUCKET } from "./tables.mjs";
+import { BACKUP_BUCKETS, BACKUP_TABLES, PHOTO_BUCKET } from "./tables.mjs";
 
 /**
  * Anything shaped like a Supabase credential. A backup should never carry one.
@@ -163,21 +163,65 @@ export function verifyBackup(root) {
     }
   }
 
-  // ---- photos --------------------------------------------------------------
-  const photoRoot = join(root, "storage", PHOTO_BUCKET);
-  if (manifest.photos === null || manifest.photos === undefined) {
-    add(true, "photos", "skipped — this backup was taken with --no-photos");
-  } else if (!existsSync(photoRoot)) {
-    add(manifest.photos === 0, "storage/" + PHOTO_BUCKET,
-        manifest.photos === 0 ? "no photos to store" : `manifest claims ${manifest.photos}, directory missing`);
-  } else {
-    const files = readdirSync(photoRoot, { recursive: true, withFileTypes: true }).filter((e) => e.isFile());
-    add(files.length === manifest.photos, "photo count matches the manifest",
-        `manifest ${manifest.photos}, on disk ${files.length}`);
+  // ---- storage ---------------------------------------------------------------
+  //
+  // Every bucket, not only the photos. The materials bucket went unbacked-up for
+  // months precisely because nothing here looked for it.
+  for (const bucket of BACKUP_BUCKETS) {
+    const claimed = manifest.buckets?.[bucket.name] ?? (
+      bucket.name === PHOTO_BUCKET ? manifest.photos : undefined
+    );
+    const bucketRoot = join(root, "storage", bucket.name);
+
+    if (claimed === null || claimed === undefined) {
+      add(bucket.name === PHOTO_BUCKET ? manifest.photos === null : true,
+          `storage/${bucket.name}`,
+          manifest.photos === null
+            ? "skipped — this backup was taken with --no-photos"
+            : "the manifest does not mention this bucket — taken by an older script");
+      continue;
+    }
+
+    if (!existsSync(bucketRoot)) {
+      add(claimed === 0, `storage/${bucket.name}`,
+          claimed === 0 ? "no files to store" : `manifest claims ${claimed}, directory missing`);
+      continue;
+    }
+
+    const files = readdirSync(bucketRoot, { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile());
+    add(files.length === claimed, `${bucket.label} count matches the manifest`,
+        `manifest ${claimed}, on disk ${files.length}`);
 
     const empty = files.filter((e) => statSync(join(e.parentPath ?? e.path, e.name)).size === 0);
-    add(empty.length === 0, "no truncated photo files",
+    add(empty.length === 0, `no truncated ${bucket.label} files`,
         empty.length === 0 ? `${files.length} file(s), all non-empty` : `${empty.length} zero-byte file(s)`);
+  }
+
+  // ---- coverage --------------------------------------------------------------
+  //
+  // This script is deliberately offline, so it cannot ask the database what
+  // tables exist. What it CAN insist on is that the backup script asked, and
+  // recorded the answer. A backup with no coverage block was taken before the
+  // check existed and may be missing whole tables without saying so.
+  const coverage = manifest.coverage;
+  add(coverage?.checked === true, "the backup verified its own table coverage",
+      coverage?.checked === true
+        ? `${coverage.backedUp.length} backed up, ${coverage.notBackedUp.length} deliberately not`
+        : "no coverage block — taken by a script that could not check for missing tables");
+
+  if (coverage?.checked === true) {
+    const listed = new Set([...(coverage.backedUp ?? []), ...(coverage.notBackedUp ?? [])]);
+    const uncovered = (coverage.liveTables ?? []).filter((t) => !listed.has(t));
+    add(uncovered.length === 0, "every table in the database was accounted for",
+        uncovered.length === 0
+          ? `${(coverage.liveTables ?? []).length} table(s) in the source database`
+          : `not covered: ${uncovered.join(", ")}`);
+
+    const missingFiles = (coverage.backedUp ?? []).filter(
+      (t) => !existsSync(join(root, "tables", `${t}.json`)));
+    add(missingFiles.length === 0, "every table it claims to back up has a file",
+        missingFiles.length === 0 ? "" : `no file for: ${missingFiles.join(", ")}`);
   }
 
   // ---- secrets -------------------------------------------------------------

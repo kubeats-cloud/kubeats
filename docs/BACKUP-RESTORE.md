@@ -18,12 +18,89 @@ state, they live in different places, and they come back in a particular order.
 | --- | --- | --- |
 | **1. Table rows** | `public` schema | `pg_dump`, or `npm run backup` |
 | **2. Auth users** | `auth` schema, behind the Auth API | Dump the `auth` schema, or `npm run backup`. **Passwords cannot move** unless you dump `auth` at the SQL level. |
-| **3. Photos** | Storage, private `visit-photos` bucket | Files, not rows. `npm run backup`, or the Storage API. |
+| **3. Files** | Storage, two private buckets: `visit-photos` and `materials` | Files, not rows. `npm run backup`, or the Storage API. Both buckets, since the four-pass audit: `materials` holds posters and fee sheets that exist nowhere else. |
 | **4. Supabase-only pieces** | Vault + pg_cron | **Cannot be exported at all.** Re-created by re-running migration `0004`. |
 
 Skip domain 2 and the restore fails immediately: `profiles.id` references
 `auth.users`, so every row that names a person is refused. Skip domain 4 and
 nothing appears broken — photos simply stop being deleted, quietly, forever.
+
+---
+
+## What a backup covers, and what it deliberately does not
+
+`scripts/tables.mjs` is the list, and it is checked against the live database
+every time a backup runs. A table the database has that appears in neither list
+**stops the backup with a non-zero exit** rather than producing one that looks
+complete. That check exists because it had already gone wrong: `visit_people`,
+`institute_status_history` and `materials` were each added by a migration and
+never added to the backup, so for months a restore would have come back without
+a single closing-report contact and without the status audit trail at all.
+
+**Backed up (14 tables):** profiles, location_states, location_cities,
+location_areas, purposes, institutes, daily_plans, visits, visit_people,
+institute_status_history, targets, materials, pincodes_cache, photo_purge_runs.
+
+**Deliberately not backed up, with reasons:**
+
+| Table | Why not |
+| --- | --- |
+| `institute_statuses` | A fixed lookup of nine rows, recreated in full by migration `0010`. Restoring it would fight the migration for the same rows. |
+| `place_cache` | A cache of OpenStreetMap area names keyed by rounded coordinates. Regenerates on demand; decoration by design. |
+
+**Both buckets are backed up:** `visit-photos` (a rep's evidence, and the only
+copy of anything past the retention window) and `materials` (the admin library,
+which never expires and is never regenerated).
+
+Adding a table in a future migration means adding one line to `BACKUP_TABLES`,
+or to `NOT_BACKED_UP` with a reason. The backup will refuse to run until you do.
+
+---
+
+## The restore contract: schema, not seed
+
+**A restore targets a database that has the schema but not the seed.**
+
+Migrations `0001` and `0010` seed reference data — 36 states, 85 cities, 5
+purposes, 9 statuses — so a freshly migrated database is not empty. The backup
+carries its own copy of the same tables, with different ids and usually more
+rows, because production has been adding cities and areas through the app ever
+since. Upserting one onto the other does not merge them, it accumulates: a
+rehearsal turned 85 seeded cities plus 88 backed-up ones into **173**.
+
+So `npm run restore` **empties four tables before restoring them** —
+`location_areas`, `location_cities`, `location_states`, `purposes` — in that
+order, because areas reference cities and cities reference states. For those
+four the backup is the authority and the seed is discarded.
+
+Everything else is upserted by id, which is correct: institutes, visits, plans
+and the rest have no seed to collide with.
+
+Two consequences worth knowing:
+
+- **Restore into a fresh project.** The clearing step is safe on a database
+  built for the restore and destructive on one with real location data in it.
+- **Migrations first, then restore.** The order does not change; what changes is
+  that you no longer need to hand-delete the seed first.
+
+---
+
+## The migration chain is forward-only
+
+Each migration is individually idempotent: re-running any **one** of them is
+safe, which is what a fix or a half-applied file needs. Re-running the **whole
+chain** over a database that has already had it is not supported.
+
+`0001` creates `weekly_targets`; `0013` renames it to `weekly_targets_pre_0013`.
+Replaying `0001` afterwards asks for a state the chain has already moved past.
+This was investigated properly during the audit: freeing the old constraint
+names let `0001` re-create the table, which then collided at `0013`, which broke
+the guard that freed the names. One collision became three, so the fix was
+withdrawn and the limitation written down instead. Migration `0016`, section 5,
+records that in the file itself.
+
+**To rehearse, apply the chain to a fresh database** — which is what a rehearsal
+should do anyway.
 
 ---
 
@@ -526,7 +603,8 @@ Being precise about this, because a runbook nobody has executed is a wish.
 - Migrations `0001`–`0003` rebuild the entire schema **unchanged** with only the
   compatibility prelude in front of them: 11 tables, RLS on all 11, 37 policies,
   8 triggers, 8 functions, 28 indexes, 79 CHECK constraints, 11 foreign keys,
-  the storage bucket, and all seed data (36 states, 85 cities, 5 purposes).
+  the storage buckets, and all seed data (36 states, 85 cities, 5 purposes,
+  9 institute statuses).
 - `0004` fails on plain Postgres with `extension "pg_cron" is not available` —
   which is why it has its own section above.
 - The `pg_dump --data-only` → `pg_restore` path, into a schema built from the
