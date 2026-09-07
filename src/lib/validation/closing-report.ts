@@ -40,6 +40,17 @@ export const SESSION_ACTIVITIES = [
   "Seminar or workshop",
 ] as const;
 
+/**
+ * The one that means students came to us rather than us going to them.
+ *
+ * It is NOT in SESSION_ACTIVITIES, because a campus visit is not a session and
+ * has no topic, class, streams or participation level. What it does share is
+ * the head count: `students_attended` carries "how many students were there"
+ * for both, and this is the predicate that decides a campus visit is one of the
+ * times we insist on knowing.
+ */
+export const CAMPUS_VISIT_ACTIVITY = "Campus visit";
+
 export const MANAGEMENT_ACTIVITY = "Management meeting";
 export const APPLICATION_ACTIVITY = "Application collection";
 export const ADMISSION_ACTIVITY = "Admission counselling";
@@ -125,6 +136,19 @@ export const PRIMARY_OUTCOMES = [
 
 export const hasSession = (activities: string[]) =>
   activities.some((a) => (SESSION_ACTIVITIES as readonly string[]).includes(a));
+export const hasCampusVisit = (activities: string[]) =>
+  activities.includes(CAMPUS_VISIT_ACTIVITY);
+
+/**
+ * Whether this report owes a student head count at all.
+ *
+ * `students_attended` is shared: a session fills it with who was in the room,
+ * a campus visit with who came to see the place. One column, so one question —
+ * asked whenever either happened, and asked once when both did.
+ */
+export const hasStudentCount = (activities: string[]) =>
+  hasSession(activities) || hasCampusVisit(activities);
+
 export const hasManagement = (activities: string[]) =>
   activities.includes(MANAGEMENT_ACTIVITY);
 export const hasApplications = (activities: string[]) =>
@@ -207,6 +231,15 @@ export const closingReportSchema = z
     session_topic: text(300),
     session_class: oneOf(SESSION_CLASSES),
     session_streams: manyOf(SESSION_STREAMS),
+    /**
+     * The student head count, shared by a session and a campus visit.
+     *
+     * It sits under "Session detail" for historical reasons — 0001 put it
+     * there — but it is no longer session-only: a campus visit fills the same
+     * field with how many students came to see the campus. There is one
+     * column, so a report that was both a session and a campus visit has one
+     * number covering both; the form says so where that can happen.
+     */
     students_attended: count,
     session_duration_mins: count,
     other_faculty_present: text(300),
@@ -272,13 +305,27 @@ export const closingReportSchema = z
     // Required only because of what the rep said happened.
     if (hasSession(value.activities_conducted)) {
       if (!value.session_topic) fail("session_topic", "What was the session about?");
-      if (value.students_attended === null) {
-        fail("students_attended", "How many students attended?");
-      }
       if (!value.session_class) fail("session_class", "Which class?");
       if (!value.session_participation) {
         fail("session_participation", "How engaged were they?");
       }
+    }
+
+    // The head count, for a session or a campus visit or both. Lifted out of
+    // the session branch above so a campus visit is asked too — that is the
+    // bug this closes: the number had nowhere to go, so a campus visit could
+    // be closed without ever saying how many students came. One field, so one
+    // message, worded for whichever the rep ticked.
+    if (
+      hasStudentCount(value.activities_conducted) &&
+      value.students_attended === null
+    ) {
+      fail(
+        "students_attended",
+        hasSession(value.activities_conducted)
+          ? "How many students attended?"
+          : "How many students visited the campus?",
+      );
     }
 
     if (hasManagement(value.activities_conducted)) {

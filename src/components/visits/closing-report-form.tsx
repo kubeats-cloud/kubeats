@@ -45,6 +45,7 @@ import {
   closingReportSchema,
   hasAdmissions,
   hasApplications,
+  hasCampusVisit,
   hasManagement,
   hasSession,
 } from "@/lib/validation/closing-report";
@@ -144,6 +145,7 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
     set(key)(value.replace(/\D/g, "").slice(0, max));
 
   const showSession = hasSession(activities);
+  const showCampus = hasCampusVisit(activities);
   const showManagement = hasManagement(activities);
   const showApplications = hasApplications(activities);
   const showAdmissions = hasAdmissions(activities);
@@ -446,6 +448,16 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                       value={field.students_attended}
                       onChange={(e) => digits("students_attended", 5)(e.target.value)}
                     />
+                    {/* There is one student-count field, so when the visit was
+                        both a session and a campus visit it has to serve both.
+                        Say so rather than letting the rep guess which we
+                        wanted. */}
+                    {showCampus && (
+                      <p className="text-muted-foreground text-xs">
+                        Covers the campus visit too — there is one figure for
+                        both.
+                      </p>
+                    )}
                     {problem("students_attended")}
                   </div>
                 </div>
@@ -550,6 +562,33 @@ export function ClosingReportForm({ visit }: { visit: VisitReport }) {
                     value={field.student_questions}
                     onChange={(e) => set("student_questions")(e.target.value)}
                   />
+                </div>
+            </FormSection>
+          )}
+
+          {/* 3b. Campus visit ------------------------------------------
+              Only when there was no session: the two share students_attended,
+              and the session block above already asks for it. */}
+          {showCampus && !showSession && (
+            <FormSection
+              title="The campus visit"
+              description="Only asked because you ticked a campus visit above."
+            >
+                <div className="space-y-2">
+                  <Label htmlFor="campus-attended">
+                    Students who visited the campus
+                  </Label>
+                  <Input
+                    id="campus-attended"
+                    className="h-11"
+                    inputMode="numeric"
+                    value={field.students_attended}
+                    onChange={(e) => digits("students_attended", 5)(e.target.value)}
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    How many actually came, not how many were expected.
+                  </p>
+                  {problem("students_attended")}
                 </div>
             </FormSection>
           )}
@@ -943,6 +982,16 @@ function Review({
                 ]
                   .filter(Boolean)
                   .join(" · "),
+              )}
+            {/* A campus visit with no session has no "Session" line to carry
+                its head count, so it gets its own. */}
+            {hasCampusVisit(activities) &&
+              !hasSession(activities) &&
+              line(
+                "Campus visit",
+                field.students_attended
+                  ? `${field.students_attended} students visited`
+                  : null,
               )}
             {line("Student response", field.student_response)}
             {line("Interest", field.student_interest ? `${field.student_interest} / 5` : null)}

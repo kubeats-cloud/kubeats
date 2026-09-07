@@ -4,6 +4,7 @@ import { formatDate } from "@/lib/dates";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import { activityLabelFor } from "@/lib/validation/visit";
+import { hasCampusVisit, hasSession } from "@/lib/validation/closing-report";
 import type { VisitReport } from "@/lib/closing-report";
 
 /**
@@ -39,13 +40,25 @@ export function ReportView({ report }: { report: VisitReport }) {
     report.session_topic,
     report.session_class && `class ${report.session_class}`,
     report.session_streams?.length ? report.session_streams.join(", ") : null,
-    report.students_attended !== null ? `${report.students_attended} students` : null,
     report.students_reached !== null ? `${report.students_reached} reached` : null,
     report.session_duration_mins !== null ? `${report.session_duration_mins} min` : null,
     report.session_participation && `${report.session_participation} participation`,
   ]
     .filter(Boolean)
     .join(" · ");
+
+  /**
+   * The head count has its own row rather than sitting inside the "Session"
+   * line, because it is no longer only a session's number: a campus visit
+   * fills the same field. On a campus visit with no session it would otherwise
+   * have printed as "Session: 40 students" against a report that had no
+   * session in it.
+   */
+  const done = report.activities_conducted ?? [];
+  const countLabel =
+    hasCampusVisit(done) && !hasSession(done)
+      ? "Students who visited"
+      : "Students attended";
 
   return (
     <div className="space-y-4">
@@ -111,6 +124,7 @@ export function ReportView({ report }: { report: VisitReport }) {
           <dl className="divide-border divide-y">
             {row("Activities", chips(report.activities_conducted))}
             {row("Session", session || null)}
+            {row(countLabel, report.students_attended)}
             {row("Questions asked", report.student_questions)}
             {row("Faculty present", report.other_faculty_present)}
             {row("Student response", report.student_response)}

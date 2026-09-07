@@ -68,6 +68,49 @@ describe("closing report enrichment", () => {
     expect(errs(closingReportSchema.safeParse(base({ activities_conducted: ["Management meeting"], management_response: ["Supportive"], management_feedback: "ok", management_interest: "Enormous" })))).toContain("management_interest");
     expect(errs(closingReportSchema.safeParse(base({ primary_outcome: "World peace" })))).toContain("primary_outcome");
   });
+  it("requires the head count when a campus visit happened", () => {
+    // The bug this closes: students_attended was gated on a session, so a
+    // campus visit was never asked for a number and the one it was given was
+    // thrown away on save.
+    const e = errs(closingReportSchema.safeParse(base({
+      activities_conducted: ["Campus visit"],
+    })));
+    expect(e).toContain("students_attended");
+  });
+
+  it("accepts a campus visit's head count, including zero", () => {
+    for (const value of ["0", "45"]) {
+      const r = closingReportSchema.safeParse(base({
+        activities_conducted: ["Campus visit"], students_attended: value,
+      }));
+      expect(r.success, value).toBe(true);
+      if (r.success) expect(r.data.students_attended).toBe(Number(value));
+    }
+  });
+
+  it("asks only once when a visit was both a session and a campus visit", () => {
+    // One field, one question. The message is the session's, because that is
+    // the more specific thing that happened.
+    const e = errs(closingReportSchema.safeParse(base({
+      activities_conducted: ["Campus visit", "Career guidance session"],
+      session_topic: "X", session_class: "12", session_participation: "High",
+    })));
+    expect(e.filter((path) => path === "students_attended")).toHaveLength(1);
+  });
+
+  it("leaves the head count alone when neither happened", () => {
+    // An introduction meeting is not made to answer a question about students.
+    expect(closingReportSchema.safeParse(base()).success).toBe(true);
+  });
+
+  it("still requires the head count for a session, as it always did", () => {
+    const e = errs(closingReportSchema.safeParse(base({
+      activities_conducted: ["Career guidance session"],
+      session_topic: "X", session_class: "12", session_participation: "High",
+    })));
+    expect(e).toContain("students_attended");
+  });
+
   it("form-data mapping carries the new keys", () => {
     const fd = new FormData();
     fd.set("visit_id", "x"); fd.set("students_reached", "10");

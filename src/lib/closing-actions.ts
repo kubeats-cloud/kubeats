@@ -9,6 +9,7 @@ import {
   closingReportFormDataToInput,
   closingReportSchema,
   hasSession,
+  hasStudentCount,
   needsClosingReport,
 } from "@/lib/validation/closing-report";
 import { visitFieldErrors } from "@/lib/validation/visit";
@@ -116,6 +117,10 @@ export async function submitClosingReport(
 
   // 2. The report itself, and the completion if this visit has one to do.
   const session = hasSession(input.activities_conducted);
+  // students_attended is the exception to the session gating below: a campus
+  // visit fills the same field with how many students came to see the campus.
+  // Gating it on `session` alone is what used to throw that number away.
+  const counted = hasStudentCount(input.activities_conducted);
   // A session or campus visit is closed by its report, whether it had been
   // scheduled ("Set") or logged as already done. Both end up with the same
   // lifecycle and the same closed_at, so "when was this finished" means one
@@ -128,17 +133,20 @@ export async function submitClosingReport(
       activities_conducted: input.activities_conducted,
       // Session detail is only meaningful when a session happened; storing it
       // otherwise would leave stray answers from a field the rep then hid.
+      // students_attended is the one exception — see below.
       session_topic: session ? input.session_topic : null,
       session_class: session ? input.session_class : null,
       session_streams: session ? input.session_streams : null,
-      students_attended: session ? input.students_attended : null,
+      // Kept for a session OR a campus visit — the one field both fill in.
+      students_attended: counted ? input.students_attended : null,
       session_duration_mins: session ? input.session_duration_mins : null,
       other_faculty_present: session ? input.other_faculty_present : null,
       other_faculty_count: session ? input.other_faculty_count : null,
       session_participation: session ? input.session_participation : null,
       student_questions: session ? input.student_questions : null,
-      // students_reached is a session number, kept only when a session happened,
-      // exactly like students_attended above.
+      // students_reached stays a session number — "how many the visit put the
+      // message in front of" has no meaning for a campus tour, so unlike
+      // students_attended above it is not shared.
       students_reached: session ? input.students_reached : null,
 
       student_response: input.student_response,
