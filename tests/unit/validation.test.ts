@@ -179,7 +179,6 @@ describe("targetsSchema", () => {
     olympiad: "",
     application: "",
     admission: "",
-    institutes_covered: "",
   };
 
   it("reads an empty box as zero", () => {

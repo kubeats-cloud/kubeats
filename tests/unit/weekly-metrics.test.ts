@@ -29,30 +29,25 @@ describe("Rule 7 — where each metric is counted from", () => {
   });
 
   it("declares where every metric's achieved figure comes from", () => {
-    // Three sources, not two. meetings comes from the daily plan (Rule 7),
-    // institutes_covered is a DISTINCT count that tallyVisitMetrics cannot
-    // produce, and the other seven are counts of matching visit rows.
+    // Two sources. meetings comes from the daily plan (Rule 7); the other
+    // seven are counts of matching visit rows.
     const sources = Object.fromEntries(METRICS.map((m) => [m.key, m.source]));
 
     expect(sources.meetings).toBe("plan");
-    expect(sources.institutes_covered).toBe("distinct-institutes");
 
-    for (const metric of METRICS.filter(
-      (m) => m.key !== "meetings" && m.key !== "institutes_covered",
-    )) {
+    for (const metric of METRICS.filter((m) => m.key !== "meetings")) {
       expect(metric.source, metric.key).toBe("visits");
     }
   });
 
-  it("never lets tallyVisitMetrics fill in the two it does not own", () => {
-    // Both are the caller's job. A bug that quietly counted them from the
+  it("never lets tallyVisitMetrics fill in the one it does not own", () => {
+    // Meetings are the caller's job. A bug that quietly counted them from the
     // visits log would be invisible in the UI, so it is asserted here.
     const tallied = tallyVisitMetrics([
       { activity: "olympiad", lifecycle_status: null },
       { activity: "meeting", lifecycle_status: null },
     ]);
     expect(tallied.meetings).toBe(0);
-    expect(tallied.institutes_covered).toBe(0);
   });
 
   it("splits sessions and campus visits by lifecycle", () => {

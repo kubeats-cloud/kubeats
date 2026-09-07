@@ -20,11 +20,6 @@ import {
  * period covers. periods.ts owns that range, including the weekly case's
  * deliberate Sunday end, so a Sunday still folds into the week that just ended.
  *
- * institutes_covered is the exception to "count the rows": it is the number of
- * DISTINCT institutes reached, so four visits to one school count once. It is
- * filled in here rather than by tallyVisitMetrics() for the same reason
- * `meetings` is — that function counts matching rows and cannot express it.
- *
  * Every read is scoped by RLS: a rep's queries return only their own rows, an
  * admin's return the team's. The member filters below are for correctness of
  * the answer, not for security.
@@ -97,13 +92,14 @@ function toRecord(row: RawRow): TargetRecord {
   };
 }
 
-/** A visit row as the achieved-count queries select it. */
-type CountableVisit = TallyableVisit & { institute_id: string };
-
-function achievedFrom(visits: CountableVisit[], meetingsHeld: number): MetricCounts {
+/**
+ * Rule 7 in one place: the visits log fills in seven metrics, and the daily
+ * plan fills in the eighth. Meetings are overwritten rather than tallied
+ * because tallyVisitMetrics() deliberately refuses to count them.
+ */
+function achievedFrom(visits: TallyableVisit[], meetingsHeld: number): MetricCounts {
   const achieved = tallyVisitMetrics(visits);
   achieved.meetings = meetingsHeld;
-  achieved.institutes_covered = new Set(visits.map((v) => v.institute_id)).size;
   return achieved;
 }
 
@@ -137,7 +133,7 @@ export async function getTargets(
       .lte("date", end),
     supabase
       .from("visits")
-      .select("member, activity, lifecycle_status, institute_id")
+      .select("member, activity, lifecycle_status")
       .eq("member", memberId)
       .gte("date", start)
       .lte("date", end),
@@ -163,7 +159,7 @@ export async function getTargets(
         ? toRecord(targetsResult.data as unknown as RawRow)
         : emptyRecord(memberId, period, periodStart),
       achieved: achievedFrom(
-        (visitsResult.data ?? []) as CountableVisit[],
+        (visitsResult.data ?? []) as TallyableVisit[],
         plansResult.count ?? 0,
       ),
     },
@@ -210,7 +206,7 @@ export async function getTeamTargets(
         .lte("date", end),
       supabase
         .from("visits")
-        .select("member, activity, lifecycle_status, institute_id")
+        .select("member, activity, lifecycle_status")
         .gte("date", start)
         .lte("date", end),
     ]);
@@ -237,8 +233,8 @@ export async function getTeamTargets(
     heldByMember.set(row.member, (heldByMember.get(row.member) ?? 0) + 1);
   }
 
-  const visitsByMember = new Map<string, CountableVisit[]>();
-  for (const row of (visitsResult.data ?? []) as (CountableVisit & {
+  const visitsByMember = new Map<string, TallyableVisit[]>();
+  for (const row of (visitsResult.data ?? []) as (TallyableVisit & {
     member: string;
   })[]) {
     const list = visitsByMember.get(row.member);

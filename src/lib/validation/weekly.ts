@@ -2,14 +2,28 @@ import { z } from "zod";
 import { TARGET_PERIODS, periodStartOf } from "@/lib/periods";
 
 /**
- * The eight weekly metrics, and — the part that actually matters — where each
- * one's ACHIEVED figure is counted from.
+ * The eight metrics, and — the part that actually matters — where each one's
+ * ACHIEVED figure is counted from.
  *
  * Rule 7: Meetings are counted from the daily plan, not from the visits log.
  * A meeting only counts once the plan entry it belongs to is marked held, which
  * is what the meeting gate guarantees. The other seven are counted from visits.
  * Keeping the source in the same table as the label means the Weekly screen and
  * the Dashboard can never disagree about what a number means.
+ *
+ * There were briefly nine. Migration 0013 added `institutes_covered` — a count
+ * of DISTINCT institutes rather than of rows — and the client has since asked
+ * for it off the Targets screen. It is gone from here, so the app neither asks
+ * a rep to commit to it nor writes it, but **the column still exists** on
+ * public.targets, carrying the numbers reps already committed. That is
+ * deliberate: dropping it is the one part of this change that could not be
+ * undone, and 0013 itself set the precedent by renaming weekly_targets aside
+ * rather than dropping it. Re-adding the metric is this entry restored:
+ *
+ *   { key: "institutes_covered", label: "Institutes Covered",
+ *     source: "distinct-institutes" }
+ *
+ * plus its line in `targetsSchema` and the DISTINCT count in targets.ts.
  */
 export const METRICS = [
   { key: "meetings", label: "Meetings", source: "plan" },
@@ -61,19 +75,6 @@ export const METRICS = [
     source: "visits",
     activity: "admission",
     lifecycle: null,
-  },
-  /**
-   * The ninth metric, and the only one that is not a count of rows.
-   *
-   * "Covered" means distinct institutes reached in the period, so four visits
-   * to one school count once. tallyVisitMetrics() cannot produce it — that
-   * function counts matching rows — so it carries its own source and is filled
-   * in by the caller, exactly as `meetings` is.
-   */
-  {
-    key: "institutes_covered",
-    label: "Institutes Covered",
-    source: "distinct-institutes",
   },
 ] as const;
 
@@ -278,7 +279,6 @@ export const targetsSchema = z
     olympiad: count,
     application: count,
     admission: count,
-    institutes_covered: count,
   })
   .superRefine((value, ctx) => {
     if (periodStartOf(value.period, value.period_start) !== value.period_start) {

@@ -193,9 +193,25 @@ describe("remaining and progressStatus", () => {
 });
 
 describe("the metric set", () => {
-  it("carries the ninth metric the targets table has a column for", () => {
-    expect(METRIC_KEYS).toContain("institutes_covered");
-    expect(METRIC_KEYS).toHaveLength(9);
+  it("is the eight the Targets screen commits to", () => {
+    expect(METRIC_KEYS).toEqual([
+      "meetings",
+      "sessions_set",
+      "sessions_done",
+      "campus_visits_set",
+      "campus_visits_done",
+      "olympiad",
+      "application",
+      "admission",
+    ]);
+  });
+
+  it("no longer carries institutes_covered", () => {
+    // The client asked for it off the screen. The COLUMN is still on
+    // public.targets, holding what reps already committed — see the note at the
+    // top of validation/weekly.ts — but nothing here writes or reads it, so a
+    // re-add has to be deliberate rather than a stray string in a select list.
+    expect(METRIC_KEYS as readonly string[]).not.toContain("institutes_covered");
   });
 });
 

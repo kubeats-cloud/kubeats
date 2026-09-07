@@ -67,7 +67,7 @@ function periodsAhead(period: TargetPeriod, periodStart: string): number {
 }
 
 /**
- * Saves the nine numbers, either as a working draft or as the final
+ * Saves the eight numbers, either as a working draft or as the final
  * commitment. `locked` is never sent as false on an existing row — that is
  * reopening, which is an admin's action and lives below.
  */

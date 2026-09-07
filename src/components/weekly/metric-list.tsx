@@ -4,7 +4,7 @@ import { EmptyState } from "@/components/states";
 import { METRICS, type MetricCounts } from "@/lib/validation/weekly";
 
 /**
- * All nine metrics, read-only: the rep's Dashboard summary and the admin's
+ * All eight metrics, read-only: the rep's Dashboard summary and the admin's
  * drill-in both show exactly this, so neither can drift from the Targets tab.
  */
 export function MetricList({

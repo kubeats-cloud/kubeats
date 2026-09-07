@@ -31,7 +31,7 @@ import {
 /**
  * The rep's commitment for one period — a day, a week or a month.
  *
- * The nine numbers are the promise; the bars underneath are what has actually
+ * The eight numbers are the promise; the bars underneath are what has actually
  * happened, and they update as the rep types, so the size of a commitment is
  * felt against real progress rather than typed into a vacuum.
  *
