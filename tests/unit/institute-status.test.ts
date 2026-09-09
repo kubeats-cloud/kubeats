@@ -11,11 +11,7 @@ import {
   statusCategory,
   statusesInCategory,
 } from "@/lib/validation/institute";
-import {
-  followUpHidden,
-  followUpRequired,
-  visitSchema,
-} from "@/lib/validation/visit";
+import { followUpRequired, visitSchema } from "@/lib/validation/visit";
 
 /**
  * Rule 4's vocabulary and the open/closed category that features C and D will
@@ -47,11 +43,26 @@ const EXPECTED: Record<string, "open" | "closed"> = {
  * demand a follow-up. What the two required ones share is that they wait on
  * someone else's answer with nothing scheduled to bring them back.
  */
-const EXPECTED_FOLLOW_UP: Record<string, "hidden" | "required" | "optional"> = {
-  "First meeting done": "optional",
-  "Session scheduled": "hidden",
+/**
+ * Rule 5 as stage 3 restates it: an OPEN status needs a follow-up, a CLOSED one
+ * does not.
+ *
+ * The old table had a third state, "hidden" — the two "scheduled" statuses
+ * FORBADE a follow-up, because they carried their own expected date. Stage 3
+ * reversed exactly that: "next session set" IS "Session scheduled", and it is
+ * now the case that most demands a date and a time. Migration 0018 drops the
+ * constraint that said otherwise.
+ *
+ * Still written out by hand rather than derived from the catalogue. A test that
+ * maps over the source it is testing only proves the source is self-consistent;
+ * this one fails if a category is quietly flipped, which is the mistake worth
+ * catching.
+ */
+const EXPECTED_FOLLOW_UP: Record<string, "required" | "optional"> = {
+  "First meeting done": "required",
+  "Session scheduled": "required",
   "Session done": "optional",
-  "Campus visit scheduled": "hidden",
+  "Campus visit scheduled": "required",
   "Campus visit done": "optional",
   "Pending for management approval": "required",
   "Invited principal for event": "required",
@@ -62,7 +73,9 @@ const EXPECTED_FOLLOW_UP: Record<string, "hidden" | "required" | "optional"> = {
 const baseVisit = {
   activity: "olympiad",
   institute_id: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-  daily_plan_id: null,
+  // Stage 3: EVERY activity is logged from a check-in now, so the schema
+  // wants the plan row that arrival belongs to — not just meetings.
+  daily_plan_id: "3f2504e0-4f89-11d3-9a0c-0305e82c3399",
   lifecycle_status: "",
   expected_date: "",
   latitude: "",
@@ -143,14 +156,27 @@ describe("statusCategory", () => {
 describe("Rule 5, with the three new statuses folded in", () => {
   it("gives every one of the nine the follow-up rule the spec asks for", () => {
     for (const status of INSTITUTE_STATUSES) {
-      const expected = EXPECTED_FOLLOW_UP[status];
-      expect(followUpHidden(status), `${status} hidden`).toBe(
-        expected === "hidden",
-      );
       expect(followUpRequired(status), `${status} required`).toBe(
-        expected === "required",
+        EXPECTED_FOLLOW_UP[status] === "required",
       );
     }
+  });
+
+  it("requires a follow-up for exactly the OPEN statuses, and no others", () => {
+    // The rule and the category are the same question now, which is the whole
+    // point of asking isOpenStatus() rather than keeping a second list.
+    for (const status of INSTITUTE_STATUSES) {
+      expect(followUpRequired(status), status).toBe(isOpenStatus(status));
+    }
+    expect(followUpRequired(null)).toBe(false);
+  });
+
+  it("no longer FORBIDS a follow-up on the two scheduled statuses", () => {
+    // The reversal, asserted directly. These two used to be "hidden" — a
+    // follow-up on them was refused by visits_follow_up_hidden_when_scheduled,
+    // which 0018 drops. They are now the statuses that most need one.
+    expect(followUpRequired("Session scheduled")).toBe(true);
+    expect(followUpRequired("Campus visit scheduled")).toBe(true);
   });
 
   it("requires a chase date for an invitation, as it does for approval", () => {
@@ -158,23 +184,26 @@ describe("Rule 5, with the three new statuses folded in", () => {
     expect(followUpRequired("Pending for management approval")).toBe(true);
   });
 
-  it("never both hides and requires the same status", () => {
+  it("never requires a follow-up on a closed status", () => {
+    // A closed status may still CARRY one — "they said no, ask again next
+    // intake" is a real note, and 0010 kept it permitted on purpose — but it
+    // is never demanded.
     for (const status of INSTITUTE_STATUSES) {
-      expect(followUpHidden(status) && followUpRequired(status), status).toBe(
-        false,
-      );
+      if (!isOpenStatus(status)) {
+        expect(followUpRequired(status), status).toBe(false);
+      }
     }
   });
 
   it("leaves the two closed statuses optional", () => {
+    // Permitted, never demanded — 0010 kept a follow-up legal on a closed
+    // status so "they said no, ask again next intake" can still be recorded.
     for (const status of ["RSVP received", "Will not come"]) {
-      expect(followUpHidden(status), status).toBe(false);
       expect(followUpRequired(status), status).toBe(false);
     }
   });
 
   it("asks nothing of a visit that changes no status", () => {
-    expect(followUpHidden(null)).toBe(false);
     expect(followUpRequired(null)).toBe(false);
   });
 });
@@ -185,9 +214,10 @@ describe("visitSchema accepts the widened vocabulary", () => {
       const result = visitSchema.safeParse({
         ...baseVisit,
         status_set_to: status,
-        // The one status that demands a date; supplying it here keeps this
-        // test about the vocabulary rather than about Rule 5.
+        // The open statuses demand a date AND a time; supplying both here
+        // keeps this test about the vocabulary rather than about Rule 5.
         follow_up_date: followUpRequired(status) ? "2026-09-30" : "",
+        follow_up_time: followUpRequired(status) ? "10:30" : "",
       });
       expect(result.success, `${status}: ${result.error?.message}`).toBe(true);
     }
@@ -202,7 +232,7 @@ describe("visitSchema accepts the widened vocabulary", () => {
     if (!result.success) {
       const issue = result.error.issues.find((i) => i.path[0] === "follow_up_date");
       expect(issue?.message).toBe(
-        'A follow-up date is required for "Invited principal for event".',
+        '"Invited principal for event" leaves this open, so a follow-up date is needed.',
       );
     }
   });
@@ -212,6 +242,7 @@ describe("visitSchema accepts the widened vocabulary", () => {
       ...baseVisit,
       status_set_to: "Invited principal for event",
       follow_up_date: "2026-09-20",
+      follow_up_time: "11:00",
     });
     expect(result.success).toBe(true);
   });
@@ -227,7 +258,7 @@ describe("visitSchema accepts the widened vocabulary", () => {
     if (!result.success) {
       const issue = result.error.issues.find((i) => i.path[0] === "follow_up_date");
       expect(issue?.message).toBe(
-        'A follow-up date is required for "Pending for management approval".',
+        '"Pending for management approval" leaves this open, so a follow-up date is needed.',
       );
     }
   });

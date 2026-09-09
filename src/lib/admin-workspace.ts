@@ -55,7 +55,7 @@ export interface VisitFilters {
  * trap that has caught this codebase before.
  */
 const VISIT_SELECT =
-  "id, date, activity, lifecycle_status, status_set_to, notes, reported_at, visit_outcome, photo_url, member, institute_id, profiles!visits_member_fkey(name), institutes(name, city)";
+  "id, date, activity, lifecycle_status, status_set_to, notes, reported_at, visit_outcome, institute_interested, photo_url, member, institute_id, profiles!visits_member_fkey(name), institutes(name, city)";
 
 interface RawVisit {
   id: string;
@@ -66,6 +66,7 @@ interface RawVisit {
   notes: string | null;
   reported_at: string | null;
   visit_outcome: string | null;
+  institute_interested: boolean | null;
   photo_url: string | null;
   member: string;
   institute_id: string;
@@ -122,7 +123,26 @@ export async function listTeamVisits(
       status: row.status_set_to,
       notes: row.notes,
       reportedAt: row.reported_at,
-      outcome: row.visit_outcome,
+      /**
+       * The Outcome column, which had to change hands.
+       *
+       * It read `visit_outcome` — a field the short form dropped — so every
+       * visit filed under stage 3 would have shown a dash for ever, in the one
+       * column an admin scans down.
+       *
+       * BOTH are read rather than only the new one. A visit filed before stage
+       * 3 has a visit_outcome and no institute_interested; one filed after has
+       * the reverse; and dropping the old value would have blanked the column
+       * backwards through the whole history to fix it going forwards. The new
+       * answer wins where both somehow exist, because it is the one the form
+       * still asks for.
+       */
+      outcome:
+        row.institute_interested === null
+          ? row.visit_outcome
+          : row.institute_interested
+            ? "Interested"
+            : "Not interested",
       memberId: row.member,
       memberName: row.profiles?.name ?? "Unknown",
       instituteId: row.institute_id,
@@ -133,6 +153,23 @@ export async function listTeamVisits(
   };
 }
 
+/**
+ * A visit somebody is still inside.
+ *
+ * Shown to an admin so a rep whose flow was orphaned can be unblocked the same
+ * day rather than waiting for the 01:30 sweep — with one-open-visit-at-a-time,
+ * an orphan stops that rep working anywhere.
+ */
+export interface OpenCheckIn {
+  planId: string;
+  memberName: string;
+  instituteName: string;
+  checkinAt: string;
+  /** Older than today, so almost certainly orphaned rather than in progress. */
+  stale: boolean;
+  locationManual: boolean;
+}
+
 export interface Overview {
   visitsToday: number;
   visitsThisWeek: number;
@@ -140,6 +177,7 @@ export interface Overview {
   photosThisWeek: number;
   openLoops: number;
   activeToday: { id: string; name: string; visits: number }[];
+  openCheckIns: OpenCheckIn[];
   recent: VisitRow[];
 }
 
@@ -165,7 +203,7 @@ export async function getOverview(): Promise<
     return supabase.from("visits").select("id", { count: "exact", head: true });
   }
 
-  const [todayCount, weekCount, reported, photos, loops, recent, actives] =
+  const [todayCount, weekCount, reported, photos, loops, recent, actives, openIns] =
     await Promise.all([
       countOf((q) => q.eq("date", today)),
       countOf((q) => q.gte("date", weekStart).lte("date", weekEnd)),
@@ -181,6 +219,18 @@ export async function getOverview(): Promise<
         .from("visits")
         .select("member, profiles!visits_member_fkey(name)")
         .eq("date", today),
+      // Everyone currently inside a visit. The predicate is the same one
+      // daily_plans_one_open_visit indexes, so this asks exactly the question
+      // that decides whether a rep is blocked.
+      supabase
+        .from("daily_plans")
+        .select(
+          "id, date, checkin_at, checkin_location_manual, profiles!daily_plans_member_fkey(name), institutes(name)",
+        )
+        .not("checkin_at", "is", null)
+        .is("checkout_at", null)
+        .eq("checkout_missing", false)
+        .order("checkin_at", { ascending: true }),
     ]);
 
   if (todayCount.error || weekCount.error || !recent.ok) {
@@ -205,6 +255,24 @@ export async function getOverview(): Promise<
       });
   }
 
+  const openCheckIns: OpenCheckIn[] = (
+    (openIns.data ?? []) as unknown as {
+      id: string;
+      date: string;
+      checkin_at: string;
+      checkin_location_manual: boolean | null;
+      profiles: { name: string | null } | null;
+      institutes: { name: string | null } | null;
+    }[]
+  ).map((row) => ({
+    planId: row.id,
+    memberName: row.profiles?.name ?? "Unknown",
+    instituteName: row.institutes?.name ?? "Unknown institute",
+    checkinAt: row.checkin_at,
+    stale: row.date < today,
+    locationManual: row.checkin_location_manual ?? false,
+  }));
+
   return {
     ok: true,
     data: {
@@ -214,6 +282,7 @@ export async function getOverview(): Promise<
       photosThisWeek: photos.count ?? 0,
       openLoops: loops.count ?? 0,
       activeToday: [...tally.values()].sort((a, b) => b.visits - a.visits),
+      openCheckIns,
       recent: recent.visits.slice(0, 8),
     },
   };

@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { SectionTitle } from "@/components/section-title";
+import { OpenCheckIns } from "@/components/admin/open-checkins";
 import { EmptyState } from "@/components/states";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import type { Overview as OverviewData } from "@/lib/admin-workspace";
@@ -33,6 +34,8 @@ import { formatDate } from "@/lib/dates";
  * analysis.
  */
 export function AdminOverview({ data }: { data: OverviewData }) {
+  const stuck = data.openCheckIns.filter((v) => v.stale).length;
+
   return (
     <>
       <SectionTitle>Today and this week</SectionTitle>
@@ -136,6 +139,20 @@ export function AdminOverview({ data }: { data: OverviewData }) {
                 ))}
               </Card>
             )}
+          </div>
+
+          {/* Placed directly under "Out today", because they answer the same
+              question a minute apart: who is out, and is anybody stuck. */}
+          <div>
+            <SectionTitle>
+              Still checked in
+              {stuck > 0 && (
+                <Badge variant="danger" className="ml-2">
+                  {stuck} stuck
+                </Badge>
+              )}
+            </SectionTitle>
+            <OpenCheckIns visits={data.openCheckIns} />
           </div>
 
           <div>

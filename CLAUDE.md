@@ -131,8 +131,8 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2826
-KiB** — about 246 KiB, 8% spare. The budget is real: measure before adding
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2875
+KiB** — about 197 KiB, 6.4% spare. The budget is real: measure before adding
 anything sizable, and re-measure rather than trusting this line. It has been
 wrong before, in both directions — it read 2949 for a while after the figure it
 described had already moved, which is how a stale number becomes a wrong
@@ -173,19 +173,40 @@ already claimed the easy 0.9 MiB between them; see README for both.
   itself refuses to apply if its lookup table and its two CHECK constraints
   disagree. Nothing may decide open-vs-closed for itself; ask one of those two.
   Note that null is neither open nor closed: "no status yet" is its own thing.
-- Rule 5's "required" list is not the same as the open category, and must not be
-  collapsed into it: only "Pending for management approval" and "Invited
-  principal for event" demand a follow-up date, because those two wait on
-  someone else's answer with nothing scheduled to bring them back. It is
-  `FOLLOW_UP_REQUIRED_FOR` in `src/lib/validation/visit.ts` and the
-  `visits_follow_up_required_when_awaiting` CHECK — renamed in 0010 from 0001's
-  `visits_follow_up_required_for_approval`, which stopped being true once it
-  covered a second status.
+- **Rule 5 IS the open category now**, which is the reverse of what this said
+  through stage 2. An OPEN status needs a follow-up date **and time**; a CLOSED
+  one does not (though it may still carry one — "they said no, ask again next
+  intake" is a real note). `followUpRequired()` asks `isOpenStatus()` and
+  `enforce_follow_up_when_open()` (0018) asks
+  `public.institute_status_is_open()`, so neither side keeps its own list and
+  they cannot drift. It is a TRIGGER rather than a CHECK because two of the
+  three live visits carried an open status with no follow-up time and a
+  constraint would have refused to build.
+  0001's `visits_follow_up_hidden_when_scheduled` — which FORBADE a follow-up
+  on the two "scheduled" statuses — is **dropped** by 0018. "Next session set"
+  *is* "Session scheduled", so the old rule and the new one were opposites.
+  0010's `visits_follow_up_required_when_awaiting` CHECK stays: both its
+  statuses are open, so it is a strict subset, kept so dropping the trigger
+  could not silently lose it.
 - Every visit must carry a photo (Rule 12, migration 0006). The rule is stated
   three times on purpose: the shared zod schema, `log_visit()` raising `FO007`,
   and the `visits_photo_required` CHECK, which is the one that holds against a
-  direct insert. The geo-tag beside it is deliberately NOT required — a denied
-  GPS permission still saves, because a rep with no signal must not be stuck.
+  direct insert.
+- **A check-in needs a location, or the rep's reason for not having one.** This
+  reverses the never-block rule 0014 and 0015 both state at length, and it is
+  the sharpest reversal in the redesign. What it is not is a wall: GPS fails →
+  the rep types why → the arrival saves with `checkin_location_manual` true and
+  their words in `checkin_manual_reason`, both shown to admins. A logged escape,
+  never a silent one. `enforce_checkin_located()` raises `FO012`; the columns
+  stay nullable because one row predates the rule and because the escape is
+  real. A POOR fix still warns and never blocks — blocking on accuracy would
+  strand a rep in a staff room, and with one-visit-at-a-time that ends their day.
+- **The presence guarantee covers every activity**, not just meetings. 0014
+  exempted sessions, campus visits and the one-shots because "they do not run
+  off the daily plan"; every visit runs off it now. `enforce_checkin_before_visit()`
+  replaces `enforce_checkin_before_meeting()` under the same trigger name and
+  the same `FO009`. `enforce_meeting_gate()` is untouched and still separate —
+  0014 insisted on two triggers so dropping either leaves the other standing.
 - The photo arrives one of two ways, both in `CaptureFields`: the in-app camera
   (`getUserMedia`, rear-facing by default, in `camera-capture.tsx`) or a file
   from the device. Whichever it is, the coordinates stamped into the image are
@@ -210,14 +231,37 @@ already claimed the easy 0.9 MiB between them; see README for both.
   Written as "any change at all" rather than "any change after `closed_at`" on
   purpose: a meeting never gets a `closed_at`, so the narrower rule would leave
   every meeting's evidence editable forever.
-- Week figures are ALWAYS live. They are recomputed from `daily_plans` and
-  `visits` on every read, so closing an old "Set" loop moves that row from
-  Sessions Set to Sessions Done in the week it was originally logged. Nothing
-  is ever a frozen historical record, and any later reporting that needs a
-  fixed snapshot has to take one itself. (This used to be phrased around the
-  weekly lock — "a locked week freezes the committed targets, nothing else".
-  The commitment is gone; the live-recomputation half is unchanged and is the
-  part that was ever load-bearing.)
+- Week figures are ALWAYS live: recomputed from `daily_plans` and `visits` on
+  every read, never a frozen snapshot. Any reporting that needs one has to take
+  it itself.
+- **Closing a "Set" no longer moves it.** It used to: one row flipped Set →
+  Done, so a session set in week 1 and held in week 3 counted as *Done in week
+  1*. Stage 3 closes a loop by VISITING AGAIN — check in, log the visit that
+  completes it — so there are two rows. The completing row carries
+  `closes_visit_id`; the Set row keeps `lifecycle_status = 'Set'` and only gains
+  a `closed_at`. Week 1 keeps its Sessions Set, week 3 earns its Sessions Done,
+  and each week is credited with what happened in it.
+  This is load-bearing arithmetic, not bookkeeping: flipping the row would have
+  moved the credit **and** let the new row count as a second Done. Pending and
+  the open-loops tile therefore both read `lifecycle_status = 'Set' AND
+  closed_at IS NULL` — `getPendingVisits()` **and** `openLoopsByMember()`; miss
+  the second and the tile never comes down.
+- **Pending is a read-only notice board.** Nothing is closed from it, by anyone.
+  Filing happens inside the visit: submitting the short feedback form calls
+  `close_visit()`, which writes the report, closes any earlier Set and stamps
+  the check-out in one transaction. There is no check-out button and no rep-facing
+  "abandon" — a visit nobody can finish is swept overnight by
+  `sweep_open_checkins()` into the same "closed, time not recorded" state the
+  old escape valve used.
+- **`checkout_missing` is an admin's to set, never a rep's.** Deleting the rep's
+  "close without check-out" button did not close the API path behind it —
+  `daily_plans_update` is `member = auth.uid() or is_admin()`, so a rep could
+  have set the column by hand. `guard_checkout_missing()` (FO020) is what
+  actually removes the abandon button, and it stamps `checkout_closed_by` /
+  `checkout_closed_at` itself rather than trusting a client. A null `_by` with a
+  set `_at` means the nightly sweep did it; a name means an admin did, from the
+  "Still checked in" panel on Overview — the same-day unblock for a rep whose
+  visit was orphaned, since one open visit stops them working anywhere.
 - A week runs Monday to Saturday for reporting, but counts Monday through
   Sunday: a Sunday's work folds into the week that just ended rather than
   falling out of every total. `weekEnd()` is the Saturday shown to the rep;

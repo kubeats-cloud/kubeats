@@ -70,6 +70,12 @@ export interface PlannedVisit {
   checkinLat: number | null;
   checkinLng: number | null;
   checkinAccuracy: number | null;
+  /**
+   * #6 — this arrival had no device position and the rep said why.
+   * Surfaced to admins because an override nobody can see is a bypass.
+   */
+  checkinLocationManual: boolean;
+  checkinManualReason: string | null;
   /** Approximate area for the check-in position, from the shared place cache. */
   checkinArea: string | null;
   checkoutAt: string | null;
@@ -143,6 +149,8 @@ interface RawPlan {
   checkin_lat: number | null;
   checkin_lng: number | null;
   checkin_accuracy: number | null;
+  checkin_location_manual: boolean | null;
+  checkin_manual_reason: string | null;
   checkout_at: string | null;
   checkout_lat: number | null;
   checkout_lng: number | null;
@@ -203,7 +211,7 @@ export async function getActivityReport(
     supabase
       .from("daily_plans")
       .select(
-        "id, date, purpose, institute_id, checkin_at, checkin_lat, checkin_lng, checkin_accuracy, checkout_at, checkout_lat, checkout_lng, checkout_accuracy, checkout_missing, institutes(name)",
+        "id, date, purpose, institute_id, checkin_at, checkin_lat, checkin_lng, checkin_accuracy, checkin_location_manual, checkin_manual_reason, checkout_at, checkout_lat, checkout_lng, checkout_accuracy, checkout_missing, institutes(name)",
       )
       .eq("member", memberId)
       .gte("date", start)
@@ -318,6 +326,8 @@ export async function getActivityReport(
         checkinLat: plan.checkin_lat,
         checkinLng: plan.checkin_lng,
         checkinAccuracy: plan.checkin_accuracy,
+        checkinLocationManual: plan.checkin_location_manual ?? false,
+        checkinManualReason: plan.checkin_manual_reason ?? null,
         checkinArea: areaAt(plan.checkin_lat, plan.checkin_lng),
         checkoutAt: plan.checkout_at,
         checkoutLat: plan.checkout_lat,

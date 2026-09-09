@@ -11,7 +11,9 @@ import { newMemberSchema } from "@/lib/validation/admin";
 const baseVisit = {
   activity: "olympiad",
   institute_id: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-  daily_plan_id: null,
+  // Stage 3: EVERY activity is logged from a check-in now, so the schema
+  // wants the plan row that arrival belongs to — not just meetings.
+  daily_plan_id: "3f2504e0-4f89-11d3-9a0c-0305e82c3399",
   lifecycle_status: "",
   expected_date: "",
   latitude: "",
@@ -86,9 +88,19 @@ describe("visitSchema", () => {
     }
   });
 
-  it("refuses a meeting with no plan entry behind it (Rule 2)", () => {
-    const result = visitSchema.safeParse({ ...baseVisit, activity: "meeting" });
-    expect(result.success).toBe(false);
+  it("refuses ANY activity with no check-in behind it", () => {
+    // This used to be Rule 2's alone — only a meeting needed a plan row. Stage
+    // 3 widens the presence guarantee to every activity, so the schema does
+    // too, mirroring enforce_checkin_before_visit() in migration 0018.
+    for (const activity of ["meeting", "olympiad", "session"] as const) {
+      const result = visitSchema.safeParse({
+        ...baseVisit,
+        activity,
+        lifecycle_status: activity === "session" ? "Done" : "",
+        daily_plan_id: null,
+      });
+      expect(result.success, activity).toBe(false);
+    }
   });
 
   it("accepts a meeting that names its plan entry", () => {
@@ -134,27 +146,48 @@ describe("visitSchema", () => {
     ).toBe(true);
   });
 
-  it("requires a follow-up for a pending approval, and forbids one when scheduled (Rule 5)", () => {
+  it("requires a date AND a time for an open status (Rule 5, restated)", () => {
+    // Nothing at all — refused.
     expect(
       visitSchema.safeParse({
         ...baseVisit,
         status_set_to: "Pending for management approval",
       }).success,
     ).toBe(false);
+
+    // A date but no time — still refused. This is the half that is new: a
+    // date alone puts a loop in a day rather than in a diary.
     expect(
       visitSchema.safeParse({
         ...baseVisit,
         status_set_to: "Pending for management approval",
         follow_up_date: "2026-09-30",
       }).success,
+    ).toBe(false);
+
+    // Both — accepted.
+    expect(
+      visitSchema.safeParse({
+        ...baseVisit,
+        status_set_to: "Pending for management approval",
+        follow_up_date: "2026-09-30",
+        follow_up_time: "10:30",
+      }).success,
     ).toBe(true);
+  });
+
+  it("no longer FORBIDS a follow-up on a scheduled status", () => {
+    // The reversal. "Session scheduled" used to refuse a follow-up outright —
+    // visits_follow_up_hidden_when_scheduled, dropped by 0018 — and is now the
+    // case that most needs one, because "next session set" IS this status.
     expect(
       visitSchema.safeParse({
         ...baseVisit,
         status_set_to: "Session scheduled",
         follow_up_date: "2026-09-30",
+        follow_up_time: "10:30",
       }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("refuses coordinates outside the globe", () => {

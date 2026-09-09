@@ -5,23 +5,25 @@ import { notFound, redirect } from "next/navigation";
 import { ArrowLeftIcon, CheckCircle2Icon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { ClosingReportForm } from "@/components/visits/closing-report-form";
 import { ReportView } from "@/components/visits/report-view";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getVisitReport } from "@/lib/closing-report";
 import { activityLabelFor } from "@/lib/validation/visit";
-import { needsClosingReport } from "@/lib/validation/closing-report";
 
 export const metadata = { title: "Closing report" };
 
 /**
- * A visit's closing report — the Pending screen's detail view, the same way
- * /institutes/[id] belongs to Institutes. It is not a seventh tab: nothing
- * links to it but a visit, and the bottom bar is unchanged.
+ * A visit's report, READ ONLY — the Pending screen's detail view, the same way
+ * /institutes/[id] belongs to Institutes.
  *
- * Three states: fill it in (the owner, not yet filed), read it (already filed,
- * or an admin looking at someone else's), or nothing to see.
+ * It used to have a third state: the owner filling the report in. Stage 3 moved
+ * filing into the visit itself — check in, log, feedback, auto check-out — so
+ * there is nothing to submit here for anybody. What remains is reading one,
+ * which is what an admin always did with it.
+ *
+ * `report-view.tsx` skips an empty value, so a report filed under the old rich
+ * form still renders in full and one filed under the short form simply shows
+ * fewer rows.
  */
 export default async function ClosingReportPage(
   props: PageProps<"/pending/[id]">,
@@ -40,7 +42,6 @@ export default async function ClosingReportPage(
   if (!mine && !isAdmin(user)) notFound();
 
   const filed = Boolean(report.reported_at);
-  const canFile = mine && !filed && needsClosingReport(report.activity);
 
   const heading = report.institute?.name ?? "Visit";
   const subtitle = [
@@ -54,7 +55,7 @@ export default async function ClosingReportPage(
   return (
     <PageColumn>
       <PageHeader
-        eyebrow={filed ? "Filed report" : "Closing report"}
+        eyebrow={filed ? "Filed report" : "Not reported"}
         title={heading}
         description={subtitle}
         action={
@@ -67,43 +68,19 @@ export default async function ClosingReportPage(
         }
       />
 
-      {canFile ? (
-        <>
-          <Card className="mb-4">
-            <CardContent className="text-muted-foreground space-y-1 text-sm">
-              <p>
-                {[report.institute?.area, report.institute?.city]
-                  .filter(Boolean)
-                  .join(", ") || "Location on file"}
-                {report.institute?.boards?.length
-                  ? ` · ${report.institute.boards.join(", ")}`
-                  : ""}
-              </p>
-              <p>
-                {report.latitude !== null && report.longitude !== null
-                  ? `Logged at ${report.latitude.toFixed(4)}, ${report.longitude.toFixed(4)}`
-                  : "Logged without a location fix"}
-              </p>
-            </CardContent>
-          </Card>
-          <ClosingReportForm visit={report} />
-        </>
+      {filed ? (
+        <p className="bg-success-subtle text-success-subtle-foreground mb-4 flex items-center gap-2 rounded-md px-3 py-2 text-sm">
+          <CheckCircle2Icon className="size-4 shrink-0" aria-hidden />
+          Filed {formatDateTime(report.reported_at)}
+        </p>
       ) : (
-        <>
-          {filed && (
-            <p className="bg-success-subtle text-success-subtle-foreground mb-4 flex items-center gap-2 rounded-md px-3 py-2 text-sm">
-              <CheckCircle2Icon className="size-4 shrink-0" aria-hidden />
-              Filed {formatDateTime(report.reported_at)}
-            </p>
-          )}
-          {!filed && (
-            <p className="bg-neutral-subtle text-neutral-subtle-foreground mb-4 rounded-md px-3 py-2 text-sm">
-              No closing report has been filed for this visit yet.
-            </p>
-          )}
-          <ReportView report={report} />
-        </>
+        <p className="bg-neutral-subtle text-neutral-subtle-foreground mb-4 rounded-md px-3 py-2 text-sm">
+          {mine
+            ? "Not reported yet. Check in at this institute again and the visit that completes it will close this off."
+            : "No report has been filed for this visit yet."}
+        </p>
       )}
+      <ReportView report={report} />
     </PageColumn>
   );
 }

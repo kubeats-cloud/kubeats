@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { INSTITUTE_STATUSES } from "@/lib/validation/institute";
+import { INSTITUTE_STATUSES, isOpenStatus } from "@/lib/validation/institute";
 
 /**
  * The visit workflow's rules, in one place, shared by the browser and the
@@ -38,41 +38,90 @@ export function activityLabelFor(activity: string): string {
 }
 
 /**
- * Rule 5, as three predicates so the form and the schema cannot drift.
+ * Rule 5, as stage 3 restates it.
  *
- * The two "scheduled" statuses already carry their own expected date, so
- * asking for a follow-up as well would be asking the same question twice —
- * and the visits_follow_up_hidden_when_scheduled CHECK rejects it outright.
+ * THE OLD SHAPE IS GONE. It had two halves: a follow-up was REQUIRED for the
+ * two statuses waiting on someone else's answer, and FORBIDDEN for the two
+ * "scheduled" ones because those carry their own expected date. The second
+ * half was `FOLLOW_UP_HIDDEN_FOR` and the `visits_follow_up_hidden_when_scheduled`
+ * CHECK, and both are gone — migration 0018 drops the constraint.
+ *
+ * The new rule is one sentence: **an OPEN status needs a date and a time to
+ * chase on; a CLOSED one does not.** "Next session set" IS "Session scheduled",
+ * which the old rule forbade a follow-up on, so the two could not both stand.
+ *
+ * It asks `isOpenStatus()` rather than listing statuses, so this cannot drift
+ * from `INSTITUTE_STATUS_CATALOGUE`. The database asks the same question the
+ * same way: `enforce_follow_up_when_open()` calls
+ * `public.institute_status_is_open()`, which reads the lookup table 0010
+ * created. Neither side keeps its own copy of the list.
+ *
+ * A CLOSED status may still CARRY a follow-up — "they said no, ask again next
+ * intake" is a real note to leave, and 0010 kept it permitted on purpose.
  */
-export const FOLLOW_UP_HIDDEN_FOR = [
-  "Session scheduled",
-  "Campus visit scheduled",
-] as const;
+export function followUpRequired(status: string | null): boolean {
+  return isOpenStatus(status);
+}
 
 /**
- * The open loops that are waiting on someone else's answer.
+ * The two statuses 0010 singled out, kept only so their message can say WHY.
  *
- * Neither has anything scheduled that would bring it back on its own — no
- * session, no campus visit, no date in anyone's diary — so without a date to
- * chase on, both simply go quiet. That is what makes them different from the
- * other open statuses, and why these two alone demand a follow-up.
- *
- * Mirrored by the visits_follow_up_required_when_awaiting CHECK (migration
- * 0010), which is what actually holds against a direct insert.
+ * They are now a strict subset of the open set above, so this decides nothing —
+ * but `visits_follow_up_required_when_awaiting` is still installed, and a rep
+ * who trips it deserves the sentence that explains it rather than the generic
+ * one.
  */
 export const FOLLOW_UP_REQUIRED_FOR = [
   "Pending for management approval",
   "Invited principal for event",
 ] as const;
 
-export function followUpHidden(status: string | null): boolean {
-  return status !== null && (FOLLOW_UP_HIDDEN_FOR as readonly string[]).includes(status);
+/**
+ * Rule 3's dates: a "Set" session or campus visit is a promise about a future
+ * day, so it must name one.
+ */
+export function expectedDateRequired(
+  activity: string,
+  lifecycle: string | null,
+): boolean {
+  return hasLifecycle(activity) && lifecycle === "Set";
 }
 
-export function followUpRequired(status: string | null): boolean {
-  return (
-    status !== null && (FOLLOW_UP_REQUIRED_FOR as readonly string[]).includes(status)
-  );
+/* ------------------------------------------------------------------ */
+/* Purpose -> activity                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a planned purpose means in the visits log.
+ *
+ * The Dashboard plans a visit as institute + purpose, from the admin-managed
+ * `public.purposes` list. Stage 3 pre-fills Log Visit from that plan row, so
+ * something has to turn "Fix a session" into (session, Set).
+ *
+ * A LOOKUP ON THE LABEL, deliberately, and it is the weak point worth naming:
+ * `purposes` has no stable key, only an editable label, so renaming a purpose
+ * in Settings silently drops it out of this map. That is survivable rather
+ * than dangerous — an unmapped purpose falls through to `null` and the rep
+ * picks the activity by hand, which is exactly what "Other" does — but it is
+ * why the fallback is a real path and not an assertion.
+ */
+export const PURPOSE_ACTIVITY: Record<
+  string,
+  { activity: ActivityKey; lifecycle: "Set" | "Done" | null }
+> = {
+  "Fix a session": { activity: "session", lifecycle: "Set" },
+  "Complete a session": { activity: "session", lifecycle: "Done" },
+  "Fix a campus visit": { activity: "campus_visit", lifecycle: "Set" },
+  "Complete a campus visit": { activity: "campus_visit", lifecycle: "Done" },
+  // "Other" is deliberately absent: the rep picks.
+};
+
+/** What a purpose pre-fills, or null when the rep has to choose. */
+export function activityForPurpose(
+  purpose: string | null | undefined,
+): { activity: ActivityKey; lifecycle: "Set" | "Done" | null } | null {
+  if (!purpose) return null;
+  return PURPOSE_ACTIVITY[purpose.trim()] ?? null;
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -199,33 +248,41 @@ export const visitSchema = z
       });
     }
 
-    // Rule 2 — the gate. A meeting must be tied to a plan row for today.
-    if (value.activity === "meeting" && !value.daily_plan_id) {
+    // The presence guarantee, now for EVERY activity (stage 3).
+    //
+    // This used to apply to meetings alone, mirroring the trigger 0014
+    // installed. 0018 widens that trigger to every activity — a visit is only
+    // ever logged from a check-in now — so the schema widens with it. Without
+    // this the rep would reach the database and be refused there with FO009.
+    if (!value.daily_plan_id) {
       ctx.addIssue({
         code: "custom",
         path: ["daily_plan_id"],
         message:
-          "A meeting can only be logged for an institute on today's plan. Add it on the Dashboard first.",
+          "Check in at the institute before logging the visit. Start from the Dashboard.",
       });
     }
 
-    // Rule 5 — mirrors the two follow-up CHECK constraints.
-    if (followUpRequired(value.status_set_to) && !value.follow_up_date) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["follow_up_date"],
-        message: `A follow-up date is required for "${value.status_set_to}".`,
-      });
-    }
-    if (
-      followUpHidden(value.status_set_to) &&
-      (value.follow_up_date || value.follow_up_time)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["follow_up_date"],
-        message: "That status already carries its own expected date.",
-      });
+    // Rule 5 — an open status needs a date AND a time to chase on.
+    //
+    // Mirrors enforce_follow_up_when_open() in 0018, which asks the same
+    // question of the same lookup table. The old "forbidden when scheduled"
+    // half is gone: 0018 drops the constraint that stated it.
+    if (followUpRequired(value.status_set_to)) {
+      if (!value.follow_up_date) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["follow_up_date"],
+          message: `"${value.status_set_to}" leaves this open, so a follow-up date is needed.`,
+        });
+      }
+      if (!value.follow_up_time) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["follow_up_time"],
+          message: "And a time, so it lands in a diary rather than a day.",
+        });
+      }
     }
   });
 
