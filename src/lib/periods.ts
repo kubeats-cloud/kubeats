@@ -26,31 +26,30 @@ import { mondayOf, weekCountEnd, formatWeekRange, weekLabel } from "@/lib/weeks"
  * once. What differs is which periods a given screen offers:
  *
  *   PERIODS         all four — what the helpers here understand
- *   TARGET_PERIODS  daily and weekly — what a rep may be OFFERED. There is no
- *                   yearly target: nobody commits to a year of numbers in this
- *                   app. Monthly was withdrawn by the client (see
- *                   docs/flow-redesign-plan.md, change 5); the database still
- *                   accepts it, so a monthly row committed before this stays
- *                   readable rather than becoming invalid data.
  *   REPORT_PERIODS  daily, monthly, yearly — how the activity report is read.
  *                   No weekly, because month-and-year is how the client asked
  *                   to see history, and a fourth tab nobody uses is clutter.
- *                   Monthly stays HERE: the client withdrew the monthly
- *                   commitment, not the ability to read a month of history.
  *
- * Keeping them as separate lists over one union is what stops a yearly row
- * reaching the targets table, which the database would refuse anyway.
+ * THERE IS NO LONGER A TARGET_PERIODS.
  *
- * Note that TARGET_PERIODS is now NARROWER than targets_period_valid, which
- * still permits 'monthly'. That asymmetry is deliberate and is the whole
- * reason no migration was needed: the app stops offering a period, the
- * database stops nothing, and restoring the option later is this one list.
+ * It listed the periods a rep could commit to numbers for. Stage 2 of the
+ * redesign (docs/flow-redesign-plan.md, changes 3 and 4) ended commitment
+ * altogether: the daily target turned out to BE the daily plan and was merged
+ * into it, and the weekly screen became a read-only account of what was
+ * actually done. Nothing sets a target any more, so a list of periods you may
+ * set one for describes nothing.
+ *
+ * The database is untouched — public.targets still exists, still has its rows,
+ * and targets_period_valid still accepts all three periods. Reviving the
+ * feature means restoring this list and the screens that read it, not a
+ * migration. That is the whole reason it was removed from the app rather than
+ * from the schema.
+ *
+ * `weekly` is still a period here, and still the one the week summary counts
+ * over; it just is not a period anyone commits to.
  */
 export const PERIODS = ["daily", "weekly", "monthly", "yearly"] as const;
 export type Period = (typeof PERIODS)[number];
-
-export const TARGET_PERIODS = ["daily", "weekly"] as const;
-export type TargetPeriod = (typeof TARGET_PERIODS)[number];
 
 export const REPORT_PERIODS = ["daily", "monthly", "yearly"] as const;
 export type ReportPeriod = (typeof REPORT_PERIODS)[number];
@@ -72,12 +71,6 @@ export const PERIOD_NOUN: Record<Period, string> = {
 
 export function isPeriod(value: unknown): value is Period {
   return typeof value === "string" && (PERIODS as readonly string[]).includes(value);
-}
-
-export function isTargetPeriod(value: unknown): value is TargetPeriod {
-  return (
-    typeof value === "string" && (TARGET_PERIODS as readonly string[]).includes(value)
-  );
 }
 
 export function isReportPeriod(value: unknown): value is ReportPeriod {

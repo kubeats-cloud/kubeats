@@ -44,7 +44,13 @@ export const REP_NAV: NavItem[] = [
   { href: "/institutes", label: "Institutes", icon: "institutes" },
   { href: "/log", label: "Log Visit", icon: "log" },
   { href: "/pending", label: "Pending", icon: "pending" },
-  { href: "/targets", label: "Targets", icon: "weekly" },
+  // The ROUTE stays /targets and the label no longer says so, which is not an
+  // oversight. Stage 2 turned that screen from a commitment into a read-only
+  // account of the week (docs/flow-redesign-plan.md, change 4), so a tab
+  // reading "Targets" would name something the app no longer has. Renaming the
+  // route as well would break bookmarks and the /weekly redirect proxy.ts
+  // already serves, for nothing a rep would ever see.
+  { href: "/targets", label: "This week", icon: "weekly" },
   { href: "/materials", label: "Materials", icon: "materials" },
 ];
 

@@ -9,7 +9,7 @@ import { PeriodControls } from "@/components/weekly/period-controls";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getActivityReport } from "@/lib/activity-report";
 import { listReps } from "@/lib/closing-report";
-import { memberName } from "@/lib/targets";
+import { memberName } from "@/lib/week-summary";
 import {
   REPORT_PERIODS,
   isReportPeriod,

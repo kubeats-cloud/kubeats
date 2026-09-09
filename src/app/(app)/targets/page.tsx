@@ -6,87 +6,79 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
 import { MetricList } from "@/components/weekly/metric-list";
-import { PeriodControls } from "@/components/weekly/period-controls";
-import { ReopenButton } from "@/components/weekly/reopen-button";
-import { TargetsForm } from "@/components/weekly/targets-form";
+import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
-import { getTargets, memberName } from "@/lib/targets";
-import { completionPercent } from "@/lib/validation/weekly";
-import {
-  PERIOD_NOUN,
-  TARGET_PERIODS,
-  isTargetPeriod,
-  normalisePeriodStart,
-  type TargetPeriod,
-} from "@/lib/periods";
+import { getWeekSummary, memberName } from "@/lib/week-summary";
+import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
 
-export const metadata = { title: "Targets" };
+export const metadata = { title: "This week" };
 
 const first = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : undefined;
 
-export default async function TargetsPage(props: PageProps<"/targets">) {
+/**
+ * The week, read only.
+ *
+ * This screen used to be Targets: a rep committed to eight numbers for a day,
+ * a week or a month, submitted them, and an admin could reopen a locked week.
+ * Stage 2 of the redesign removed all of it (docs/flow-redesign-plan.md,
+ * changes 3 and 4) — the daily target turned out to be the daily plan and was
+ * merged into it, and the weekly commitment became this: what you actually did.
+ *
+ * The route is still /targets. Renaming it would break the bookmarks and the
+ * /weekly redirect that proxy.ts already serves, for no gain a rep would ever
+ * see — the tab is labelled from lib/nav.ts, and that is what they read.
+ *
+ * ?period= and ?start= are gone with the period switcher; ?week= is the
+ * parameter this screen has always shared with /team and the one the admin
+ * drill-in passes. An old ?start= link simply lands on the current week, which
+ * is the same graceful fallback the period switcher used to give.
+ */
+export default async function WeekPage(props: PageProps<"/targets">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
   const searchParams = await props.searchParams;
+  const weekStart = normaliseWeekParam(first(searchParams.week));
 
-  // Period and start both come from the URL. An unknown period falls back to
-  // weekly rather than erroring — that is the one this screen has always been,
-  // and a hand-edited URL should land somewhere sensible.
-  const periodParam = first(searchParams.period);
-  const period: TargetPeriod = isTargetPeriod(periodParam) ? periodParam : "weekly";
-  const periodStart = normalisePeriodStart(period, first(searchParams.start));
-
-  // An admin may look at one rep's targets; everyone else only ever sees their
+  // An admin may look at one rep's week; everyone else only ever sees their
   // own. Checked here as well as by RLS, so a rep hand-editing the URL simply
-  // lands back on their own numbers rather than on an error.
+  // lands back on their own figures rather than on an error.
   const requested = first(searchParams.member);
   const viewingOther = isAdmin(user) && !!requested && requested !== user.id;
   const memberId = viewingOther ? requested! : user.id;
 
   const [result, name] = await Promise.all([
-    getTargets(memberId, period, periodStart),
+    getWeekSummary(memberId, weekStart),
     viewingOther ? memberName(memberId) : Promise.resolve(user.name),
   ]);
+
+  const displayName = name ?? "this member";
 
   if (!result.ok) {
     return (
       <PageColumn>
-        <PageHeader title="Targets" description="Your commitment for the period." />
-        <ErrorState message="We could not load these targets. Please try again in a moment." />
+        <PageHeader title="This week" description="What was recorded this week." />
+        <ErrorState message="We could not load this week. Please try again in a moment." />
       </PageColumn>
     );
   }
-
-  const { record, achieved } = result.view;
-  const displayName = name ?? "this member";
-  const percent = completionPercent(achieved, record.targets);
-  const noun = PERIOD_NOUN[period];
 
   return (
     <PageColumn>
       <PageHeader
         eyebrow={viewingOther ? "Team member" : undefined}
-        title={viewingOther ? displayName : "Targets"}
+        title={viewingOther ? displayName : "This week"}
         description={
           viewingOther
-            ? `Their commitment for this ${noun}, and what they have achieved.`
-            : `Set what you are aiming for by day or week, and watch it fill in as you work.`
-        }
-        action={
-          percent !== null ? (
-            <div className="text-right">
-              <p className="text-2xl font-semibold tabular-nums">{percent}%</p>
-              <p className="text-muted-foreground text-xs">of commitment</p>
-            </div>
-          ) : undefined
+            ? "What they recorded this week."
+            : "What you have recorded this week. It fills in as you log visits."
         }
       />
 
-      {/* The screen about what you are aiming for is the natural place to ask
-          what you actually did. /report is out of the nav bar on purpose — see
-          lib/nav.ts — so this is how a rep reaches their own history. */}
+      {/* The screen about this week is the natural place to ask about the rest
+          of the history. /report is out of the nav bar on purpose — see
+          lib/nav.ts — so this is how a rep reaches their own. */}
       <Button asChild variant="outline" className="mb-4 h-11">
         <Link
           href={
@@ -102,55 +94,24 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
 
       {viewingOther && (
         <Button asChild variant="outline" className="mb-4 h-11">
-          <Link href="/">
+          <Link href="/team">
             <ArrowLeftIcon className="size-4" aria-hidden />
             Back to the team
           </Link>
         </Button>
       )}
 
-      <PeriodControls
-        period={period}
-        periodStart={periodStart}
-        options={TARGET_PERIODS}
+      <WeekNavigator
+        weekStart={weekStart}
+        basePath="/targets"
         member={viewingOther ? memberId : undefined}
       />
 
-      {viewingOther ? (
-        <div className="space-y-4">
-          <MetricList
-            title={record.locked ? "Submitted commitment" : "Commitment in progress"}
-            targets={record.targets}
-            achieved={achieved}
-            committed={record.id !== null}
-          />
-
-          {record.locked ? (
-            <ReopenButton
-              member={memberId}
-              period={period}
-              periodStart={periodStart}
-              memberName={displayName}
-            />
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              {record.id === null
-                ? `${displayName} has not committed to this ${noun} yet.`
-                : `${displayName} has not submitted this ${noun} yet, so there is nothing to reopen.`}
-            </p>
-          )}
-        </div>
-      ) : (
-        <TargetsForm
-          period={period}
-          periodStart={periodStart}
-          targets={record.targets}
-          achieved={achieved}
-          locked={record.locked}
-          submittedAt={record.submitted_at}
-          reopenedAt={record.reopened_at}
-        />
-      )}
+      <MetricList
+        title="Recorded this week"
+        description={formatWeekRange(weekStart)}
+        achieved={result.summary.achieved}
+      />
     </PageColumn>
   );
 }

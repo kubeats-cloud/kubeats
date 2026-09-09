@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fieldLabel, visitSchema } from "@/lib/validation/visit";
 import { newMemberSchema } from "@/lib/validation/admin";
-import { targetsSchema } from "@/lib/validation/weekly";
 
 /**
  * The schemas the browser and the server share. These are the rules a rep meets
@@ -168,86 +167,15 @@ describe("visitSchema", () => {
   });
 });
 
-describe("targetsSchema", () => {
-  const week = { period: "weekly", period_start: "2026-08-31" };
-  const zeros = {
-    meetings: "",
-    sessions_set: "",
-    sessions_done: "",
-    campus_visits_set: "",
-    campus_visits_done: "",
-    olympiad: "",
-    application: "",
-    admission: "",
-  };
-
-  it("reads an empty box as zero", () => {
-    const result = targetsSchema.safeParse({ ...week, ...zeros });
-    expect(result.success).toBe(true);
-    if (result.success) expect(result.data.meetings).toBe(0);
-  });
-
-  it("refuses a target that is not a whole number", () => {
-    expect(
-      targetsSchema.safeParse({ ...week, ...zeros, meetings: "12a" }).success,
-    ).toBe(false);
-    expect(
-      targetsSchema.safeParse({ ...week, ...zeros, meetings: "-3" }).success,
-    ).toBe(false);
-  });
-
-  it("insists a weekly period starts on a Monday", () => {
-    expect(
-      targetsSchema.safeParse({
-        ...zeros,
-        period: "weekly",
-        period_start: "2026-09-02",
-      }).success,
-    ).toBe(false);
-  });
-
-  it("refuses a monthly period outright — the option was withdrawn", () => {
-    // This used to assert the 1st-of-the-month alignment rule. Monthly is no
-    // longer a period a rep may commit to (docs/flow-redesign-plan.md, change
-    // 5), so the schema now rejects it before alignment is ever considered —
-    // a well-formed 1st-of-the-month is refused exactly like a mid-month date.
-    // The DATABASE still permits 'monthly', deliberately, so the rows already
-    // committed stay valid; this is the app declining to offer it.
-    expect(
-      targetsSchema.safeParse({
-        ...zeros,
-        period: "monthly",
-        period_start: "2026-09-15",
-      }).success,
-    ).toBe(false);
-    expect(
-      targetsSchema.safeParse({
-        ...zeros,
-        period: "monthly",
-        period_start: "2026-09-01",
-      }).success,
-    ).toBe(false);
-  });
-
-  it("takes any date for a daily period", () => {
-    // A Wednesday is not the start of a week or a month, but it is a perfectly
-    // good day — the alignment rule has to be per-period, not one rule.
-    expect(
-      targetsSchema.safeParse({
-        ...zeros,
-        period: "daily",
-        period_start: "2026-09-02",
-      }).success,
-    ).toBe(true);
-  });
-
-  it("refuses a period it does not know", () => {
-    expect(
-      targetsSchema.safeParse({ ...zeros, period: "quarterly", period_start: "2026-09-01" })
-        .success,
-    ).toBe(false);
-  });
-});
+/*
+ * The targetsSchema suite lived here. It is gone with the schema: stage 2 of
+ * the redesign ended weekly and daily commitments (docs/flow-redesign-plan.md,
+ * changes 3 and 4), so there is no longer a form that writes a target and
+ * nothing left for those assertions to hold. public.targets and its
+ * targets_period_start_aligned CHECK are untouched in the database, and the
+ * targets suite in tests/integration/rules.test.ts still exercises them —
+ * which is what keeps the reversibility honest rather than merely claimed.
+ */
 
 describe("newMemberSchema", () => {
   const valid = {

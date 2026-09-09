@@ -4,46 +4,53 @@ import { EmptyState } from "@/components/states";
 import { METRICS, type MetricCounts } from "@/lib/validation/weekly";
 
 /**
- * All eight metrics, read-only: the rep's Dashboard summary and the admin's
- * drill-in both show exactly this, so neither can drift from the Targets tab.
+ * All eight metrics for a week, read-only.
+ *
+ * The rep's Dashboard summary, the Weekly screen and the admin's drill-in all
+ * render exactly this, so none of them can drift from the others.
+ *
+ * The `targets` and `committed` props are gone. There is no commitment to
+ * compare against any more (docs/flow-redesign-plan.md, change 4), so the
+ * empty state is no longer "you have not set targets" — a screen that told a
+ * rep to go and set numbers would now be pointing at a form that does not
+ * exist. It is "nothing recorded yet", which is a statement about the week
+ * rather than an instruction.
  */
 export function MetricList({
   title,
-  targets,
   achieved,
-  committed,
-  emptyAction,
+  description,
 }: {
   title: string;
-  targets: MetricCounts;
   achieved: MetricCounts;
-  /** False when no targets row exists yet for this member and period. */
-  committed: boolean;
-  emptyAction?: React.ReactNode;
+  description?: string;
 }) {
+  const nothingYet = METRICS.every((metric) => achieved[metric.key] === 0);
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">{title}</CardTitle>
+        {description && (
+          <p className="text-muted-foreground text-sm">{description}</p>
+        )}
       </CardHeader>
       <CardContent>
-        {committed ? (
-          <div className="space-y-4">
+        {nothingYet ? (
+          <EmptyState
+            title="Nothing recorded yet this week"
+            description="Visits you log will be counted here as the week goes on."
+          />
+        ) : (
+          <div>
             {METRICS.map((metric) => (
               <MetricRow
                 key={metric.key}
                 label={metric.label}
                 achieved={achieved[metric.key]}
-                target={targets[metric.key]}
               />
             ))}
           </div>
-        ) : (
-          <EmptyState
-            title="No commitment for this period yet"
-            description="Set the numbers on the Targets tab and the bars will fill in as the period goes."
-            action={emptyAction}
-          />
         )}
       </CardContent>
     </Card>
