@@ -565,6 +565,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         // needs the rep to have checked in. That rule has its own suite; this
         // one is still about the gate, so it checks in as setup.
         checkin_at: new Date().toISOString(),
+        // 0019: the located guard fires on INSERT too, so an arrival
+        // written straight into the row needs a position (FO012).
+        checkin_lat: 23.0225,
+        checkin_lng: 72.5714,
       });
       expect(planError).toBeNull();
 
@@ -694,6 +698,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           purpose: `${TAG} same-day`,
           // 0014: a meeting needs a check-in as well as a plan row.
           checkin_at: new Date().toISOString(),
+          // 0019: the located guard fires on INSERT too, so an arrival
+          // written straight into the row needs a position (FO012).
+          checkin_lat: 23.0225,
+          checkin_lng: 72.5714,
         })
         .select("id")
         .single();
@@ -747,6 +755,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           purpose: `${TAG} yesterday`,
           // 0014: a meeting needs a check-in as well as a plan row.
           checkin_at: new Date().toISOString(),
+          // 0019: the located guard fires on INSERT too, so an arrival
+          // written straight into the row needs a position (FO012).
+          checkin_lat: 23.0225,
+          checkin_lng: 72.5714,
         })
         .select("id")
         .single();
@@ -1975,6 +1987,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           purpose: `${TAG} try again`,
           // 0014: a meeting needs a check-in as well as a plan row.
           checkin_at: new Date().toISOString(),
+          // 0019: the located guard fires on INSERT too, so an arrival
+          // written straight into the row needs a position (FO012).
+          checkin_lat: 23.0225,
+          checkin_lng: 72.5714,
         })
         .select("id")
         .single();
@@ -2682,8 +2698,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .from("daily_plans")
         .update({
           checkin_at: new Date().toISOString(),
-          // Located, because from 0018 an arrival without a position or a
-          // declared reason is refused (FO012).
+          // Located, because an arrival without a position or a declared
+          // reason is refused (FO012).
           checkin_lat: 23.0225,
           checkin_lng: 72.5714,
         })
@@ -2808,6 +2824,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .from("daily_plans")
           .update({
             checkin_at: new Date().toISOString(),
+            // Deliberately NO coordinates: the declared reason is what makes
+            // this arrival legal, and the assertions below check the position
+            // really is absent.
             checkin_location_manual: true,
             checkin_manual_reason: "No signal indoors",
           })
@@ -2832,6 +2851,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .from("daily_plans")
           .update({
             checkin_at: new Date().toISOString(),
+            // 0019: the located guard fires on INSERT too, so an arrival
+            // written straight into the row needs a position (FO012).
+            checkin_lat: 23.0225,
+            checkin_lng: 72.5714,
             checkin_location_manual: true,
           })
           .eq("id", planId);
