@@ -87,21 +87,35 @@ export function DailyPlan({
       ? dailyPlanSummary(fieldErrors)
       : null
     : shown.error;
-  const held = entries.filter((entry) => entry.meetings_actual !== null);
-  const open = entries.filter((entry) => entry.meetings_actual === null);
+  /**
+   * Split by what the VISIT is doing, not by meetings_actual.
+   *
+   * It used to be `meetings_actual !== null`, and that quietly mis-sorted every
+   * activity except a meeting. Rule 7 sets meetings_actual for meetings alone,
+   * so a session that had been logged, filed and checked out still counted as
+   * "not held" — it sat in the open list, rendered as "In progress" with a
+   * Continue button, and never showed its duration. A rep would have been told
+   * a finished visit was still running, and the one tap offered led nowhere.
+   *
+   * visitStatusOf() is the same question the database answers with
+   * plan_visit_status(), so this now sorts on the fact rather than on a proxy
+   * for it that only held for one activity.
+   */
+  const statusOf = (entry: PlanEntry) =>
+    visitStatusOf({
+      checkinAt: entry.checkinAt,
+      checkoutAt: entry.checkoutAt,
+      checkoutMissing: entry.checkoutMissing,
+    });
+
+  const done = entries.filter((entry) => statusOf(entry) === "Completed");
+  const open = entries.filter((entry) => statusOf(entry) !== "Completed");
 
   // #7 — one active visit at a time. Whichever entry is checked in and not yet
   // checked out is holding this rep; every other Check in button says so
   // instead of offering a tap the database would refuse (FO013).
   const openElsewhere =
-    entries.find(
-      (entry) =>
-        visitStatusOf({
-          checkinAt: entry.checkinAt,
-          checkoutAt: entry.checkoutAt,
-          checkoutMissing: entry.checkoutMissing,
-        }) === "In Progress",
-    ) ?? null;
+    entries.find((entry) => statusOf(entry) === "In Progress") ?? null;
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     const parsed = dailyPlanSchema.safeParse(
@@ -253,11 +267,7 @@ export function DailyPlan({
                       check-in because the database would refuse it anyway
                       (FO009) — better to not present a button that cannot work
                       than to explain the refusal afterwards. */}
-                  {visitStatusOf({
-                    checkinAt: entry.checkinAt,
-                    checkoutAt: entry.checkoutAt,
-                    checkoutMissing: entry.checkoutMissing,
-                  }) === "Scheduled" ? (
+                  {statusOf(entry) === "Scheduled" ? (
                     <CheckInButton
                       planId={entry.id}
                       instituteName={entry.instituteName}
@@ -308,7 +318,7 @@ export function DailyPlan({
               </li>
             ))}
 
-            {held.map((entry) => (
+            {done.map((entry) => (
               <li
                 key={entry.id}
                 className="border-border bg-muted/40 flex items-center justify-between gap-3 rounded-md border px-3 py-2"
@@ -330,7 +340,7 @@ export function DailyPlan({
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <Badge variant="success">
                     <CheckCircle2Icon className="size-3" aria-hidden />
-                    Held
+                    {entry.meetings_actual !== null ? "Held" : "Done"}
                   </Badge>
                   {/* No check-out button. Filing the feedback checked them out
                       in the same transaction, so by the time an entry reads
