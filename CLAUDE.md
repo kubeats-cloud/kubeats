@@ -10,7 +10,11 @@ against registered institutes; admins oversee the whole team.
 `docs/field-ops-demo.tsx` is the validated click-through prototype. Match it for
 **behaviour, field names and flows only** — activity keys, the weekly metric
 set, the "open for today" meeting gate, the Set → Done lifecycle, the follow-up
-visibility rules, the weekly lock.
+visibility rules.
+
+The prototype's **weekly lock** is no longer one of these. Stage 2 of the
+redesign ended weekly commitments entirely (see below and
+`docs/flow-redesign-plan.md`), so there is nothing left to lock.
 
 **Do not copy its visuals.** Its cream/teal/gold palette and Fraunces serif are
 not our design. The UI is specified below and nowhere else.
@@ -37,8 +41,8 @@ Clean, modern, mobile-first utility app.
 
 ### Screen ownership
 
-A rep has six screens: Dashboard, Institutes, Log Visit, Pending, Weekly and
-Materials. An admin has a workspace instead — Overview, Review, Assign, Team,
+A rep has six screens: Dashboard, Institutes, Log Visit, Pending, This week
+and Materials. An admin has a workspace instead — Overview, Review, Assign, Team,
 Institutes, Settings — plus Data and Manage materials, which are deliberately
 off the bar and reached from Settings or Overview.
 
@@ -56,7 +60,22 @@ This is load-bearing, not a layout preference: the meeting gate (rule 2) checks
 a visit against that member's `daily_plans` rows for that date, so a meeting
 cannot be logged at all unless the Dashboard flow put it on the plan first.
 
-Weekly targets stay on their own Weekly tab.
+**Nothing in this app sets a target any more.** Stage 2 of the redesign
+(`docs/flow-redesign-plan.md`, changes 3 and 4) removed commitment altogether:
+
+- The **daily** target was found to be the daily plan wearing a second name —
+  both were exactly institute + purpose — so it was merged into the Dashboard
+  flow above rather than duplicated. There is still no Daily tab, and now there
+  is no daily target either.
+- The **weekly** tab became "This week": a read-only count of what was actually
+  recorded, with no numbers to set, no submit and no lock.
+
+`public.targets` is untouched in the database — table, columns, rows, RLS and
+the `enforce_target_lock` trigger all still there — but no code reads or writes
+it. That is the reversible choice, the same one taken for `institutes_covered`:
+reviving commitments means restoring the screens, not writing a migration. Rule
+6 (the lock) therefore still exists in SQL and is still covered by the
+integration tests; it is simply unreachable from the app.
 
 ### How that maps to the code
 
@@ -112,9 +131,12 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2949
-KiB** — under 5% spare. That is a deliberate choice, not an oversight, and the
-budget is real: measure before adding anything sizable.
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2826
+KiB** — about 246 KiB, 8% spare. The budget is real: measure before adding
+anything sizable, and re-measure rather than trusting this line. It has been
+wrong before, in both directions — it read 2949 for a while after the figure it
+described had already moved, which is how a stale number becomes a wrong
+decision about a dependency.
 
 ```bash
 npm run build && npx wrangler deploy --dry-run --outdir /tmp/out   # "Total Upload:"
@@ -131,8 +153,9 @@ already claimed the easy 0.9 MiB between them; see README for both.
   (Node runtime, no edge).
 - `npm run typecheck` runs `next typegen` first — `LayoutProps`/`PageProps` are
   generated into `.next/types` and `tsc` alone cannot see them.
-- Load-bearing rules (meeting gate, weekly lock, role visibility) belong in the
-  database as RLS and triggers, not only in the UI.
+- Load-bearing rules (meeting gate, role visibility) belong in the database as
+  RLS and triggers, not only in the UI. The weekly lock was one of these and its
+  trigger is still installed; the app no longer reaches it.
 - Validate every input on both client and server. Never surface stack traces,
   SQL or secrets to users.
 - A write that touches more than one table goes through a Postgres function so
@@ -187,13 +210,14 @@ already claimed the easy 0.9 MiB between them; see README for both.
   Written as "any change at all" rather than "any change after `closed_at`" on
   purpose: a meeting never gets a `closed_at`, so the narrower rule would leave
   every meeting's evidence editable forever.
-- A locked week freezes the COMMITTED TARGETS, nothing else. The achieved
-  column stays live: it is recomputed from `daily_plans` and `visits` on every
-  read, so closing an old "Set" loop moves that row from Sessions Set to
-  Sessions Done in the week it was originally logged — including in a week that
-  is already submitted. `locked` therefore means "this rep can no longer change
-  what they promised", not "these numbers are a frozen historical record".
-  Any later reporting that needs a fixed snapshot has to take one itself.
+- Week figures are ALWAYS live. They are recomputed from `daily_plans` and
+  `visits` on every read, so closing an old "Set" loop moves that row from
+  Sessions Set to Sessions Done in the week it was originally logged. Nothing
+  is ever a frozen historical record, and any later reporting that needs a
+  fixed snapshot has to take one itself. (This used to be phrased around the
+  weekly lock — "a locked week freezes the committed targets, nothing else".
+  The commitment is gone; the live-recomputation half is unchanged and is the
+  part that was ever load-bearing.)
 - A week runs Monday to Saturday for reporting, but counts Monday through
   Sunday: a Sunday's work folds into the week that just ended rather than
   falling out of every total. `weekEnd()` is the Saturday shown to the rep;

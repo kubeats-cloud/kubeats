@@ -2,68 +2,70 @@ import Link from "next/link";
 import { ChevronRightIcon, UsersIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/states";
-import {
-  TONE_BAR,
-  TONE_BADGE,
-  completionPercent,
-  toneFor,
-} from "@/lib/validation/weekly";
-import type { TeamMemberTargets } from "@/lib/targets";
+import { METRICS, type MetricCounts } from "@/lib/validation/weekly";
+import type { TeamMemberWeek } from "@/lib/week-summary";
 
 /**
  * The admin's view of the week.
  *
- * Two presentations of one list, because the two audiences are not the same
- * person at the same desk. On a phone it is a stack of tappable cards. From
- * `md` it is a table — columns that line up, numbers right-aligned on a
- * tabular figure so they can be compared down the column, and a row height
- * tight enough to see a whole team at once. Stretching the card list across a
- * monitor would have been the easy thing and would have read as unfinished.
+ * This used to be a progress table: a "% of commitment" per rep, a coloured
+ * bar, and a status of "No commitment yet" / "In progress" / "Submitted".
+ * Stage 2 of the redesign ended commitments (docs/flow-redesign-plan.md,
+ * changes 3 and 4), which would have left every row reading 0%, no tone and
+ * "No commitment yet" for ever — a table of dashes.
  *
- * The percentage is the unweighted mean of the metrics they committed to, so a
- * rep who promised a little and did it reads as complete — which is the honest
- * answer to "did they do what they said", and not the same question as "who did
- * the most work".
+ * So the question it answers has changed rather than been dropped. It was
+ * "did they do what they said"; it is now "what did they do". That is a
+ * weaker question, and deliberately so: with nothing promised there is nothing
+ * to measure against, and inventing a denominator would be making one up.
+ *
+ * Two presentations of one list, kept from the original because the two
+ * audiences are not the same person at the same desk. On a phone it is a stack
+ * of tappable cards. From `md` it is a table — columns that line up, numbers
+ * right-aligned on a tabular figure so they can be compared down the column,
+ * and a row height tight enough to see a whole team at once.
  */
+
+/**
+ * The columns worth putting in front of an admin.
+ *
+ * Not all eight metrics: a six-column table on a laptop is readable and a
+ * ten-column one is not, and these are the three the client's own weekly
+ * question is about. The rest are one tap away on the member's own week, which
+ * shows all eight.
+ */
+const COLUMNS = ["meetings", "sessions_done", "campus_visits_done"] as const;
+
+const columnLabel = (key: (typeof COLUMNS)[number]) =>
+  METRICS.find((m) => m.key === key)?.label ?? key;
 
 interface Row {
   id: string;
   name: string;
   role: string;
-  percent: number | null;
-  tone: ReturnType<typeof toneFor> | "none";
-  status: string;
+  achieved: MetricCounts;
+  total: number;
   loops: number;
   href: string;
 }
 
 function rowsFrom(
-  members: TeamMemberTargets[],
+  members: TeamMemberWeek[],
   weekStart: string,
   openLoops: Map<string, number>,
 ): Row[] {
-  return members.map((member) => {
-    const { record, achieved } = member.view;
-    const percent = completionPercent(achieved, record.targets);
-    return {
-      id: member.member,
-      name: member.name,
-      role: member.role,
-      percent,
-      // With nothing committed there is no bar to draw and no tone to pick.
-      tone: percent === null ? "none" : toneFor(percent, 100),
-      status:
-        record.id === null
-          ? "No commitment yet"
-          : record.locked
-            ? "Submitted"
-            : "In progress",
-      loops: openLoops.get(member.member) ?? 0,
-      href: `/weekly?week=${weekStart}&member=${member.member}`,
-    };
-  });
+  return members.map((member) => ({
+    id: member.member,
+    name: member.name,
+    role: member.role,
+    achieved: member.achieved,
+    // Every metric counts once. This is a volume figure, not a score — there is
+    // no target to weight it against and it is not pretending to be one.
+    total: METRICS.reduce((sum, m) => sum + member.achieved[m.key], 0),
+    loops: openLoops.get(member.member) ?? 0,
+    href: `/targets?week=${weekStart}&member=${member.member}`,
+  }));
 }
 
 export function TeamSnapshot({
@@ -71,7 +73,7 @@ export function TeamSnapshot({
   weekStart,
   openLoops,
 }: {
-  members: TeamMemberTargets[];
+  members: TeamMemberWeek[];
   weekStart: string;
   openLoops: Map<string, number>;
 }) {
@@ -109,27 +111,28 @@ export function TeamSnapshot({
                   </div>
 
                   <p className="text-muted-foreground mt-0.5 truncate text-xs">
-                    {row.status}
-                    {" · "}
-                    {row.loops} open loop{row.loops === 1 ? "" : "s"}
+                    {row.total === 0
+                      ? "Nothing recorded this week"
+                      : COLUMNS.map(
+                          (key) => `${row.achieved[key]} ${columnLabel(key).toLowerCase()}`,
+                        ).join(" · ")}
                   </p>
 
-                  <Progress
-                    value={row.percent ?? 0}
-                    indicatorClassName={TONE_BAR[row.tone]}
-                    className="mt-2"
-                    aria-label={`${row.name}: ${row.percent ?? 0}% of commitment`}
-                  />
+                  <p className="text-muted-foreground mt-0.5 truncate text-xs">
+                    {row.loops} open loop{row.loops === 1 ? "" : "s"}
+                  </p>
                 </div>
 
                 <div className="shrink-0 text-right">
-                  {row.percent === null ? (
-                    <span className="text-muted-foreground text-lg">—</span>
-                  ) : (
-                    <Badge variant={TONE_BADGE[row.tone]} className="tabular-nums">
-                      {row.percent}%
-                    </Badge>
-                  )}
+                  <span
+                    className={
+                      row.total === 0
+                        ? "text-muted-foreground text-lg"
+                        : "text-lg font-semibold tabular-nums"
+                    }
+                  >
+                    {row.total === 0 ? "—" : row.total}
+                  </span>
                 </div>
 
                 <ChevronRightIcon
@@ -147,24 +150,27 @@ export function TeamSnapshot({
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <caption className="sr-only">
-              Each team member&rsquo;s progress against their commitment this week
+              What each team member recorded this week
             </caption>
             <thead>
               <tr className="border-border text-muted-foreground border-b text-left">
                 <th scope="col" className="px-5 py-2.5 text-xs font-medium">
                   Member
                 </th>
-                <th scope="col" className="px-5 py-2.5 text-xs font-medium">
-                  Commitment
-                </th>
+                {COLUMNS.map((key) => (
+                  <th
+                    key={key}
+                    scope="col"
+                    className="px-5 py-2.5 text-right text-xs font-medium"
+                  >
+                    {columnLabel(key)}
+                  </th>
+                ))}
                 <th scope="col" className="px-5 py-2.5 text-right text-xs font-medium">
                   Open loops
                 </th>
-                <th scope="col" className="w-[34%] px-5 py-2.5 text-xs font-medium">
-                  Progress
-                </th>
                 <th scope="col" className="px-5 py-2.5 text-right text-xs font-medium">
-                  Complete
+                  All activity
                 </th>
                 <th scope="col" className="w-10 px-2 py-2.5">
                   <span className="sr-only">Open</span>
@@ -190,7 +196,15 @@ export function TeamSnapshot({
                       )}
                     </Link>
                   </td>
-                  <td className="text-muted-foreground px-5 py-3">{row.status}</td>
+                  {COLUMNS.map((key) => (
+                    <td key={key} className="px-5 py-3 text-right tabular-nums">
+                      {row.achieved[key] === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        row.achieved[key]
+                      )}
+                    </td>
+                  ))}
                   <td className="px-5 py-3 text-right tabular-nums">
                     {row.loops === 0 ? (
                       <span className="text-muted-foreground">—</span>
@@ -198,20 +212,11 @@ export function TeamSnapshot({
                       row.loops
                     )}
                   </td>
-                  <td className="px-5 py-3">
-                    <Progress
-                      value={row.percent ?? 0}
-                      indicatorClassName={TONE_BAR[row.tone]}
-                      aria-label={`${row.name}: ${row.percent ?? 0}% of commitment`}
-                    />
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    {row.percent === null ? (
-                      <span className="text-muted-foreground">—</span>
+                  <td className="px-5 py-3 text-right font-semibold tabular-nums">
+                    {row.total === 0 ? (
+                      <span className="text-muted-foreground font-normal">—</span>
                     ) : (
-                      <Badge variant={TONE_BADGE[row.tone]} className="tabular-nums">
-                        {row.percent}%
-                      </Badge>
+                      row.total
                     )}
                   </td>
                   <td className="px-2 py-3">

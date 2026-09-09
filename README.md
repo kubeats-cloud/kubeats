@@ -357,11 +357,13 @@ exist purely to fit:
 Those two together were the cheap wins, and they are spent. Neither is worth
 extending.
 
-**Where it stands: 2949 KiB against a 3072 KiB ceiling — 123 KiB, under 5%.**
+**Where it stands: 2826 KiB against a 3072 KiB ceiling — 246 KiB, about 8%.**
 
 Read that as a budget, not a comfort. It was 2831 KiB before the in-app camera
 and the area-name lookup; two ordinary features spent nearly two thirds of the
-remaining room. Treat the number as a release gate:
+room that existed then. The redesign has since given some back — stage 1 freed
+7 KiB and stage 2 another 7 by deleting the target-setting form — which is a
+reprieve, not a change of situation. Treat the number as a release gate:
 
 | Measured | Do |
 | --- | --- |

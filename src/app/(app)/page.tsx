@@ -15,7 +15,7 @@ import {
   listPurposes,
   openLoopsByMember,
 } from "@/lib/visits";
-import { getTargets } from "@/lib/targets";
+import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf } from "@/lib/weeks";
 import { getOverview } from "@/lib/admin-workspace";
 
@@ -35,7 +35,7 @@ export default async function DashboardPage() {
     admin ? Promise.resolve([]) : listInstitutesForPicker(),
     admin ? Promise.resolve([]) : listPurposes(),
     admin ? Promise.resolve(new Map<string, number>()) : openLoopsByMember(),
-    admin ? Promise.resolve(null) : getTargets(user.id, "weekly", weekStart),
+    admin ? Promise.resolve(null) : getWeekSummary(user.id, weekStart),
     admin ? getOverview() : Promise.resolve(null),
   ]);
 
@@ -92,25 +92,13 @@ export default async function DashboardPage() {
           </SectionTitle>
           {week?.ok ? (
             <>
-              <MetricList
-                title="Target vs achieved"
-                targets={week.view.record.targets}
-                achieved={week.view.achieved}
-                committed={week.view.record.id !== null}
-                emptyAction={
-                  <Button asChild className="h-11">
-                    <Link href="/targets">Set this week&rsquo;s targets</Link>
-                  </Button>
-                }
-              />
-              {week.view.record.id !== null && (
-                <Button asChild variant="outline" className="mt-3 h-11 w-full">
-                  <Link href="/targets">Open Targets</Link>
-                </Button>
-              )}
+              <MetricList title="Recorded this week" achieved={week.summary.achieved} />
+              <Button asChild variant="outline" className="mt-3 h-11 w-full">
+                <Link href="/targets">Open this week</Link>
+              </Button>
             </>
           ) : (
-            <ErrorState message="We could not load this week's targets. Please try again in a moment." />
+            <ErrorState message="We could not load this week. Please try again in a moment." />
           )}
         </>
       )}

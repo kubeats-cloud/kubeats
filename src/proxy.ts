@@ -118,12 +118,18 @@ export async function proxy(request: NextRequest) {
   // without JavaScript did not - and a permanent redirect that only some
   // clients can see is not one.
   //
-  // ?week= becomes ?start= and the period is pinned, so a link saved when the
-  // screen was called Weekly lands on exactly the week it used to.
+  // ?week= is carried straight through. It briefly became ?period=weekly&start=
+  // while /targets offered a daily/weekly/monthly switcher; stage 2 of the
+  // redesign took the switcher away and the screen reads ?week= again, so the
+  // old translation would now hand it two parameters it ignores and drop the
+  // saved week on the floor. A link saved when the screen was called Weekly
+  // lands on exactly the week it used to, which is the whole point of this.
   if (pathname === "/weekly" || pathname.startsWith("/weekly/")) {
-    const params = new URLSearchParams({ period: "weekly" });
+    const params = new URLSearchParams();
     const week = request.nextUrl.searchParams.get("week");
-    if (week) params.set("start", week);
+    if (week) params.set("week", week);
+    const member = request.nextUrl.searchParams.get("member");
+    if (member) params.set("member", member);
     return redirectTo("/targets", params);
   }
 

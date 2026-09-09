@@ -4,7 +4,7 @@ import { ErrorState } from "@/components/states";
 import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { requireAdmin } from "@/lib/admin";
-import { getTeamTargets } from "@/lib/targets";
+import { getTeamWeek } from "@/lib/week-summary";
 import { openLoopsByMember } from "@/lib/visits";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
 
@@ -14,13 +14,17 @@ const first = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : undefined;
 
 /**
- * Who is on track, and who is behind.
+ * What each rep recorded this week.
  *
  * The week is navigable because "how did the team do" is a question about a
  * particular week far more often than about this one. Opening a member goes to
- * their Weekly screen, which is where a locked week is reopened — one place
- * that does it, rather than a second button here that would have to stay in
- * step with it.
+ * their own week, which shows all eight metrics rather than the three that fit
+ * across a table.
+ *
+ * It used to ask who was on track against their commitment. Stage 2 of the
+ * redesign ended commitments (docs/flow-redesign-plan.md, changes 3 and 4), so
+ * there is no longer a target to be on track against — and no locked week to
+ * reopen from here either.
  */
 export default async function TeamPage(props: PageProps<"/team">) {
   const gate = await requireAdmin();
@@ -37,7 +41,7 @@ export default async function TeamPage(props: PageProps<"/team">) {
   const weekStart = normaliseWeekParam(first(searchParams.week));
 
   const [team, openLoops] = await Promise.all([
-    getTeamTargets("weekly", weekStart),
+    getTeamWeek(weekStart),
     openLoopsByMember(),
   ]);
 
@@ -45,7 +49,7 @@ export default async function TeamPage(props: PageProps<"/team">) {
     <>
       <PageHeader
         title="Team"
-        description="Each rep's commitment for the week and what they have achieved against it."
+        description="What each rep recorded this week."
       />
 
       <WeekNavigator weekStart={weekStart} basePath="/team" />

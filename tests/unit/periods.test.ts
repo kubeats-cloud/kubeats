@@ -3,10 +3,8 @@ import {
   PERIODS,
   PERIOD_NOUN,
   REPORT_PERIODS,
-  TARGET_PERIODS,
   isPeriod,
   isReportPeriod,
-  isTargetPeriod,
   monthEndOf,
   monthStartOf,
   normalisePeriodStart,
@@ -15,11 +13,7 @@ import {
   shiftPeriod,
 } from "@/lib/periods";
 import { mondayOf, weekCountEnd } from "@/lib/weeks";
-import {
-  progressStatus,
-  remaining,
-  METRIC_KEYS,
-} from "@/lib/validation/weekly";
+import { METRIC_KEYS } from "@/lib/validation/weekly";
 
 /**
  * The date arithmetic behind daily, weekly and monthly targets.
@@ -167,30 +161,12 @@ describe("isPeriod", () => {
   });
 });
 
-describe("remaining and progressStatus", () => {
-  it("never reports negative remaining", () => {
-    expect(remaining(12, 10)).toBe(0);
-    expect(remaining(3, 10)).toBe(7);
-    expect(remaining(0, 0)).toBe(0);
-  });
-
-  it("reads the three states the way a person would", () => {
-    expect(progressStatus(0, 10)).toBe("not-started");
-    expect(progressStatus(4, 10)).toBe("in-progress");
-    expect(progressStatus(10, 10)).toBe("completed");
-    expect(progressStatus(12, 10)).toBe("completed");
-  });
-
-  it("calls a commitment of nothing Not Started, not Completed", () => {
-    // Committing to nothing and achieving nothing is not an achievement — the
-    // same judgement toneFor() makes when it returns "none" rather than "met".
-    expect(progressStatus(0, 0)).toBe("not-started");
-  });
-
-  it("counts anything achieved against a zero target as in progress", () => {
-    expect(progressStatus(3, 0)).toBe("in-progress");
-  });
-});
+/*
+ * The "remaining and progressStatus" suite lived here. Both functions measured
+ * achieved against a TARGET, and stage 2 removed the target — see
+ * tests/unit/weekly-metrics.test.ts for the same note about toneFor and
+ * completionPercent.
+ */
 
 describe("the metric set", () => {
   it("is the eight the Targets screen commits to", () => {
@@ -241,50 +217,46 @@ describe("the yearly period (feature 1's report)", () => {
   });
 });
 
-describe("the two period vocabularies", () => {
-  it("offers weekly to targets and yearly to the report, never the reverse", () => {
-    // The split is what stops a yearly row reaching public.targets, whose
-    // targets_period_valid CHECK would refuse it anyway.
-    expect(TARGET_PERIODS).toEqual(["daily", "weekly"]);
+describe("the period vocabulary", () => {
+  it("reads the report by day, month and year, and never by week", () => {
+    // REPORT_PERIODS is now the only vocabulary. TARGET_PERIODS went with the
+    // commitments in stage 2: nothing sets a target, so a list of periods you
+    // may set one for described nothing.
     expect(REPORT_PERIODS).toEqual(["daily", "monthly", "yearly"]);
-    expect(TARGET_PERIODS).not.toContain("yearly");
     expect(REPORT_PERIODS).not.toContain("weekly");
+    expect(isReportPeriod("weekly")).toBe(false);
+    expect(isReportPeriod("quarterly")).toBe(false);
+    for (const p of REPORT_PERIODS) expect(isReportPeriod(p), p).toBe(true);
   });
 
-  it("no longer offers a monthly TARGET, but still reads a monthly REPORT", () => {
-    // The client withdrew the monthly commitment, not the monthly history.
-    // Asserted as a pair because collapsing the two lists into one is exactly
-    // how the report would lose its month.
-    expect(TARGET_PERIODS).not.toContain("monthly");
-    expect(isTargetPeriod("monthly")).toBe(false);
-    expect(REPORT_PERIODS).toContain("monthly");
-    expect(isReportPeriod("monthly")).toBe(true);
+  it("still understands weekly, which no screen commits to but the summary counts by", () => {
+    // The read-only week summary counts over periodRange("weekly", ...), which
+    // is the ONE place the weekly grid still matters. If weekly fell out of
+    // PERIODS with the targets, that summary would lose its range.
+    expect(PERIODS).toContain("weekly");
+    expect(periodStartOf("weekly", "2026-09-16")).toBe(mondayOf("2026-09-16"));
+    // The deliberate Sunday end, so a Sunday folds into the week that ended.
+    expect(periodRange("weekly", "2026-09-07").end).toBe(weekCountEnd("2026-09-07"));
+    expect(PERIOD_NOUN.weekly).toBe("week");
   });
 
-  it("still understands monthly as a period, so an existing row stays readable", () => {
-    // targets_period_valid still permits 'monthly' and no migration dropped it.
-    // The helpers must therefore keep answering for it, or a monthly row
-    // committed before this change becomes unreadable rather than merely
-    // unoffered.
-    expect(PERIODS).toContain("monthly");
+  it("still understands monthly and daily, so an existing targets row stays readable", () => {
+    // No migration dropped anything: public.targets keeps its rows and
+    // targets_period_valid still permits all three. The helpers must keep
+    // answering for them, or a row committed before stage 2 becomes
+    // unreadable rather than merely unoffered.
+    for (const p of ["daily", "weekly", "monthly"] as const) {
+      expect(PERIODS, p).toContain(p);
+      expect(periodRange(p, periodStartOf(p, "2026-09-16")).end, p).toBeTruthy();
+      expect(PERIOD_NOUN[p], p).toBeTruthy();
+    }
     expect(periodStartOf("monthly", "2026-09-16")).toBe("2026-09-01");
     expect(periodRange("monthly", "2026-09-01").end).toBe("2026-09-30");
-    expect(PERIOD_NOUN.monthly).toBe("month");
   });
 
-  it("recognises each vocabulary's own members and no others", () => {
-    for (const p of TARGET_PERIODS) expect(isTargetPeriod(p), p).toBe(true);
-    for (const p of REPORT_PERIODS) expect(isReportPeriod(p), p).toBe(true);
-    expect(isTargetPeriod("yearly")).toBe(false);
-    expect(isReportPeriod("weekly")).toBe(false);
-    expect(isTargetPeriod("quarterly")).toBe(false);
-    expect(isReportPeriod("quarterly")).toBe(false);
-  });
-
-  it("keeps both vocabularies inside the one set the helpers understand", () => {
-    for (const p of [...TARGET_PERIODS, ...REPORT_PERIODS]) {
+  it("keeps the report vocabulary inside the one set the helpers understand", () => {
+    for (const p of REPORT_PERIODS) {
       expect(PERIODS, p).toContain(p);
-      // Every period the screens can offer must have a range and a noun.
       expect(periodRange(p, periodStartOf(p, "2026-09-16")).end, p).toBeTruthy();
       expect(PERIOD_NOUN[p], p).toBeTruthy();
     }
