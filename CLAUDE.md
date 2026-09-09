@@ -131,8 +131,8 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2873
-KiB** — about 199 KiB, 6.5% spare. The budget is real: measure before adding
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2883
+KiB** — about 189 KiB, 6.1% spare. The budget is real: measure before adding
 anything sizable, and re-measure rather than trusting this line. It has been
 wrong before, in both directions — it read 2949 for a while after the figure it
 described had already moved, which is how a stale number becomes a wrong
@@ -263,6 +263,25 @@ already claimed the easy 0.9 MiB between them; see README for both.
   so a report filed under any version still renders; `report-view.tsx` skips an
   empty value. Bringing one back is a form control, and a migration only because
   `close_visit()` has to carry it.
+- **Campus scoping is a security boundary, not a filter.** `public.campuses`
+  holds the university's own five campuses — the places reps work FROM — and is
+  NOT `public.institutes`, which is the pipeline of prospect schools they work
+  ON. A rep has exactly one campus (`profiles.campus_id`); an admin has none and
+  sees everything, which is why the column is nullable and `my_campus()` returns
+  null for them. `enforce_profile_campus` (FO021) holds both halves.
+  Three doors, not one: `institutes_select`, `institutes_update` (which was
+  `using (true) with check (true)` — any rep could edit any institute, readable
+  or not) and `institute_status_history_select` (which exposed the whole
+  registry's journey without touching `institutes`). Materials are scoped in
+  **two** places, the table and the bucket, or the row is hidden and the file is
+  not; a null `campus_id` there means every campus.
+  **`log_visit()` and `close_visit()` MUST stay SECURITY INVOKER** — that is what
+  makes campus scoping apply inside them, and a DEFINER rewrite would punch a
+  hole straight through the boundary. The meeting-gate and presence triggers are
+  SECURITY DEFINER and bypass RLS by design; leave them alone.
+  A join against an unreadable institute returns **null, not an error**, so
+  `institute-scope.ts` logs it and prints "Not in your campus" rather than
+  "Unknown institute" — a scoping fault must not read like a deleted row.
 - **`checkout_missing` is an admin's to set, never a rep's.** Deleting the rep's
   "close without check-out" button did not close the API path behind it —
   `daily_plans_update` is `member = auth.uid() or is_admin()`, so a rep could

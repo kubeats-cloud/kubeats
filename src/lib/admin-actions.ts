@@ -270,6 +270,7 @@ export async function createMember(
     email: textOf(formData, "email"),
     password: textOf(formData, "password"),
     role: textOf(formData, "role"),
+    campus_id: textOf(formData, "campus_id"),
   });
   if (!parsed.success) {
     return {
@@ -300,10 +301,13 @@ export async function createMember(
 
   // The profile is written as the admin, not as the service role, so the RLS
   // policy and the role-guard trigger both still apply.
+  // FO021 says the same thing in the database; this is the copy that reaches
+  // the admin as a sentence instead of a constraint rejection.
   const { error: profileError } = await gate.supabase.from("profiles").insert({
     id: data.user.id,
     name: input.name,
     role: input.role,
+    campus_id: input.campus_id,
   });
 
   if (profileError) {

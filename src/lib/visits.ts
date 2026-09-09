@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
+import { instituteNameFrom } from "@/lib/institute-scope";
 import { todayISO } from "@/lib/dates";
 import type { InstituteStatus } from "@/lib/validation/institute";
 
@@ -132,7 +133,7 @@ export async function getTodayPlan(
         ...r
       }) => ({
         ...r,
-        instituteName: names.get(r.institute_id) ?? "Unknown institute",
+        instituteName: instituteNameFrom(names, r.institute_id, "visits"),
         assignedBy: assigned_by,
         assignedByName: assigned_by ? (assigners.get(assigned_by) ?? null) : null,
         checkinAt: checkin_at,
@@ -201,7 +202,7 @@ export async function getPendingVisits(): Promise<
     ok: true,
     visits: rows.map((r) => ({
       ...r,
-      instituteName: names.get(r.institute_id) ?? "Unknown institute",
+      instituteName: instituteNameFrom(names, r.institute_id, "visits"),
       memberName: members.get(r.member) ?? null,
     })),
   };
@@ -412,7 +413,7 @@ export async function getUnreportedVisits(
     id: r.id,
     activity: r.activity,
     date: r.date,
-    instituteName: names.get(r.institute_id) ?? "Unknown institute",
+    instituteName: instituteNameFrom(names, r.institute_id, "visits"),
     planId: r.daily_plan_id,
   }));
 }
@@ -458,7 +459,7 @@ export async function getPlanById(
     id: data.id,
     date: data.date,
     institute_id: data.institute_id,
-    instituteName: names.get(data.institute_id) ?? "Unknown institute",
+    instituteName: instituteNameFrom(names, data.institute_id, "visits"),
     purpose: data.purpose,
     checkinAt: data.checkin_at,
     checkoutAt: data.checkout_at,

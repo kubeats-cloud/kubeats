@@ -11,7 +11,7 @@ document that has the full detail; this page is the index, not a copy of them.
 | **Rotate the service-role key** | It has appeared in a build log; rotating retires it | `docs/PHASE-10-Production-Readiness-Audit.md` (H2) and the rotation steps handed over in session |
 | **Weekly backup + one restore rehearsal** | No automatic backup exists on the free tier; a mistaken delete is otherwise unrecoverable | `docs/BACKUP-RESTORE.md`, "For the client" |
 | **Uptime monitoring** | Nothing polls `/api/health` today, so an outage goes unnoticed. Point a monitor at it for liveness; set `HEALTH_CHECK_TOKEN` if you also want it to check the database | `docs/PHASE-10-Production-Readiness-Audit.md` (M2), and "Security findings & posture" below for F2 |
-| **Deploy size ceiling** | ~199 KiB headroom under the 3072 KiB free-plan limit (measured, stage 3); a big feature could still need the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
+| **Deploy size ceiling** | ~189 KiB headroom under the 3072 KiB free-plan limit (measured, part C); a big feature could still need the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
 | **Set the `security.txt` contact** | The file is live but has **no** contact yet, so finding F5 is not closed. Needs the role address the custom domain unlocks | This document, "Security findings & posture" |
 
 None of these is an application code change. They are operational decisions for whoever owns the

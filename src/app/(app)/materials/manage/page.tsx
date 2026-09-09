@@ -10,6 +10,7 @@ import { MaterialManageList } from "@/components/materials/material-manage-list"
 import { MaterialUploadForm } from "@/components/materials/material-upload-form";
 import { requireAdmin } from "@/lib/admin";
 import { listMaterialsForAdmin } from "@/lib/materials";
+import { listCampuses } from "@/lib/campuses";
 
 export const metadata = { title: "Manage materials" };
 
@@ -35,7 +36,10 @@ export default async function ManageMaterialsPage() {
     );
   }
 
-  const materials = await listMaterialsForAdmin();
+  const [materials, campuses] = await Promise.all([
+    listMaterialsForAdmin(),
+    listCampuses(),
+  ]);
 
   return (
     <PageColumn>
@@ -58,7 +62,7 @@ export default async function ManageMaterialsPage() {
         description="The file is stored as uploaded. Nothing is compressed, so print quality is kept."
         className="mb-6"
       >
-        <MaterialUploadForm userId={gate.user.id} />
+        <MaterialUploadForm userId={gate.user.id} campuses={campuses} />
       </FormSection>
 
       <SectionTitle>In the library</SectionTitle>

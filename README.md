@@ -357,7 +357,7 @@ exist purely to fit:
 Those two together were the cheap wins, and they are spent. Neither is worth
 extending.
 
-**Where it stands: 2873 KiB against a 3072 KiB ceiling — 199 KiB, about 6.5%.**
+**Where it stands: 2883 KiB against a 3072 KiB ceiling — 189 KiB, about 6.1%.**
 
 Read that as a budget, not a comfort. It was 2831 KiB before the in-app camera
 and the area-name lookup; two ordinary features spent nearly two thirds of the

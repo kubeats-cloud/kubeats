@@ -11,6 +11,7 @@ import { TeamPanel } from "@/components/settings/team-panel";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { listPurposeRows, listTeamMembers } from "@/lib/admin";
 import { getLocationTree } from "@/lib/locations";
+import { listCampuses } from "@/lib/campuses";
 
 export const metadata = { title: "Settings" };
 
@@ -33,10 +34,11 @@ export default async function SettingsPage() {
   // The photo counts moved to /data with the flush that needed them; querying
   // storage on every Settings load for a number nothing shows would be a
   // request nobody asked for.
-  const [purposes, tree, members] = await Promise.all([
+  const [purposes, tree, members, campuses] = await Promise.all([
     listPurposeRows(),
     getLocationTree(),
     listTeamMembers(),
+    listCampuses(),
   ]);
 
   return (
@@ -48,7 +50,7 @@ export default async function SettingsPage() {
       />
 
       <SectionTitle>Team</SectionTitle>
-      <TeamPanel members={members} />
+      <TeamPanel members={members} campuses={campuses} />
 
       <SectionTitle className="mt-8">Shared lists</SectionTitle>
       {/* Side by side once there is room: two independent lists an admin edits

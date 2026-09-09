@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
+import { instituteNameOr } from "@/lib/institute-scope";
 import { signVisitPhotos } from "@/lib/photos";
 import type { VisitPhoto } from "@/lib/photos";
 import { activityLabelFor } from "@/lib/validation/visit";
@@ -143,7 +144,7 @@ export async function listTeamVisits(
       memberId: row.member,
       memberName: row.profiles?.name ?? "Unknown",
       instituteId: row.institute_id,
-      instituteName: row.institutes?.name ?? "Unknown institute",
+      instituteName: instituteNameOr(row.institutes?.name, "admin-workspace"),
       city: row.institutes?.city ?? null,
       photo: row.photo_url ? (photos.get(row.photo_url) ?? { status: "expired" }) : null,
     })),
@@ -264,7 +265,7 @@ export async function getOverview(): Promise<
   ).map((row) => ({
     planId: row.id,
     memberName: row.profiles?.name ?? "Unknown",
-    instituteName: row.institutes?.name ?? "Unknown institute",
+    instituteName: instituteNameOr(row.institutes?.name, "admin-workspace"),
     checkinAt: row.checkin_at,
     stale: row.date < today,
     locationManual: row.checkin_location_manual ?? false,
@@ -324,6 +325,6 @@ export async function listAssignments(): Promise<AssignmentRow[]> {
     purpose: row.purpose,
     held: row.meetings_actual !== null,
     memberName: row.profiles?.name ?? "Unknown",
-    instituteName: row.institutes?.name ?? "Unknown institute",
+    instituteName: instituteNameOr(row.institutes?.name, "admin-workspace"),
   }));
 }

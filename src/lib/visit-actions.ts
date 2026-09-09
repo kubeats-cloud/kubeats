@@ -127,6 +127,16 @@ export async function assignVisit(
     if (error.code === "42501") {
       return { error: "Only an admin can assign a visit.", fieldErrors: {} };
     }
+    // FO023 — an assignment has to stay inside the rep's own campus, or it
+    // reintroduces exactly the crossing campus scoping exists to prevent. The
+    // picker is filtered too, so this is the backstop rather than the message
+    // an admin normally sees.
+    if (error.code === "FO023") {
+      return {
+        error: "That institute is not in that rep's campus.",
+        fieldErrors: {},
+      };
+    }
     return {
       error: toFriendlyMessage(error, "We could not assign that visit."),
       fieldErrors: {},
