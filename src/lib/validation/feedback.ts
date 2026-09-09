@@ -285,3 +285,69 @@ export function feedbackFormDataToInput(formData: FormData) {
     session_taken_by: str("session_taken_by"),
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* The form's own state                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the short form holds while it is being filled in.
+ *
+ * It lives HERE rather than in the component so this file — which the unit
+ * tests already import, and which pulls in no React — owns both the shape and
+ * the one operation performed on it.
+ */
+export interface FeedbackState {
+  interested: string;
+  visitOutcome: string;
+  managementResponse: string;
+  studentResponse: string;
+  nextMeetingSet: string;
+  followUpDate: string;
+  followUpTime: string;
+  metName: string;
+  metPhone: string;
+  studentsAttended: string;
+  sessionTopic: string;
+  sessionTakenBy: string;
+  closesVisitId: string;
+}
+
+export const EMPTY_FEEDBACK: FeedbackState = {
+  interested: "",
+  visitOutcome: "",
+  managementResponse: "",
+  studentResponse: "",
+  nextMeetingSet: "",
+  followUpDate: "",
+  followUpTime: "",
+  metName: "",
+  metPhone: "",
+  studentsAttended: "",
+  sessionTopic: "",
+  sessionTakenBy: "",
+  closesVisitId: "",
+};
+
+/** One field's worth of change. */
+export type FeedbackPatch = Partial<FeedbackState>;
+
+/**
+ * Apply one field's change to the state.
+ *
+ * Trivial on its own, and the point is WHERE it is called rather than what it
+ * does: inside a functional update, so `prev` is the latest state rather than
+ * whatever the component last rendered with.
+ *
+ * The bug this replaces was found by driving the live form: two yes/no taps in
+ * the same tick both merged against the same stale prop, and the first answer
+ * vanished. A rep tapping seconds apart would never have seen it, which is why
+ * it survived every other check — the property worth pinning is that patches
+ * COMPOSE, and that is what the test asserts.
+ */
+export function applyFeedbackPatch(
+  prev: FeedbackState,
+  patch: FeedbackPatch,
+): FeedbackState {
+  return { ...prev, ...patch };
+}

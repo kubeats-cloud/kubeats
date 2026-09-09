@@ -15,11 +15,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CaptureFields } from "@/components/visits/capture-fields";
+import { FeedbackFields } from "@/components/visits/feedback-fields";
 import {
   EMPTY_FEEDBACK,
-  FeedbackFields,
+  applyFeedbackPatch,
   type FeedbackState,
-} from "@/components/visits/feedback-fields";
+} from "@/lib/validation/feedback";
 import { logAndFileVisit } from "@/lib/feedback-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import type { OpenLoop, PlanEntry } from "@/lib/visits";
@@ -220,7 +221,10 @@ export function LogVisitForm({
       <FeedbackFields
         status={status}
         value={feedback}
-        onChange={setFeedback}
+        // Functional, so two changes in one tick both survive: the second
+        // merges against the first's result rather than against the render it
+        // started from. See applyFeedbackPatch.
+        onChange={(patch) => setFeedback((prev) => applyFeedbackPatch(prev, patch))}
         fieldErrors={fieldErrors}
         openLoops={openLoops}
       />

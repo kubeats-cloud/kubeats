@@ -17,7 +17,11 @@ import {
   VISIT_OUTCOMES,
   needsCampusCount,
   needsSessionDetail,
+  type FeedbackPatch,
+  type FeedbackState,
 } from "@/lib/validation/feedback";
+
+export { EMPTY_FEEDBACK, type FeedbackState } from "@/lib/validation/feedback";
 import type { OpenLoop } from "@/lib/visits";
 import { formatDate } from "@/lib/dates";
 import { activityLabelFor } from "@/lib/validation/visit";
@@ -123,37 +127,6 @@ function Picker({
   );
 }
 
-export interface FeedbackState {
-  interested: string;
-  visitOutcome: string;
-  managementResponse: string;
-  studentResponse: string;
-  nextMeetingSet: string;
-  followUpDate: string;
-  followUpTime: string;
-  metName: string;
-  metPhone: string;
-  studentsAttended: string;
-  sessionTopic: string;
-  sessionTakenBy: string;
-  closesVisitId: string;
-}
-
-export const EMPTY_FEEDBACK: FeedbackState = {
-  interested: "",
-  visitOutcome: "",
-  managementResponse: "",
-  studentResponse: "",
-  nextMeetingSet: "",
-  followUpDate: "",
-  followUpTime: "",
-  metName: "",
-  metPhone: "",
-  studentsAttended: "",
-  sessionTopic: "",
-  sessionTakenBy: "",
-  closesVisitId: "",
-};
 
 export function FeedbackFields({
   status,
@@ -165,13 +138,26 @@ export function FeedbackFields({
   /** The institute status the rep chose. It decides what else is asked. */
   status: string | null;
   value: FeedbackState;
-  onChange: (next: FeedbackState) => void;
+  /**
+   * Emits a PATCH, not a merged object, and that is the whole fix.
+   *
+   * This used to hand back `{ ...value, [key]: v }` — the whole state, merged
+   * here against the `value` prop. Two changes in one tick therefore both
+   * merged against the SAME stale prop and the second silently overwrote the
+   * first, which is exactly what happened when two yes/no buttons were tapped
+   * in the same tick during live verification.
+   *
+   * A patch cannot do that: the component no longer has the whole object to
+   * merge, so the merge has to happen where the latest state is — inside a
+   * functional update in the parent.
+   */
+  onChange: (patch: FeedbackPatch) => void;
   fieldErrors: Record<string, string>;
   /** Q2 — earlier "Set" loops at this institute the rep may be closing. */
   openLoops: OpenLoop[];
 }) {
   const set = <K extends keyof FeedbackState>(key: K, v: FeedbackState[K]) =>
-    onChange({ ...value, [key]: v });
+    onChange({ [key]: v } as FeedbackPatch);
 
   const err = (key: string) =>
     fieldErrors[key] ? <p className="text-danger text-xs">{fieldErrors[key]}</p> : null;

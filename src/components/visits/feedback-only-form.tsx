@@ -2,11 +2,12 @@
 
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { FeedbackFields } from "@/components/visits/feedback-fields";
 import {
   EMPTY_FEEDBACK,
-  FeedbackFields,
+  applyFeedbackPatch,
   type FeedbackState,
-} from "@/components/visits/feedback-fields";
+} from "@/lib/validation/feedback";
 import { submitFeedback } from "@/lib/feedback-actions";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { fieldLabel } from "@/lib/validation/visit";
@@ -59,7 +60,10 @@ export function FeedbackOnlyForm({
       <FeedbackFields
         status={status}
         value={feedback}
-        onChange={setFeedback}
+        // Functional, so two changes in one tick both survive: the second
+        // merges against the first's result rather than against the render it
+        // started from. See applyFeedbackPatch.
+        onChange={(patch) => setFeedback((prev) => applyFeedbackPatch(prev, patch))}
         fieldErrors={state.fieldErrors}
         openLoops={openLoops}
       />

@@ -1,0 +1,195 @@
+import { describe, expect, it } from "vitest";
+import {
+  EMPTY_FEEDBACK,
+  MANAGEMENT_RESPONSES,
+  STUDENT_RESPONSES,
+  VISIT_OUTCOMES,
+  applyFeedbackPatch,
+  feedbackFieldsSchema,
+  needsCampusCount,
+  needsSessionDetail,
+  type FeedbackState,
+} from "@/lib/validation/feedback";
+
+/**
+ * The short closing report: the state the form holds, and the rules it applies.
+ *
+ * The state half exists as testable code at all because of a bug found by
+ * driving the live form — see the composition suite below.
+ */
+
+const filled = (over: Partial<Record<string, string>> = {}) => ({
+  closes_visit_id: "",
+  notes: "A note",
+  interested: "yes",
+  visit_outcome: "Successful",
+  management_response: "Supportive",
+  student_response: "Very positive",
+  next_meeting_set: "no",
+  follow_up_date: "",
+  follow_up_time: "",
+  met_name: "A Person",
+  met_phone: "9876543210",
+  students_attended: "",
+  session_topic: "",
+  session_taken_by: "",
+  ...over,
+});
+
+describe("applyFeedbackPatch — two changes in one tick both survive", () => {
+  it("composes, which is the property the old code lost", () => {
+    // THE REGRESSION. FeedbackFields used to hand back `{ ...value, [key]: v }`
+    // — the whole state, merged against the `value` PROP. Two changes before a
+    // re-render therefore merged against the same stale object and the second
+    // overwrote the first. Tapping "Yes" on one question and "No" on the next
+    // in the same tick lost the "Yes".
+    //
+    // Patches compose, so applying them in sequence keeps both. That is what
+    // the parent now does inside a functional update.
+    const first = applyFeedbackPatch(EMPTY_FEEDBACK, { interested: "yes" });
+    const second = applyFeedbackPatch(first, { nextMeetingSet: "no" });
+
+    expect(second.interested, "the first answer must survive").toBe("yes");
+    expect(second.nextMeetingSet).toBe("no");
+  });
+
+  it("shows what the old merge did, so the difference is on the record", () => {
+    // The old component computed `{ ...value, [key]: v }` itself, where `value`
+    // was the PROP it last rendered with. Two changes before a re-render both
+    // started from that same object. Reproduced here against a fixed `stale`
+    // to show the loss concretely rather than describing it.
+    const stale = EMPTY_FEEDBACK;
+    const oldFirst = { ...stale, interested: "yes" };
+    const oldSecond = { ...stale, nextMeetingSet: "no" }; // still merging `stale`
+    expect(oldSecond.interested, "the old way dropped the first answer").toBe("");
+    expect(oldFirst.interested).toBe("yes"); // it existed, then was overwritten
+
+    // The new way threads the result through, so nothing is dropped.
+    const now = applyFeedbackPatch(
+      applyFeedbackPatch(stale, { interested: "yes" }),
+      { nextMeetingSet: "no" },
+    );
+    expect(now.interested).toBe("yes");
+    expect(now.nextMeetingSet).toBe("no");
+  });
+
+  it("survives a whole form filled one field at a time", () => {
+    const answers: [keyof FeedbackState, string][] = [
+      ["interested", "yes"],
+      ["visitOutcome", "Successful"],
+      ["managementResponse", "Supportive"],
+      ["studentResponse", "Very positive"],
+      ["nextMeetingSet", "yes"],
+      ["followUpDate", "2026-09-30"],
+      ["followUpTime", "10:30"],
+      ["metName", "A Person"],
+      ["metPhone", "9876543210"],
+    ];
+    const end = answers.reduce(
+      (state, [key, value]) => applyFeedbackPatch(state, { [key]: value }),
+      EMPTY_FEEDBACK,
+    );
+    for (const [key, value] of answers) expect(end[key], key).toBe(value);
+  });
+
+  it("never mutates the state it was given", () => {
+    // A functional update hands back the PREVIOUS state; mutating it would make
+    // React's own bail-out checks see no change.
+    const before = { ...EMPTY_FEEDBACK };
+    applyFeedbackPatch(before, { interested: "yes" });
+    expect(before).toEqual(EMPTY_FEEDBACK);
+  });
+
+  it("starts every field empty, so nothing is answered by default", () => {
+    // "" is a real state: it means the rep has not touched the control, and the
+    // schema rejects it rather than reading silence as "no".
+    for (const [key, value] of Object.entries(EMPTY_FEEDBACK)) {
+      expect(value, key).toBe("");
+    }
+  });
+});
+
+describe("the short form's rules", () => {
+  it("accepts a filled report", () => {
+    expect(feedbackFieldsSchema.safeParse(filled()).success).toBe(true);
+  });
+
+  it("refuses an unanswered yes/no rather than reading it as no", () => {
+    expect(feedbackFieldsSchema.safeParse(filled({ interested: "" })).success).toBe(
+      false,
+    );
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ next_meeting_set: "" })).success,
+    ).toBe(false);
+  });
+
+  it("demands a date AND a time when a next meeting is set", () => {
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ next_meeting_set: "yes" })).success,
+    ).toBe(false);
+    expect(
+      feedbackFieldsSchema.safeParse(
+        filled({ next_meeting_set: "yes", follow_up_date: "2026-09-30" }),
+      ).success,
+      "a date with no time is still refused",
+    ).toBe(false);
+    expect(
+      feedbackFieldsSchema.safeParse(
+        filled({
+          next_meeting_set: "yes",
+          follow_up_date: "2026-09-30",
+          follow_up_time: "10:30",
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
+  it("asks for nothing extra when no next meeting is set", () => {
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ next_meeting_set: "no" })).success,
+    ).toBe(true);
+  });
+
+  it("refuses a phone with nobody attached to it", () => {
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ met_name: "" })).success,
+    ).toBe(false);
+  });
+
+  it("refuses a mobile that is not ten digits", () => {
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ met_phone: "98765" })).success,
+    ).toBe(false);
+  });
+
+  it("refuses a vocabulary the database would refuse too", () => {
+    // Each of these mirrors a CHECK added in 0005. A value the app lets through
+    // but the database rejects is a rep staring at a save that will not work.
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ visit_outcome: "Invented" })).success,
+    ).toBe(false);
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ management_response: "Invented" }))
+        .success,
+    ).toBe(false);
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ student_response: "Invented" })).success,
+    ).toBe(false);
+  });
+
+  it("asks the session questions for a session, and the count alone for a campus visit", () => {
+    // Driven by the STATUS the rep already chose, not by a second checklist.
+    expect(needsSessionDetail("Session done")).toBe(true);
+    expect(needsCampusCount("Session done")).toBe(false);
+    expect(needsCampusCount("Campus visit done")).toBe(true);
+    expect(needsSessionDetail("Campus visit done")).toBe(false);
+    expect(needsSessionDetail(null)).toBe(false);
+    expect(needsCampusCount(null)).toBe(false);
+  });
+
+  it("keeps the three vocabularies the closing report settled on", () => {
+    expect(VISIT_OUTCOMES).toContain("Successful");
+    expect(MANAGEMENT_RESPONSES).toContain("Supportive");
+    expect(STUDENT_RESPONSES).toContain("Very positive");
+  });
+});
