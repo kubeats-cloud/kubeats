@@ -240,6 +240,21 @@ if (configured && !has0018) {
  * gap in two of 0018's triggers. Applied at ship time like 0018, so the suite
  * has to describe both sides of it.
  */
+/**
+ * Migration 0020b is the campus boundary. Applied at ship time like 0018 and
+ * 0019, and probed rather than assumed: a project without it would report the
+ * isolation suite as passing when nothing is scoped at all, which is the one
+ * false green that matters most here.
+ *
+ * Probed through the POLICY rather than the column: 0020a adds campus_id and
+ * changes nothing, so a column is not evidence the boundary exists.
+ */
+const has0020b = configured
+  ? await admin
+      .rpc("my_campus")
+      .then(({ error }) => !error)
+  : false;
+
 const has0019 = configured
   ? await admin
       .rpc("close_visit", { p_visit_id: null, p_daily_plan_id: null, p_visit_outcome: null })
@@ -403,8 +418,30 @@ interface Member {
   db: SupabaseClient;
 }
 
-/** A throwaway account, with a session client that RLS applies to. */
-async function makeMember(role: "rep" | "admin", label: string): Promise<Member> {
+/**
+ * A throwaway account, with a session client that RLS applies to.
+ *
+ * A REP needs a campus and an ADMIN must not have one - enforce_profile_campus
+ * (FO021) refuses either mistake, which is what killed this whole harness the
+ * moment 0020b was applied. The campus is a parameter rather than a constant
+ * because the isolation suite needs two reps on two DIFFERENT campuses, and
+ * proving they cannot see each other is the entire point of the feature.
+ */
+/**
+ * Every account this file creates, so the cleanup cannot miss one.
+ *
+ * afterAll used to name [repA, repB, boss] by hand, which was true when those
+ * were the only three. Suites have since added their own — the targets subject,
+ * and the two reps the isolation suite needs on two campuses — and each new one
+ * was a leaked auth user and profile nobody would have noticed.
+ */
+const createdMembers: Member[] = [];
+
+async function makeMember(
+  role: "rep" | "admin",
+  label: string,
+  campusId?: string,
+): Promise<Member> {
   const email = `${TAG}.${label}@example.com`.replace(/:/g, ".");
   const password = `${TAG}-passphrase`;
 
@@ -417,7 +454,13 @@ async function makeMember(role: "rep" | "admin", label: string): Promise<Member>
 
   const { error: profileError } = await admin
     .from("profiles")
-    .insert({ id: data.user.id, name: `${TAG} ${label}`, role });
+    .insert({
+      id: data.user.id,
+      name: `${TAG} ${label}`,
+      role,
+      // Null for an admin, and FO021 insists on that too.
+      campus_id: role === "rep" ? (campusId ?? null) : null,
+    });
   if (profileError) throw new Error(`profile: ${profileError.message}`);
 
   const session = createClient(url!, anon!, { auth: { persistSession: false } });
@@ -427,7 +470,7 @@ async function makeMember(role: "rep" | "admin", label: string): Promise<Member>
     throw new Error(`signIn: ${signInError?.message}`);
   }
 
-  return {
+  const member: Member = {
     id: data.user.id,
     email,
     db: createClient(url!, anon!, {
@@ -437,6 +480,8 @@ async function makeMember(role: "rep" | "admin", label: string): Promise<Member>
       },
     }),
   };
+  createdMembers.push(member);
+  return member;
 }
 
 describe.skipIf(!configured)("the rules enforced in Postgres", () => {
@@ -452,10 +497,31 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
    */
   let has0006 = false;
 
+  /**
+   * The campus this suite's fixtures live on.
+   *
+   * repA and repB share it deliberately: every existing test here is about a
+   * rule other than campus scoping - the meeting gate, the photo, the weekly
+   * counts - and putting them on different campuses would have made half of
+   * them fail for a reason they are not testing. The campus BOUNDARY has its
+   * own suite at the foot of this file, with its own second campus.
+   */
+  let campusA: string;
+
   beforeAll(async () => {
+    // A throwaway campus, not one of the five: these tests create and delete
+    // institutes freely and must never touch a real campus's pipeline.
+    const { data: campus, error: campusError } = await admin
+      .from("campuses")
+      .insert({ name: `${TAG} campus A`, city: "Testville", active: false })
+      .select("id")
+      .single();
+    if (campusError) throw new Error(`campus: ${campusError.message}`);
+    campusA = campus.id as string;
+
     [repA, repB, boss] = await Promise.all([
-      makeMember("rep", "rep-a"),
-      makeMember("rep", "rep-b"),
+      makeMember("rep", "rep-a", campusA),
+      makeMember("rep", "rep-b", campusA),
       makeMember("admin", "admin"),
     ]);
 
@@ -468,6 +534,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         city: "Bengaluru",
         state: "Karnataka",
         registered_by: repA.id,
+        campus_id: campusA,
       })
       .select("id")
       .single();
@@ -497,7 +564,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
   afterAll(async () => {
     if (!configured) return;
-    const members = [repA, repB, boss].filter(Boolean);
+    // From the registry, not a hand-written list — see createdMembers.
+    const members = createdMembers.filter(Boolean);
 
     // By tag, not by the one id held in scope: a test may add institutes of its
     // own, and a leftover row would quietly accumulate on every run.
@@ -523,6 +591,24 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       await admin.from("daily_plans").delete().eq("member", member.id);
       await admin.from("profiles").delete().eq("id", member.id);
       await admin.auth.admin.deleteUser(member.id);
+    }
+
+    // Material ROWS the isolation suite made. No files were ever uploaded for
+    // them, only the rows that describe them.
+    await admin.from("materials").delete().like("title", `${TAG}%`);
+
+    // Campuses LAST: profiles and institutes reference them with ON DELETE
+    // RESTRICT, so this fails loudly if anything above was missed rather than
+    // silently orphaning a row.
+    const { error: campusError } = await admin
+      .from("campuses")
+      .delete()
+      .like("name", `${TAG}%`);
+    if (campusError) {
+      console.warn(
+        `  ! test campuses could not be removed: ${campusError.message}` +
+          " — something still references them.",
+      );
     }
   });
 
@@ -684,7 +770,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
       const institute = await admin
         .from("institutes")
-        .insert({ name: `${TAG} app_today school`, type: "school", boards: BOARDS })
+        .insert({ name: `${TAG} app_today school`, type: "school", boards: BOARDS, campus_id: campusA })
         .select("id")
         .single();
       const houseId = institute.data!.id as string;
@@ -741,7 +827,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       // The gate did not get looser, only consistent.
       const institute = await admin
         .from("institutes")
-        .insert({ name: `${TAG} yesterday school`, type: "school", boards: BOARDS })
+        .insert({ name: `${TAG} yesterday school`, type: "school", boards: BOARDS, campus_id: campusA })
         .select("id")
         .single();
       const houseId = institute.data!.id as string;
@@ -1102,7 +1188,13 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .update({ role: "admin" })
         .eq("id", repB.id);
 
-      expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+      // Two guards now stand here, and either refusal is the right outcome.
+      // guard_profile_role has always raised insufficient_privilege; since
+      // 0020b, FO021 gets there first because a rep carries a campus and an
+      // admin must not - so promoting yourself trips the campus rule before
+      // the role rule is reached. The assertion that matters is the one below:
+      // the row did not move.
+      expect([INSUFFICIENT_PRIVILEGE, "FO021"]).toContain(error?.code);
 
       const { data } = await admin
         .from("profiles")
@@ -1364,6 +1456,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           city: "Bengaluru",
           state: "Karnataka",
           registered_by: repA.id,
+          campus_id: campusA,
         })
         .select("id")
         .single();
@@ -1672,7 +1765,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const makeInstitute = async (label: string) => {
       const { data, error } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, registered_by: repA.id })
+        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, registered_by: repA.id, campus_id: campusA })
         .select("id")
         .single();
       if (error) throw new Error(`institute: ${error.message}`);
@@ -1912,7 +2005,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const closedInstitute = async (label: string, status: string) => {
       const { data, error } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, registered_by: repA.id })
+        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, registered_by: repA.id, campus_id: campusA })
         .select("id")
         .single();
       if (error) throw new Error(`institute: ${error.message}`);
@@ -2225,10 +2318,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const month = `${day.slice(0, 7)}-01`;
 
     beforeAll(async () => {
-      subject = await makeMember("rep", "targets");
+      subject = await makeMember("rep", "targets", campusA);
       const { data, error } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} targets school`, type: "school", boards: BOARDS })
+        .insert({ name: `${TAG} targets school`, type: "school", boards: BOARDS, campus_id: campusA })
         .select("id")
         .single();
       if (error) throw new Error(`institute: ${error.message}`);
@@ -2414,7 +2507,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const coverDay = iso(-6);
       const { data: second } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} second school`, type: "school", boards: BOARDS })
+        .insert({ name: `${TAG} second school`, type: "school", boards: BOARDS, campus_id: campusA })
         .select("id")
         .single();
 
@@ -2500,7 +2593,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const plan = async (label: string, date = day) => {
       const { data: house, error: hErr } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS })
+        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, campus_id: campusA })
         .select("id")
         .single();
       if (hErr) throw new Error(`institute: ${hErr.message}`);
@@ -2521,7 +2614,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     beforeAll(async () => {
       const { data } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} presence base`, type: "school", boards: BOARDS })
+        .insert({ name: `${TAG} presence base`, type: "school", boards: BOARDS, campus_id: campusA })
         .select("id")
         .single();
       houseId = data!.id;
@@ -2748,7 +2841,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const freshPlan = async (label: string, date = day) => {
       const { data: house, error: hErr } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} s3 ${label}`, type: "school", boards: BOARDS })
+        .insert({ name: `${TAG} s3 ${label}`, type: "school", boards: BOARDS, campus_id: campusA })
         .select("id")
         .single();
       if (hErr) throw new Error(`institute: ${hErr.message}`);
@@ -2795,7 +2888,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     beforeAll(async () => {
       const { data } = await admin
         .from("institutes")
-        .insert({ name: `${TAG} s3 base`, type: "school", boards: BOARDS })
+        .insert({ name: `${TAG} s3 base`, type: "school", boards: BOARDS, campus_id: campusA })
         .select("id")
         .single();
       houseId = data!.id;
@@ -3162,7 +3255,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         // INSERTED with checkin_at already set skipped them entirely.
         const { data: house } = await admin
           .from("institutes")
-          .insert({ name: `${TAG} insert guard`, type: "school", boards: BOARDS })
+          .insert({ name: `${TAG} insert guard`, type: "school", boards: BOARDS, campus_id: campusA })
           .select("id")
           .single();
 
@@ -3262,4 +3355,312 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       });
     });
   });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!configured || !has0020b)(
+    "campus isolation — the acceptance test for part C",
+    () => {
+      /**
+       * TWO REPS ON TWO DIFFERENT CAMPUSES, and the whole feature is whether
+       * neither can reach the other.
+       *
+       * Every assertion below runs through a rep's OWN SIGNED-IN CLIENT. That
+       * is not a stylistic choice: `admin` here is the service-role key, which
+       * bypasses RLS entirely, so it is structurally incapable of testing this.
+       * A suite that checked campus scoping with the service role would pass
+       * against a database with no policies at all.
+       *
+       * Read `.data` rather than `.error` throughout. RLS does not raise on a
+       * read - it returns fewer rows - so a leak looks like a successful query
+       * with somebody else's data in it. That is exactly what makes it easy to
+       * miss and worth testing this precisely.
+       */
+      let campusB: string;
+      let alice: Member; // campus A
+      let bob: Member; // campus B
+      let aliceSchool: string;
+      let bobSchool: string;
+      let sharedMaterial: string | null = null;
+      let bobMaterial: string | null = null;
+
+      const schoolFor = async (campusId: string, ownerId: string, label: string) => {
+        const { data, error } = await admin
+          .from("institutes")
+          .insert({
+            name: `${TAG} ${label}`,
+            type: "school",
+            boards: BOARDS,
+            registered_by: ownerId,
+            campus_id: campusId,
+          })
+          .select("id")
+          .single();
+        if (error) throw new Error(`${label}: ${error.message}`);
+        return data.id as string;
+      };
+
+      beforeAll(async () => {
+        const { data: campus, error } = await admin
+          .from("campuses")
+          .insert({ name: `${TAG} campus B`, city: "Otherville", active: false })
+          .select("id")
+          .single();
+        if (error) throw new Error(`campus B: ${error.message}`);
+        campusB = campus.id as string;
+
+        alice = await makeMember("rep", "alice", campusA);
+        bob = await makeMember("rep", "bob", campusB);
+
+        aliceSchool = await schoolFor(campusA, alice.id, "alice school");
+        bobSchool = await schoolFor(campusB, bob.id, "bob school");
+      });
+
+      describe("institutes", () => {
+        it("shows each rep their own and not the other's", async () => {
+          const { data: aliceSees } = await alice.db
+            .from("institutes")
+            .select("id")
+            .in("id", [aliceSchool, bobSchool]);
+          expect(aliceSees?.map((r) => r.id)).toEqual([aliceSchool]);
+
+          const { data: bobSees } = await bob.db
+            .from("institutes")
+            .select("id")
+            .in("id", [aliceSchool, bobSchool]);
+          expect(bobSees?.map((r) => r.id)).toEqual([bobSchool]);
+        });
+
+        it("returns NOTHING rather than an error for the other's id", async () => {
+          // The shape a leak would take. Asking for a specific foreign row by
+          // id is the most direct attempt there is, and it comes back empty
+          // rather than refused - which is why .data is what is asserted.
+          const { data, error } = await bob.db
+            .from("institutes")
+            .select("id, name")
+            .eq("id", aliceSchool);
+          expect(error).toBeNull();
+          expect(data).toEqual([]);
+        });
+
+        it("REFUSES an edit of the other's institute (the institutes_update hole)", async () => {
+          // institutes_update was `using (true) with check (true)`: any rep
+          // could rewrite any institute's name, contacts or status. Reading was
+          // never the only door.
+          const { data } = await bob.db
+            .from("institutes")
+            .update({ name: `${TAG} bob was here` })
+            .eq("id", aliceSchool)
+            .select("id");
+          expect(data ?? [], "bob must not have updated a row").toEqual([]);
+
+          const { data: after } = await admin
+            .from("institutes")
+            .select("name")
+            .eq("id", aliceSchool)
+            .single();
+          expect(after?.name).toBe(`${TAG} alice school`);
+        });
+
+        it("refuses to register into the other's campus", async () => {
+          const { error } = await bob.db.from("institutes").insert({
+            name: `${TAG} bob smuggling`,
+            type: "school",
+            boards: BOARDS,
+            registered_by: bob.id,
+            campus_id: campusA,
+          });
+          expect(error).not.toBeNull();
+        });
+      });
+
+      describe("status history", () => {
+        it("hides the other campus's journey", async () => {
+          // The quiet door: names, statuses and dates were readable by every
+          // rep without ever selecting from institutes.
+          await admin
+            .from("institutes")
+            .update({ status: "First meeting done" })
+            .eq("id", aliceSchool);
+          await admin
+            .from("institutes")
+            .update({ status: "Session done" })
+            .eq("id", bobSchool);
+
+          const { data: bobSees } = await bob.db
+            .from("institute_status_history")
+            .select("institute_id")
+            .in("institute_id", [aliceSchool, bobSchool]);
+          expect(bobSees?.every((r) => r.institute_id === bobSchool)).toBe(true);
+
+          const { data: aliceSees } = await alice.db
+            .from("institute_status_history")
+            .select("institute_id")
+            .in("institute_id", [aliceSchool, bobSchool]);
+          expect(aliceSees?.every((r) => r.institute_id === aliceSchool)).toBe(true);
+        });
+      });
+
+      describe("visits", () => {
+        it("hides the other rep's visits", async () => {
+          // Member scoping already did this, and it is asserted here anyway:
+          // "already covered by another rule" is how a boundary quietly stops
+          // being covered by any rule.
+          await admin.from("daily_plans").insert({
+            member: alice.id,
+            date: iso(),
+            institute_id: aliceSchool,
+            purpose: `${TAG} alice plan`,
+            checkin_at: new Date().toISOString(),
+            checkin_lat: 23.0225,
+            checkin_lng: 72.5714,
+          });
+          const { data: visit } = await admin
+            .from("visits")
+            .insert({
+              institute_id: aliceSchool,
+              member: alice.id,
+              activity: "olympiad",
+              date: iso(),
+              photo_url: photoFor(alice.id),
+            })
+            .select("id")
+            .single();
+
+          const { data: bobSees } = await bob.db
+            .from("visits")
+            .select("id")
+            .eq("id", visit!.id);
+          expect(bobSees).toEqual([]);
+
+          const { data: aliceSees } = await alice.db
+            .from("visits")
+            .select("id")
+            .eq("id", visit!.id);
+          expect(aliceSees?.length).toBe(1);
+        });
+      });
+
+      describe("materials", () => {
+        beforeAll(async () => {
+          const rows = [
+            { title: `${TAG} shared`, campus_id: null },
+            { title: `${TAG} bob only`, campus_id: campusB },
+          ];
+          for (const row of rows) {
+            const { data } = await admin
+              .from("materials")
+              .insert({
+                title: row.title,
+                category: "Poster",
+                file_path: `${TAG}/${crypto.randomUUID()}.png`,
+                file_name: "x.png",
+                file_type: "image/png",
+                file_size: 10,
+                campus_id: row.campus_id,
+              })
+              .select("id")
+              .single();
+            if (row.campus_id === null) sharedMaterial = data!.id;
+            else bobMaterial = data!.id;
+          }
+        });
+
+        it("keeps a campus-specific material to that campus", async () => {
+          const { data: aliceSees } = await alice.db
+            .from("materials")
+            .select("id")
+            .eq("id", bobMaterial!);
+          expect(aliceSees, "alice must not see bob's material").toEqual([]);
+
+          const { data: bobSees } = await bob.db
+            .from("materials")
+            .select("id")
+            .eq("id", bobMaterial!);
+          expect(bobSees?.length).toBe(1);
+        });
+
+        it("sends an ALL CAMPUSES material to both", async () => {
+          // Null campus_id is the shared library the app had before scoping,
+          // and it has to keep working or every existing material vanishes.
+          for (const [who, rep] of [["alice", alice], ["bob", bob]] as const) {
+            const { data } = await rep.db
+              .from("materials")
+              .select("id")
+              .eq("id", sharedMaterial!);
+            expect(data?.length, `${who} should see the shared material`).toBe(1);
+          }
+        });
+      });
+
+      describe("the admin", () => {
+        it("sees BOTH campuses' institutes", async () => {
+          const { data } = await boss.db
+            .from("institutes")
+            .select("id")
+            .in("id", [aliceSchool, bobSchool]);
+          expect(data?.length, "an accidentally-scoped admin breaks oversight").toBe(2);
+        });
+
+        it("sees both campuses' status history", async () => {
+          const { data } = await boss.db
+            .from("institute_status_history")
+            .select("institute_id")
+            .in("institute_id", [aliceSchool, bobSchool]);
+          const seen = new Set((data ?? []).map((r) => r.institute_id));
+          expect(seen.has(aliceSchool) && seen.has(bobSchool)).toBe(true);
+        });
+
+        it("sees both reps' visits and every material", async () => {
+          const { data: visits } = await boss.db
+            .from("visits")
+            .select("id")
+            .in("institute_id", [aliceSchool, bobSchool]);
+          expect((visits ?? []).length).toBeGreaterThan(0);
+
+          const { data: materials } = await boss.db
+            .from("materials")
+            .select("id")
+            .in("id", [sharedMaterial!, bobMaterial!]);
+          expect(materials?.length).toBe(2);
+        });
+
+        it("has no campus of their own, which is what makes that work", async () => {
+          const { data } = await admin
+            .from("profiles")
+            .select("campus_id")
+            .eq("id", boss.id)
+            .single();
+          // my_campus() returns null for an admin, so `campus_id = my_campus()`
+          // is false for them. Every policy leads with is_admin() for exactly
+          // this reason - without it an admin would see NOTHING.
+          expect(data?.campus_id).toBeNull();
+        });
+      });
+
+      describe("cross-campus assignment", () => {
+        it("is refused (FO023)", async () => {
+          const { error } = await boss.db.from("daily_plans").insert({
+            member: bob.id,
+            date: iso(1),
+            institute_id: aliceSchool,
+            purpose: `${TAG} wrong campus`,
+            assigned_by: boss.id,
+          });
+          expect(error?.code).toBe("FO023");
+        });
+
+        it("is allowed within the rep's own campus", async () => {
+          const { error } = await boss.db.from("daily_plans").insert({
+            member: bob.id,
+            date: iso(1),
+            institute_id: bobSchool,
+            purpose: `${TAG} right campus`,
+            assigned_by: boss.id,
+          });
+          expect(error).toBeNull();
+        });
+      });
+    },
+  );
 });
