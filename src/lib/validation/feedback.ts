@@ -233,7 +233,13 @@ export const feedbackSchema = z
   .object({
     ...shape,
     visit_id: z.uuid(),
-    daily_plan_id: z.uuid(),
+    /**
+     * Null when the check-in this visit came from is already closed — swept
+     * overnight, or cleared by an admin. The report is still owed and is still
+     * filed; there is simply no check-out left to stamp, and asking for one
+     * would be refused by daily_plans_checkout_missing_valid.
+     */
+    daily_plan_id: z.uuid().nullable(),
   })
   .superRefine(refine);
 
@@ -262,7 +268,7 @@ export function feedbackFormDataToInput(formData: FormData) {
   };
   return {
     visit_id: str("visit_id"),
-    daily_plan_id: str("daily_plan_id"),
+    daily_plan_id: str("daily_plan_id") || null,
     closes_visit_id: str("closes_visit_id"),
     notes: str("notes"),
     interested: str("interested"),

@@ -31,12 +31,16 @@ export function FeedbackOnlyForm({
   planId,
   status,
   openLoops,
+  alreadyClosed = false,
 }: {
   visitId: string;
-  planId: string;
+  /** Null when the check-in is already closed and there is no check-out left. */
+  planId: string | null;
   /** The status recorded when the visit was logged. */
   status: string | null;
   openLoops: OpenLoop[];
+  /** Swept overnight, or cleared by an admin, before the report was filed. */
+  alreadyClosed?: boolean;
 }) {
   const [state, formAction, isPending] = useActionState(submitFeedback, EMPTY_STATE);
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
@@ -44,11 +48,12 @@ export function FeedbackOnlyForm({
   return (
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="visit_id" value={visitId} />
-      <input type="hidden" name="daily_plan_id" value={planId} />
+      <input type="hidden" name="daily_plan_id" value={planId ?? ""} />
 
       <p className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-sm">
-        Your visit was saved but the report did not go through. Finish it here
-        and you will be checked out.
+        {alreadyClosed
+          ? "This visit was saved but never reported, and the check-in has since been closed. Finish the report here — the time on site stays “not recorded”, which is the honest answer."
+          : "Your visit was saved but the report did not go through. Finish it here and you will be checked out."}
       </p>
 
       <FeedbackFields
@@ -78,7 +83,11 @@ export function FeedbackOnlyForm({
       )}
 
       <Button type="submit" className="h-11 w-full" disabled={isPending}>
-        {isPending ? "Saving…" : "Save and check out"}
+        {isPending
+          ? "Saving…"
+          : alreadyClosed
+            ? "Save the report"
+            : "Save and check out"}
       </Button>
     </form>
   );

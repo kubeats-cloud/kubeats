@@ -416,3 +416,52 @@ export async function getUnreportedVisits(
     planId: r.daily_plan_id,
   }));
 }
+
+/**
+ * One plan row by id, whatever day it belongs to.
+ *
+ * getTodayPlan() answers "what am I doing today", which is the right question
+ * for the Dashboard and the wrong one for finishing a report: a visit logged
+ * yesterday and never reported still owes one, and by then its plan row has
+ * been swept closed and is not in today's list at all.
+ *
+ * Scoped by RLS to the caller, and by member as well for correctness.
+ */
+export async function getPlanById(
+  memberId: string,
+  planId: string,
+): Promise<{
+  id: string;
+  date: string;
+  institute_id: string;
+  instituteName: string;
+  purpose: string;
+  checkinAt: string | null;
+  checkoutAt: string | null;
+  checkoutMissing: boolean;
+} | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("daily_plans")
+    .select("id, date, institute_id, purpose, checkin_at, checkout_at, checkout_missing")
+    .eq("id", planId)
+    .eq("member", memberId)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (error) logError("visits:plan-by-id", error);
+    return null;
+  }
+
+  const names = await instituteNames([data.institute_id]);
+  return {
+    id: data.id,
+    date: data.date,
+    institute_id: data.institute_id,
+    instituteName: names.get(data.institute_id) ?? "Unknown institute",
+    purpose: data.purpose,
+    checkinAt: data.checkin_at,
+    checkoutAt: data.checkout_at,
+    checkoutMissing: data.checkout_missing ?? false,
+  };
+}

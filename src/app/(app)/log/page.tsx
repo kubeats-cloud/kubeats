@@ -7,7 +7,12 @@ import { EmptyState } from "@/components/states";
 import { LogVisitForm } from "@/components/visits/log-visit-form";
 import { FeedbackOnlyForm } from "@/components/visits/feedback-only-form";
 import { getCurrentUser } from "@/lib/auth";
-import { getTodayPlan, getUnreportedVisitFor, openLoopsAt } from "@/lib/visits";
+import {
+  getPlanById,
+  getTodayPlan,
+  getUnreportedVisitFor,
+  openLoopsAt,
+} from "@/lib/visits";
 import { visitStatusOf } from "@/lib/validation/checkin";
 import { formatTime, todayISO } from "@/lib/dates";
 
@@ -55,8 +60,61 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
         checkoutMissing: entry.checkoutMissing,
       }) === "In Progress",
   );
+
+  // A named plan is honoured whatever day it belongs to and whatever state it
+  // is in. That is what makes "Finish the report" work for a visit whose
+  // check-in was swept closed overnight: the report is still owed, and the plan
+  // row it came from is no longer in today's list at all.
+  const named = planId ? await getPlanById(user.id, planId) : null;
   const entry = inProgress.find((e) => e.id === planId) ?? inProgress[0] ?? null;
 
+  // Finishing a report needs a visit, not an arrival — so this is asked of the
+  // named plan first and only then of the one in progress.
+  const target = named ?? entry;
+  const existing = target
+    ? await getUnreportedVisitFor({
+        member: user.id,
+        date: named ? named.date : today,
+        institute_id: target.institute_id,
+      })
+    : null;
+
+  if (target && existing) {
+    const stillOpen =
+      target.checkinAt !== null &&
+      target.checkoutAt === null &&
+      target.checkoutMissing === false;
+
+    const openLoops = await openLoopsAt(user.id, target.institute_id);
+    const arrivedAt = target.checkinAt ? formatTime(target.checkinAt) : null;
+
+    return (
+      <PageColumn>
+        <PageHeader
+          eyebrow="Finish this visit"
+          title="How did it go?"
+          description={
+            arrivedAt
+              ? `${target.instituteName} · arrived ${arrivedAt}`
+              : target.instituteName
+          }
+        />
+        <FeedbackOnlyForm
+          visitId={existing.id}
+          // Null once the check-in is closed: the report is still filed, but
+          // there is no check-out left to stamp and the database would refuse
+          // one (daily_plans_checkout_missing_valid).
+          planId={stillOpen ? target.id : null}
+          status={existing.status_set_to}
+          openLoops={openLoops}
+          alreadyClosed={!stillOpen}
+        />
+      </PageColumn>
+    );
+  }
+
+  // Past the report branch, this is the full log form — and that genuinely does
+  // need an arrival in progress. Nothing to log without one.
   if (!entry) {
     return (
       <PageColumn>
@@ -74,45 +132,21 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
     );
   }
 
-  const [existing, openLoops] = await Promise.all([
-    // Keyed on the plan's own (member, date, institute), NOT on
-    // visits.daily_plan_id — that link is written by close_visit(), which is
-    // the step that fails in the case this recovers. See getUnreportedVisitFor.
-    getUnreportedVisitFor({
-      member: user.id,
-      date: today,
-      institute_id: entry.institute_id,
-    }),
-    openLoopsAt(user.id, entry.institute_id),
-  ]);
+  const openLoops = await openLoopsAt(user.id, entry.institute_id);
 
   // "Meeting time" is the arrival, server-stamped — never a field the rep types.
   const arrived = entry.checkinAt ? formatTime(entry.checkinAt) : null;
-  const description = arrived
-    ? `${entry.instituteName} · arrived ${arrived}`
-    : entry.instituteName;
-
-  if (existing) {
-    return (
-      <PageColumn>
-        <PageHeader
-          eyebrow="Finish this visit"
-          title="How did it go?"
-          description={description}
-        />
-        <FeedbackOnlyForm
-          visitId={existing.id}
-          planId={entry.id}
-          status={existing.status_set_to}
-          openLoops={openLoops}
-        />
-      </PageColumn>
-    );
-  }
 
   return (
     <PageColumn>
-      <PageHeader title="Log a visit" description={description} />
+      <PageHeader
+        title="Log a visit"
+        description={
+          arrived
+            ? `${entry.instituteName} · arrived ${arrived}`
+            : entry.instituteName
+        }
+      />
       <LogVisitForm userId={user.id} plan={entry} openLoops={openLoops} />
     </PageColumn>
   );
