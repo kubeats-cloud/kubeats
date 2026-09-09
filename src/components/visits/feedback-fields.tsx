@@ -12,7 +12,9 @@ import {
 } from "@/components/ui/select";
 import { FormSection } from "@/components/form-section";
 import {
-  MANAGEMENT_INTERESTS,
+  MANAGEMENT_RESPONSES,
+  STUDENT_RESPONSES,
+  VISIT_OUTCOMES,
   needsCampusCount,
   needsSessionDetail,
 } from "@/lib/validation/feedback";
@@ -77,9 +79,55 @@ function Choice({
   );
 }
 
+/**
+ * One dropdown, its hidden field and its error, in one place.
+ *
+ * Three near-identical selects is exactly where a copy-paste slip puts the
+ * wrong `name` on the right control and the value lands in another column.
+ */
+function Picker({
+  label,
+  name,
+  placeholder,
+  options,
+  value,
+  onChange,
+  error,
+}: {
+  label: string;
+  name: string;
+  placeholder: string;
+  options: readonly string[];
+  value: string;
+  onChange: (v: string) => void;
+  error?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger className="h-11 w-full" aria-label={label}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <input type="hidden" name={name} value={value} />
+      {error && <p className="text-danger text-xs">{error}</p>}
+    </div>
+  );
+}
+
 export interface FeedbackState {
   interested: string;
-  managementInterest: string;
+  visitOutcome: string;
+  managementResponse: string;
+  studentResponse: string;
   nextMeetingSet: string;
   followUpDate: string;
   followUpTime: string;
@@ -93,7 +141,9 @@ export interface FeedbackState {
 
 export const EMPTY_FEEDBACK: FeedbackState = {
   interested: "",
-  managementInterest: "",
+  visitOutcome: "",
+  managementResponse: "",
+  studentResponse: "",
   nextMeetingSet: "",
   followUpDate: "",
   followUpTime: "",
@@ -150,30 +200,39 @@ export function FeedbackFields({
           error={fieldErrors.interested}
         />
 
-        <div className="space-y-2">
-          <Label>How interested is management?</Label>
-          <Select
-            value={value.managementInterest}
-            onValueChange={(v) => set("managementInterest", v)}
-          >
-            <SelectTrigger className="h-11 w-full" aria-label="Management interest">
-              <SelectValue placeholder="Choose a level" />
-            </SelectTrigger>
-            <SelectContent>
-              {MANAGEMENT_INTERESTS.map((level) => (
-                <SelectItem key={level} value={level}>
-                  {level}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <input
-            type="hidden"
-            name="management_interest"
-            value={value.managementInterest}
-          />
-          {err("management_interest")}
-        </div>
+        {/* Three dropdowns, each one a fixed vocabulary the database also
+            holds as a CHECK. The management interest LEVEL that briefly sat
+            here is gone: a level beside a response is two answers to one
+            question, and the response is the one that says something. */}
+        <Picker
+          label="How did the visit end?"
+          name="visit_outcome"
+          placeholder="Choose an outcome"
+          options={VISIT_OUTCOMES}
+          value={value.visitOutcome}
+          onChange={(v) => set("visitOutcome", v)}
+          error={fieldErrors.visit_outcome}
+        />
+
+        <Picker
+          label="How did management respond?"
+          name="management_response"
+          placeholder="Choose a response"
+          options={MANAGEMENT_RESPONSES}
+          value={value.managementResponse}
+          onChange={(v) => set("managementResponse", v)}
+          error={fieldErrors.management_response}
+        />
+
+        <Picker
+          label="How did the students respond?"
+          name="student_response"
+          placeholder="Choose a response"
+          options={STUDENT_RESPONSES}
+          value={value.studentResponse}
+          onChange={(v) => set("studentResponse", v)}
+          error={fieldErrors.student_response}
+        />
       </FormSection>
 
       <FormSection

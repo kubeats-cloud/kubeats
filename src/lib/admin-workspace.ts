@@ -124,25 +124,22 @@ export async function listTeamVisits(
       notes: row.notes,
       reportedAt: row.reported_at,
       /**
-       * The Outcome column, which had to change hands.
+       * The Outcome column reads `visit_outcome` again — the field is back on
+       * the form, so the column that was named after it works again.
        *
-       * It read `visit_outcome` — a field the short form dropped — so every
-       * visit filed under stage 3 would have shown a dash for ever, in the one
-       * column an admin scans down.
-       *
-       * BOTH are read rather than only the new one. A visit filed before stage
-       * 3 has a visit_outcome and no institute_interested; one filed after has
-       * the reverse; and dropping the old value would have blanked the column
-       * backwards through the whole history to fix it going forwards. The new
-       * answer wins where both somehow exist, because it is the one the form
-       * still asks for.
+       * The fallback to `institute_interested` stays behind it rather than
+       * being taken out. It costs one comparison and it covers the case this
+       * column has already been caught by once: a visit whose outcome was left
+       * blank still says something, instead of a dash in the one column an
+       * admin scans down.
        */
       outcome:
-        row.institute_interested === null
-          ? row.visit_outcome
+        row.visit_outcome ??
+        (row.institute_interested === null
+          ? null
           : row.institute_interested
             ? "Interested"
-            : "Not interested",
+            : "Not interested"),
       memberId: row.member,
       memberName: row.profiles?.name ?? "Unknown",
       instituteId: row.institute_id,

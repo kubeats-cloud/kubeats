@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { MANAGEMENT_INTERESTS } from "@/lib/validation/feedback";
+import {
+  MANAGEMENT_INTERESTS,
+  MANAGEMENT_RESPONSES,
+  STUDENT_RESPONSES,
+  VISIT_OUTCOMES,
+} from "@/lib/validation/feedback";
 
 /**
  * The closing report's vocabulary — and, until stage 3, its conditional rules.
@@ -8,8 +13,14 @@ import { MANAGEMENT_INTERESTS } from "@/lib/validation/feedback";
  * `submitClosingReport` were deleted with it; the short feedback form in
  * `validation/feedback.ts` replaced them, and `close_visit()` files it.
  *
- * This file stays because the vocabularies are still needed to READ an old
- * report — `report-view.tsx` renders every filed report, and one filed before
+ * The four vocabularies the live form still uses — VISIT_OUTCOMES,
+ * MANAGEMENT_RESPONSES, STUDENT_RESPONSES and MANAGEMENT_INTERESTS — moved to
+ * validation/feedback.ts and are re-exported here. They are not defined in two
+ * places: a second copy of a list that a CHECK constraint also holds is exactly
+ * how the app and the database drift apart.
+ *
+ * This file stays because the rest of the vocabularies are still needed to READ
+ * an old report — `report-view.tsx` renders every filed report, and one filed before
  * stage 3 has all of these fields in it. `MANAGEMENT_INTERESTS` is used by the
  * new form as well; it was always a good list.
  *
@@ -81,31 +92,8 @@ export const CONTACT_TYPES = [
   "Other",
 ] as const;
 
-export const STUDENT_RESPONSES = [
-  "Very positive",
-  "Positive",
-  "Mixed",
-  "Low interest",
-  "No students present",
-] as const;
 
-export const MANAGEMENT_RESPONSES = [
-  "Supportive",
-  "Interested",
-  "Wants a proposal",
-  "Needs internal approval",
-  "Budget concerns",
-  "Not interested",
-  "Not available",
-] as const;
 
-export const VISIT_OUTCOMES = [
-  "Successful",
-  "Partially successful",
-  "Follow-up required",
-  "Postponed",
-  "Not interested",
-] as const;
 
 export const SESSION_CLASSES = ["9", "10", "11", "12", "Mixed"] as const;
 export const SESSION_STREAMS = ["science", "commerce", "humanities"] as const;
@@ -139,7 +127,7 @@ export const STUDENT_INTENTS = [
  * client components import feedback.ts, and importing it FROM here would drag
  * closingReportSchema below into the browser bundle.
  */
-export { MANAGEMENT_INTERESTS };
+export { MANAGEMENT_INTERESTS, MANAGEMENT_RESPONSES, STUDENT_RESPONSES, VISIT_OUTCOMES };
 
 /** D — the primary outcome category, distinct from visit_outcome. */
 export const PRIMARY_OUTCOMES = [

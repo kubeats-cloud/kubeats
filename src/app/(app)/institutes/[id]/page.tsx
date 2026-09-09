@@ -241,9 +241,6 @@ export default async function InstituteDetailPage(
                     <p className="text-muted-foreground text-xs">
                       {[
                         visit.visitOutcome,
-                        visit.managementInterest
-                          ? `${visit.managementInterest} management interest`
-                          : null,
                         visit.studentsAttended !== null
                           ? `${visit.studentsAttended} students`
                           : null,

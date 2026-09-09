@@ -322,20 +322,33 @@ export async function openLoopsAt(
 }
 
 /**
- * The visit already logged against a check-in, if there is one.
+ * The visit already logged against this check-in whose report is not finished.
  *
- * The flow logs the visit and files the feedback in one submit, but they are
- * two RPCs and only the second is a transaction with the check-out. If the
- * first succeeds and the second does not — a dropped connection at exactly the
- * wrong moment — the visit exists, unreported, and the rep is still checked in.
+ * MATCHED ON THE PLAN'S OWN KEY, NOT ON visits.daily_plan_id, and that is the
+ * whole point of this function rather than an incidental detail.
  *
- * So the Log Visit screen asks this before it renders. Finding a visit means
- * the logging half is already done, and the rep is shown the feedback alone
- * rather than a form that would log a SECOND visit for the same arrival.
+ * Logging and filing are one submit but two RPCs. If the first succeeds and the
+ * second does not, the visit exists, unreported, and the rep is still checked
+ * in — which is exactly the case this exists to recover. But `daily_plan_id` is
+ * written by `close_visit()`, the step that just failed, so looking the visit up
+ * by that link finds nothing in precisely the situation it was added for. The
+ * rep would be handed the full log form and would log a SECOND visit for one
+ * arrival.
+ *
+ * So it matches the way the plan row itself is keyed: (member, date,
+ * institute_id), which `daily_plans_unique_per_day` has made unique since 0001
+ * and which #8 keeps to one check-in cycle. `reported_at is null` is what makes
+ * it a resume rather than a duplicate — once the report is filed this returns
+ * nothing and the screen stops offering it.
+ *
+ * Newest first, because a cycle may legitimately record more than one activity
+ * (Q3) and the one still owing a report is the one just logged.
  */
-export async function getVisitForPlan(
-  planId: string,
-): Promise<{
+export async function getUnreportedVisitFor(plan: {
+  member: string;
+  date: string;
+  institute_id: string;
+}): Promise<{
   id: string;
   activity: string;
   lifecycle_status: string | null;
@@ -346,12 +359,60 @@ export async function getVisitForPlan(
   const { data, error } = await supabase
     .from("visits")
     .select("id, activity, lifecycle_status, status_set_to, reported_at")
-    .eq("daily_plan_id", planId)
-    .maybeSingle();
+    .eq("member", plan.member)
+    .eq("date", plan.date)
+    .eq("institute_id", plan.institute_id)
+    .is("reported_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1);
 
   if (error) {
-    logError("visits:for-plan", error);
+    logError("visits:unreported-for-plan", error);
     return null;
   }
-  return data ?? null;
+  return data?.[0] ?? null;
+}
+
+/**
+ * Every visit of this rep's still owing a report — the "pending closing report"
+ * list.
+ *
+ * Distinct from `getPendingVisits()`, which lists "Set" loops waiting to be
+ * COMPLETED. This lists visits that already happened and are waiting to be
+ * DESCRIBED, which is a different kind of owing and a much shorter one: a rep
+ * finishes these today.
+ */
+export interface UnreportedVisit {
+  id: string;
+  activity: string;
+  date: string;
+  instituteName: string;
+  planId: string | null;
+}
+
+export async function getUnreportedVisits(
+  memberId: string,
+): Promise<UnreportedVisit[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("visits")
+    .select("id, activity, date, institute_id, daily_plan_id")
+    .eq("member", memberId)
+    .is("reported_at", null)
+    .order("date", { ascending: false });
+
+  if (error) {
+    logError("visits:unreported", error);
+    return [];
+  }
+
+  const rows = data ?? [];
+  const names = await instituteNames(rows.map((r) => r.institute_id));
+  return rows.map((r) => ({
+    id: r.id,
+    activity: r.activity,
+    date: r.date,
+    instituteName: names.get(r.institute_id) ?? "Unknown institute",
+    planId: r.daily_plan_id,
+  }));
 }

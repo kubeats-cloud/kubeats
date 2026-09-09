@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { tallyVisitMetrics } from "@/lib/validation/weekly";
 import {
   INSTITUTE_STATUSES,
@@ -71,6 +71,74 @@ const historyFor = async (instituteId: string) => {
     .eq("institute_id", instituteId)
     .order("changed_at", { ascending: true });
   return data ?? [];
+};
+
+/**
+ * Give a member a checked-in plan row for (date, institute), and free them up
+ * first if they were already checked in somewhere.
+ *
+ * Two of stage 3's rules changed what a test fixture has to look like, and both
+ * of them bite here rather than in the code:
+ *
+ *   FO009  the presence guarantee now covers EVERY activity, so a direct
+ *          `insert into visits` needs an arrival behind it, not just a meeting
+ *   FO013  a member may hold one open visit at a time, so a suite that checks
+ *          the same rep in twice blocks itself on its own second test
+ *
+ * So this closes whatever was open before opening the next one. Coordinates are
+ * supplied because FO012 has no service-role exception either — a located
+ * check-in is a located check-in whoever writes it.
+ *
+ * Safe to call before 0018: the columns and triggers simply are not there, and
+ * the update writes the same arrival it always did.
+ */
+const ensureArrival = async (
+  memberId: string,
+  instituteId: string,
+  date: string,
+) => {
+  await admin
+    .from("daily_plans")
+    .update({ checkout_at: new Date().toISOString() })
+    .eq("member", memberId)
+    .not("checkin_at", "is", null)
+    .is("checkout_at", null)
+    .eq("checkout_missing", false);
+
+  const { data: existing } = await admin
+    .from("daily_plans")
+    .select("id, checkin_at")
+    .eq("member", memberId)
+    .eq("date", date)
+    .eq("institute_id", instituteId)
+    .maybeSingle();
+
+  let planId = existing?.id as string | undefined;
+  if (!planId) {
+    const { data } = await admin
+      .from("daily_plans")
+      .insert({
+        member: memberId,
+        date,
+        institute_id: instituteId,
+        purpose: `${TAG} fixture`,
+      })
+      .select("id")
+      .single();
+    planId = data!.id;
+  }
+
+  if (!existing?.checkin_at) {
+    await admin
+      .from("daily_plans")
+      .update({
+        checkin_at: new Date().toISOString(),
+        checkin_lat: 23.0225,
+        checkin_lng: 72.5714,
+      })
+      .eq("id", planId!);
+  }
+  return planId!;
 };
 
 const has0005 = configured
@@ -166,6 +234,17 @@ if (configured && !has0018) {
     ].join(String.fromCharCode(10)),
   );
 }
+
+/**
+ * Migration 0019 settles the closing report's field set and closes an INSERT
+ * gap in two of 0018's triggers. Applied at ship time like 0018, so the suite
+ * has to describe both sides of it.
+ */
+const has0019 = configured
+  ? await admin
+      .rpc("close_visit", { p_visit_id: null, p_daily_plan_id: null, p_visit_outcome: null })
+      .then(({ error }) => error?.code !== "PGRST202")
+  : false;
 
 const has0013 = configured
   ? await admin
@@ -590,6 +669,15 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       // log_visit dates the visit and looks the plan up, and the two have to
       // land on the same day for this to pass. Between 00:00 and 05:30 IST it
       // failed before migration 0008.
+      // One open visit at a time: free the rep before opening another.
+      await admin
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("member", repA.id)
+        .not("checkin_at", "is", null)
+        .is("checkout_at", null)
+        .eq("checkout_missing", false);
+
       const institute = await admin
         .from("institutes")
         .insert({ name: `${TAG} app_today school`, type: "school", boards: BOARDS })
@@ -1283,13 +1371,21 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .eq("member", repA.id)
         .eq("institute_id", instituteId);
 
+      // Every visit needs an arrival behind it from 0018 on (FO009), including
+      // the one dated outside the week — the presence guarantee is keyed on the
+      // visit's own date, so that one needs its own.
+      await ensureArrival(repA.id, instituteId, iso());
       await admin.from("visits").insert([
         { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "session", lifecycle_status: "Set", date: iso(), expected_date: iso(7) },
         { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "session", lifecycle_status: "Done", date: iso() },
         { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "olympiad", date: iso() },
-        // Dated well outside the week: must not be counted.
-        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "olympiad", date: iso(-40) },
       ]);
+
+      await ensureArrival(repA.id, instituteId, iso(-40));
+      await admin.from("visits").insert({
+        institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id),
+        activity: "olympiad", date: iso(-40),
+      });
     });
 
     it("counts Meetings from the daily plan, not from the visits log", async () => {
@@ -1419,6 +1515,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       });
 
       it("records each new status on a visit", async () => {
+        await ensureArrival(repA.id, instituteId, iso());
         for (const status of [
           "Invited principal for event",
           "RSVP received",
@@ -1434,11 +1531,16 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
             // Rule 5: an invitation must carry a chase date, so this is about
             // the vocabulary only once that is satisfied.
             follow_up_date: status === "Invited principal for event" ? iso(7) : null,
+            // ...and a time with it from 0018 on (FO016).
+            follow_up_time: status === "Invited principal for event" ? "10:30" : null,
           });
           expect(error, status).toBeNull();
         }
       });
 
+      // A follow-up TIME rides along with the date from stage 3 on: an open
+      // status needs both (FO016). Before 0018 the extra column is simply
+      // stored and changes nothing, so one fixture serves both databases.
       const visitWith = (status: string, followUp: string | null) => ({
         institute_id: instituteId,
         member: repA.id,
@@ -1447,6 +1549,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         photo_url: photoFor(repA.id),
         status_set_to: status,
         follow_up_date: followUp,
+        follow_up_time: followUp ? "10:30" : null,
       });
 
       it("demands a follow-up date for both awaiting statuses", async () => {
@@ -1458,7 +1561,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           "Invited principal for event",
         ]) {
           const { error } = await admin.from("visits").insert(visitWith(status, null));
-          expect(error?.code, status).toBe(CHECK_VIOLATION);
+          // 0010's CHECK before 0018; afterwards the trigger gets there first
+          // and says the same thing with a code the app can map.
+          expect([CHECK_VIOLATION, "FO016"], status).toContain(error?.code);
         }
       });
 
@@ -1515,7 +1620,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         // rather than in a diary, which is how it goes quiet.
         const { error } = await admin
           .from("visits")
-          .insert(visitWith("Session scheduled", iso(7)));
+          .insert({ ...visitWith("Session scheduled", iso(7)), follow_up_time: null });
         expect(error?.code).toBe("FO016");
       });
 
@@ -1653,12 +1758,18 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     it("links the visit when the change came through log_visit()", async () => {
       const id = await makeInstitute("via log_visit");
+      // A visit needs an arrival behind it from 0018 (FO009).
+      await ensureArrival(repA.id, id, iso());
 
       const { data: visitId, error } = await repA.db.rpc("log_visit", {
         p_institute_id: id,
         p_activity: "olympiad",
         p_photo_url: photoFor(repA.id),
         p_status_set_to: "Campus visit scheduled",
+        // An open status needs a date and a time to chase on (FO016). It used
+        // to be FORBIDDEN on this status, which is the reversal stage 3 made.
+        p_follow_up_date: iso(7),
+        p_follow_up_time: "10:30",
       });
       expect(error).toBeNull();
       expect(visitId).toBeTruthy();
@@ -1673,6 +1784,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     it("does not attribute a direct change to an unrelated earlier visit", async () => {
       const id = await makeInstitute("no mislink");
+      // A visit needs an arrival behind it from 0018 (FO009).
+      await ensureArrival(repA.id, id, iso());
 
       // A visit that sets one status...
       await repA.db.rpc("log_visit", {
@@ -1680,6 +1793,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_activity: "olympiad",
         p_photo_url: photoFor(repA.id),
         p_status_set_to: "First meeting done",
+        // Open status, so a chase date and time are required (FO016).
+        p_follow_up_date: iso(7),
+        p_follow_up_time: "10:30",
       });
       // ...then a different status set by hand, in its own transaction.
       await repA.db
@@ -1696,6 +1812,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     it("keeps the history when the visit that caused it is deleted", async () => {
       const id = await makeInstitute("visit deleted");
+      // A visit needs an arrival behind it from 0018 (FO009).
+      await ensureArrival(repA.id, id, iso());
       const { data: visitId } = await repA.db.rpc("log_visit", {
         p_institute_id: id,
         p_activity: "olympiad",
@@ -1838,6 +1956,16 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     it("runs the whole new cycle through, and the journey shows the reopen", async () => {
       const id = await closedInstitute("full cycle", "Will not come");
 
+      // One open visit at a time. This inserts a plan with checkin_at already
+      // set, so the unique index applies on INSERT — free the rep first.
+      await admin
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("member", repA.id)
+        .not("checkin_at", "is", null)
+        .is("checkout_at", null)
+        .eq("checkout_missing", false);
+
       const { data: plan, error: planError } = await repA.db
         .from("daily_plans")
         .insert({
@@ -1860,6 +1988,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_photo_url: photoFor(repA.id),
         p_daily_plan_id: plan!.id,
         p_status_set_to: "First meeting done",
+        // Reopening leaves the institute OPEN, so from 0018 the visit owes a
+        // date and a time to chase on (FO016).
+        p_follow_up_date: iso(7),
+        p_follow_up_time: "10:30",
       });
       expect(visitError).toBeNull();
 
@@ -2217,6 +2349,11 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const old = iso(-20);
       const oldInSameMonth = old.slice(0, 7) === day.slice(0, 7);
 
+      // Each date needs its own arrival: the presence guarantee is keyed on the
+      // visit's own date (FO009).
+      await ensureArrival(subject.id, houseId, day);
+      await ensureArrival(subject.id, houseId, old);
+
       await admin.from("visits").insert([
         {
           institute_id: houseId,
@@ -2264,6 +2401,12 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .insert({ name: `${TAG} second school`, type: "school", boards: BOARDS })
         .select("id")
         .single();
+
+      // An arrival at each school on that day (FO009). Two visits at the first
+      // school share one arrival — Q3 allows several activities in one cycle,
+      // which is exactly what this test needs.
+      await ensureArrival(subject.id, houseId, coverDay);
+      await ensureArrival(subject.id, second!.id, coverDay);
 
       // Three visits, two schools: the first school twice.
       await admin.from("visits").insert([
@@ -2321,6 +2464,22 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
      */
     let houseId: string;
     const day = iso();
+
+    /**
+     * One open visit at a time (FO013) means a suite that checks the same rep
+     * in test after test blocks itself on its own second test. Nothing here is
+     * asserting about the PREVIOUS test's visit, so each one starts with the
+     * rep free.
+     */
+    beforeEach(async () => {
+      await admin
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("member", repA.id)
+        .not("checkin_at", "is", null)
+        .is("checkout_at", null)
+        .eq("checkout_missing", false);
+    });
 
     const plan = async (label: string, date = day) => {
       const { data: house, error: hErr } = await admin
@@ -2400,9 +2559,11 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(open).toBeNull();
     });
 
-    it("ACCEPTS a check-in with no location at all", async () => {
-      // The escape valve, at the layer that actually enforces things. A denied
-      // permission must never stop a rep recording that they arrived.
+    it.skipIf(has0018)("PRE-0018: ACCEPTS a check-in with no location at all", async () => {
+      // The escape valve as it was: a denied permission must never stop a rep
+      // recording that they arrived. Stage 3 reverses this — the arrival now
+      // needs a position or a declared reason (FO012), and the stage 3 suite
+      // asserts the new shape.
       const { planId } = await plan("no gps");
       const { error } = await repA.db
         .from("daily_plans")
@@ -2438,7 +2599,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(before.error?.code).toBe(CHECK_VIOLATION);
     });
 
-    it("refuses a row that both has a check-out and claims one is missing", async () => {
+    it.skipIf(has0018)("PRE-0018: refuses a row that both has a check-out and claims one is missing", async () => {
       const { planId } = await plan("contradiction");
       await repA.db
         .from("daily_plans")
@@ -2454,7 +2615,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(error?.code).toBe(CHECK_VIOLATION);
     });
 
-    it("lets a stuck visit be closed without a check-out", async () => {
+    it.skipIf(has0018)("PRE-0018: lets a REP close a stuck visit", async () => {
       const { planId } = await plan("forgot");
       await repA.db
         .from("daily_plans")
@@ -2488,7 +2649,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       ).toBeNull();
     });
 
-    it("lets an admin close a rep's forgotten visit", async () => {
+    it.skipIf(has0018)("PRE-0018: lets an admin close a rep's forgotten visit", async () => {
       const { planId } = await plan("admin closes");
       await repA.db
         .from("daily_plans")
@@ -2519,7 +2680,13 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { planId, instituteId } = await plan("checked in meeting");
       await repA.db
         .from("daily_plans")
-        .update({ checkin_at: new Date().toISOString() })
+        .update({
+          checkin_at: new Date().toISOString(),
+          // Located, because from 0018 an arrival without a position or a
+          // declared reason is refused (FO012).
+          checkin_lat: 23.0225,
+          checkin_lng: 72.5714,
+        })
         .eq("id", planId);
 
       const { error } = await repA.db.rpc("log_visit", {
@@ -2582,6 +2749,22 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       if (error) throw new Error(`plan: ${error.message}`);
       return { planId: data.id as string, instituteId: house.id as string };
     };
+
+    /**
+     * One open visit at a time (FO013) means a suite that checks the same rep
+     * in test after test blocks itself on its own second test. Nothing here is
+     * asserting about the PREVIOUS test's visit, so each one starts with the
+     * rep free.
+     */
+    beforeEach(async () => {
+      await admin
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("member", repA.id)
+        .not("checkin_at", "is", null)
+        .is("checkout_at", null)
+        .eq("checkout_missing", false);
+    });
 
     const arrive = (planId: string) =>
       repA.db
@@ -2852,10 +3035,16 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .select("id")
           .single();
 
+        // A REAL visit id that is not a closable loop — this meeting itself.
+        // A made-up uuid would trip the closes_visit_id foreign key first and
+        // never reach the check, which would prove the FK works rather than the
+        // rule. close_visit wants the caller's own, at the same institute,
+        // still "Set" and still open; a meeting has no lifecycle at all, so it
+        // fails on exactly the condition being tested.
         const { error } = await repA.db.rpc("close_visit", {
           p_visit_id: mine!.id,
           p_daily_plan_id: planId,
-          p_closes_visit_id: "00000000-0000-0000-0000-000000000000",
+          p_closes_visit_id: mine!.id,
         });
         expect(error?.code).toBe("FO019");
       });
@@ -2938,6 +3127,96 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .eq("id", stuck.planId);
 
         expect((await arrive(next.planId)).error).toBeNull();
+      });
+    });
+
+
+    describe.skipIf(!has0019)("0019 — the closing report's final fields", () => {
+      it("guards an arrival created by INSERT, not only by UPDATE", async () => {
+        // The gap a test found rather than a reading did. 0018 attached both
+        // check-in guards as `before update of checkin_at`, which is how the app
+        // works — plan first, arrive later — and not what the rules claim. A row
+        // INSERTED with checkin_at already set skipped them entirely.
+        const { data: house } = await admin
+          .from("institutes")
+          .insert({ name: `${TAG} insert guard`, type: "school", boards: BOARDS })
+          .select("id")
+          .single();
+
+        const { error } = await admin.from("daily_plans").insert({
+          member: repA.id,
+          date: iso(),
+          institute_id: house!.id,
+          purpose: `${TAG} insert guard`,
+          checkin_at: new Date().toISOString(),
+        });
+        expect(error?.code).toBe("FO012");
+      });
+
+      it("stores the outcome, the management response and the student response", async () => {
+        const { planId, instituteId } = await freshPlan("final fields");
+        await arrive(planId);
+        const { data: visit } = await repA.db
+          .from("visits")
+          .insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "meeting",
+            date: day,
+            photo_url: photoFor(repA.id),
+          })
+          .select("id")
+          .single();
+
+        const { error } = await repA.db.rpc("close_visit", {
+          p_visit_id: visit!.id,
+          p_daily_plan_id: planId,
+          p_institute_interested: true,
+          p_visit_outcome: "Successful",
+          // A one-element array: the column is a text[] and its <@ CHECK is
+          // untouched, so a multi-select later is a form change only.
+          p_management_response: ["Supportive"],
+          p_student_response: "Positive",
+          p_met_name: "A Person",
+          p_met_phone: "9876543210",
+        });
+        expect(error).toBeNull();
+
+        const { data } = await admin
+          .from("visits")
+          .select("visit_outcome, management_response, student_response, institute_interested, met_name, met_phone, management_interest")
+          .eq("id", visit!.id)
+          .single();
+        expect(data?.visit_outcome).toBe("Successful");
+        expect(data?.management_response).toEqual(["Supportive"]);
+        expect(data?.student_response).toBe("Positive");
+        expect(data?.institute_interested).toBe(true);
+        expect(data?.met_phone).toBe("9876543210");
+        // Dormant, not dropped: still a column, never written.
+        expect(data?.management_interest).toBeNull();
+      });
+
+      it("still refuses a vocabulary the CHECKs do not know", async () => {
+        const { planId, instituteId } = await freshPlan("bad vocab");
+        await arrive(planId);
+        const { data: visit } = await repA.db
+          .from("visits")
+          .insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "meeting",
+            date: day,
+            photo_url: photoFor(repA.id),
+          })
+          .select("id")
+          .single();
+
+        const { error } = await repA.db.rpc("close_visit", {
+          p_visit_id: visit!.id,
+          p_daily_plan_id: planId,
+          p_visit_outcome: "Invented by a stale client",
+        });
+        expect(error?.code).toBe(CHECK_VIOLATION);
       });
     });
 

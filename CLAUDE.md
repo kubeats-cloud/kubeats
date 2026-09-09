@@ -131,8 +131,8 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2875
-KiB** — about 197 KiB, 6.4% spare. The budget is real: measure before adding
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2873
+KiB** — about 199 KiB, 6.5% spare. The budget is real: measure before adding
 anything sizable, and re-measure rather than trusting this line. It has been
 wrong before, in both directions — it read 2949 for a while after the figure it
 described had already moved, which is how a stale number becomes a wrong
@@ -253,6 +253,16 @@ already claimed the easy 0.9 MiB between them; see README for both.
   "abandon" — a visit nobody can finish is swept overnight by
   `sweep_open_checkins()` into the same "closed, time not recorded" state the
   old escape valve used.
+- **The closing report's field set is settled** (0019): a response note, is the
+  institute interested, the OUTCOME, the MANAGEMENT RESPONSE, the STUDENT
+  RESPONSE, next-session-set with its mandatory date and time, person met as
+  name + phone, and — only when the status says so — the session or campus-visit
+  head count with topic and who took it. Management interest LEVEL was collected
+  for the length of stage 3 and withdrawn: a level beside a response is two
+  answers to one question. Every retired field keeps its column and its CHECK,
+  so a report filed under any version still renders; `report-view.tsx` skips an
+  empty value. Bringing one back is a form control, and a migration only because
+  `close_visit()` has to carry it.
 - **`checkout_missing` is an admin's to set, never a rep's.** Deleting the rep's
   "close without check-out" button did not close the API path behind it —
   `daily_plans_update` is `member = auth.uid() or is_admin()`, so a rep could

@@ -29,15 +29,52 @@ import { z } from "zod";
  */
 
 /**
- * Management's interest level. The one vocabulary the short form kept.
+ * The three vocabularies the closing report kept, defined HERE rather than in
+ * closing-report.ts.
  *
- * It LIVES here rather than in closing-report.ts, and the direction is
- * load-bearing rather than tidy. This module is imported by client components;
- * closing-report.ts still holds `closingReportSchema`, a thirty-field zod
- * schema nothing submits any more. Importing the constant from there pulled
- * that whole schema into the browser bundle — about 44 KiB gzipped for a list
- * of four strings. closing-report.ts now imports it from here instead, which
- * costs a server-only module nothing.
+ * The direction is load-bearing rather than tidy. This module is imported by
+ * client components; closing-report.ts still holds `closingReportSchema`, a
+ * thirty-field zod schema nothing submits any more. Importing from there pulls
+ * that whole schema into the browser bundle for the sake of three short lists.
+ * closing-report.ts imports them back, which costs a server-only module nothing.
+ *
+ * Every one of these matches a CHECK constraint added in 0005, so the lists and
+ * the database agree by construction and adding a value still means changing
+ * both.
+ */
+export const VISIT_OUTCOMES = [
+  "Successful",
+  "Partially successful",
+  "Follow-up required",
+  "Postponed",
+  "Not interested",
+] as const;
+
+export const MANAGEMENT_RESPONSES = [
+  "Supportive",
+  "Interested",
+  "Wants a proposal",
+  "Needs internal approval",
+  "Budget concerns",
+  "Not interested",
+  "Not available",
+] as const;
+
+export const STUDENT_RESPONSES = [
+  "Very positive",
+  "Positive",
+  "Mixed",
+  "Low interest",
+  "No students present",
+] as const;
+
+/**
+ * Management's interest LEVEL — no longer asked for.
+ *
+ * Built in stage 3 and withdrawn before it shipped: an interest level beside a
+ * management response is two answers to one question, and the client chose the
+ * response. The column stays dormant on public.visits and this list stays here
+ * because report-view.tsx still renders a report that has one.
  */
 export const MANAGEMENT_INTERESTS = ["Low", "Medium", "High", "Very High"] as const;
 
@@ -64,6 +101,17 @@ const count = z
  * it is rejected rather than read as "no". Reading silence as no is how a form
  * this short would start producing data nobody typed.
  */
+/** A single choice from a fixed list, or nothing. */
+const oneOf = <T extends readonly string[]>(values: T, message: string) =>
+  z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : v))
+    .nullable()
+    .refine((v) => v === null || (values as readonly string[]).includes(v), {
+      message,
+    });
+
 const yesNo = (message: string) =>
   z
     .string()
@@ -98,15 +146,24 @@ const shape = {
     notes: text(2000),
 
     interested: yesNo("Say whether the institute is interested."),
-    management_interest: z
-      .string()
-      .trim()
-      .transform((v) => (v === "" ? null : v))
-      .nullable()
-      .refine(
-        (v) => v === null || (MANAGEMENT_INTERESTS as readonly string[]).includes(v),
-        { message: "Choose one of the listed levels." },
-      ),
+
+    /**
+     * The three dropdowns, each mirroring a CHECK from 0005.
+     *
+     * `management_response` is stored as a text[] because the column always was
+     * one — the old form offered checkboxes. This offers a single choice and
+     * sends a one-element array, so the `<@` CHECK is satisfied unchanged and
+     * widening it back to a multi-select later needs no migration.
+     */
+    visit_outcome: oneOf(VISIT_OUTCOMES, "Choose how the visit ended."),
+    management_response: oneOf(
+      MANAGEMENT_RESPONSES,
+      "Choose one of the listed responses.",
+    ),
+    student_response: oneOf(
+      STUDENT_RESPONSES,
+      "Choose one of the listed responses.",
+    ),
 
     /** Drives the follow-up rule below, and nothing else. */
     next_meeting_set: yesNo("Say whether a next session or meeting is set."),
@@ -209,7 +266,9 @@ export function feedbackFormDataToInput(formData: FormData) {
     closes_visit_id: str("closes_visit_id"),
     notes: str("notes"),
     interested: str("interested"),
-    management_interest: str("management_interest"),
+    visit_outcome: str("visit_outcome"),
+    management_response: str("management_response"),
+    student_response: str("student_response"),
     next_meeting_set: str("next_meeting_set"),
     follow_up_date: str("follow_up_date"),
     follow_up_time: str("follow_up_time"),

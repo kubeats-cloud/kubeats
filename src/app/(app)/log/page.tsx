@@ -7,9 +7,9 @@ import { EmptyState } from "@/components/states";
 import { LogVisitForm } from "@/components/visits/log-visit-form";
 import { FeedbackOnlyForm } from "@/components/visits/feedback-only-form";
 import { getCurrentUser } from "@/lib/auth";
-import { getTodayPlan, getVisitForPlan, openLoopsAt } from "@/lib/visits";
+import { getTodayPlan, getUnreportedVisitFor, openLoopsAt } from "@/lib/visits";
 import { visitStatusOf } from "@/lib/validation/checkin";
-import { formatTime } from "@/lib/dates";
+import { formatTime, todayISO } from "@/lib/dates";
 
 export const metadata = { title: "Log Visit" };
 
@@ -40,6 +40,7 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
   const planParam = searchParams.plan;
   const planId = typeof planParam === "string" ? planParam : undefined;
 
+  const today = todayISO();
   const plan = await getTodayPlan(user.id);
   const entries = plan.ok ? plan.entries : [];
 
@@ -74,7 +75,14 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
   }
 
   const [existing, openLoops] = await Promise.all([
-    getVisitForPlan(entry.id),
+    // Keyed on the plan's own (member, date, institute), NOT on
+    // visits.daily_plan_id — that link is written by close_visit(), which is
+    // the step that fails in the case this recovers. See getUnreportedVisitFor.
+    getUnreportedVisitFor({
+      member: user.id,
+      date: today,
+      institute_id: entry.institute_id,
+    }),
     openLoopsAt(user.id, entry.institute_id),
   ]);
 
@@ -84,7 +92,7 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
     ? `${entry.instituteName} · arrived ${arrived}`
     : entry.instituteName;
 
-  if (existing && !existing.reported_at) {
+  if (existing) {
     return (
       <PageColumn>
         <PageHeader

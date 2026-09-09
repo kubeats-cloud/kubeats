@@ -91,7 +91,6 @@ export interface VisitSummary {
   studentResponse: string | null;
   managementResponse: string[] | null;
   visitOutcome: string | null;
-  managementInterest: string | null;
   followUpAction: string | null;
   followUpDate: string | null;
   discussionSummary: string | null;
@@ -113,7 +112,7 @@ export async function getInstituteVisits(
   const { data, error } = await supabase
     .from("visits")
     .select(
-      "id, activity, lifecycle_status, date, notes, member, photo_url, reported_at, activities_conducted, students_attended, student_response, management_response, visit_outcome, institute_interested, management_interest, follow_up_action, follow_up_date, discussion_summary",
+      "id, activity, lifecycle_status, date, notes, member, photo_url, reported_at, activities_conducted, students_attended, student_response, management_response, visit_outcome, institute_interested, follow_up_action, follow_up_date, discussion_summary",
     )
     .eq("institute_id", instituteId)
     .order("date", { ascending: false });
@@ -159,16 +158,15 @@ export async function getInstituteVisits(
       studentsAttended: r.students_attended,
       studentResponse: r.student_response,
       managementResponse: r.management_response,
-      // Same swap as the admin Review's Outcome column, for the same reason:
-      // visit_outcome is not collected any more, so a new visit would have
-      // contributed nothing to this line. Old visits keep theirs.
+      // visit_outcome is collected again, so it leads; institute_interested
+      // stands behind it for a report that left the outcome blank.
       visitOutcome:
-        r.institute_interested === null
-          ? r.visit_outcome
+        r.visit_outcome ??
+        (r.institute_interested === null
+          ? null
           : r.institute_interested
             ? "Interested"
-            : "Not interested",
-      managementInterest: r.management_interest,
+            : "Not interested"),
       followUpAction: r.follow_up_action,
       followUpDate: r.follow_up_date,
       discussionSummary: r.discussion_summary,

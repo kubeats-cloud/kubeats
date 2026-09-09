@@ -93,7 +93,11 @@ export async function submitFeedback(
     p_daily_plan_id: input.daily_plan_id,
     p_notes: input.notes,
     p_institute_interested: input.interested,
-    p_management_interest: input.management_interest,
+    p_visit_outcome: input.visit_outcome,
+    // A one-element array: the column is a text[] and its <@ CHECK is
+    // unchanged, so widening this back to a multi-select is a form change.
+    p_management_response: input.management_response ? [input.management_response] : null,
+    p_student_response: input.student_response,
     p_met_name: input.met_name,
     p_met_phone: input.met_phone,
     p_students_attended: input.students_attended,
@@ -137,7 +141,7 @@ export async function submitFeedback(
  * hidden one. If the first succeeds and the second does not, the visit exists,
  * unreported, and the rep is still checked in — so the Dashboard shows the
  * entry as In progress with "Continue", `/log` finds the visit through
- * `getVisitForPlan()` and offers the feedback alone. The rep never sees the
+ * `getUnreportedVisitFor()` and offers the feedback alone. The rep never sees the
  * seam and cannot log the same arrival twice.
  *
  * Validating BOTH halves before either runs is what keeps that seam rare: a
@@ -210,7 +214,11 @@ export async function logAndFileVisit(
     p_daily_plan_id: visit.daily_plan_id,
     p_notes: feedback.notes,
     p_institute_interested: feedback.interested,
-    p_management_interest: feedback.management_interest,
+    p_visit_outcome: feedback.visit_outcome,
+    p_management_response: feedback.management_response
+      ? [feedback.management_response]
+      : null,
+    p_student_response: feedback.student_response,
     p_met_name: feedback.met_name,
     p_met_phone: feedback.met_phone,
     p_students_attended: feedback.students_attended,
