@@ -61,6 +61,19 @@ export const NOT_BACKED_UP = [
       "a cache of OpenStreetMap area names, keyed by rounded coordinates. " +
       "Regenerates itself on demand and is decoration by design.",
   },
+  {
+    name: "checkin_sweep_runs",
+    reason:
+      "the nightly check-in sweep's log (migration 0018): one row per run, " +
+      "saying how many orphaned visits it closed. Operational telemetry about " +
+      "the JOB, not a record of the work - what it changed is on daily_plans, " +
+      "which is backed up. It refills itself the next night, and a restored " +
+      "copy would describe runs against a database that no longer exists. " +
+      "NOTE it is treated differently from photo_purge_runs, which IS backed " +
+      "up: that one is the only evidence that photographs were deleted and " +
+      "when, and a deletion nobody can account for is worth keeping. This one " +
+      "records a state change that daily_plans already carries.",
+  },
 ];
 
 /**

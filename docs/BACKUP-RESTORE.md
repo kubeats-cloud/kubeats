@@ -19,7 +19,7 @@ state, they live in different places, and they come back in a particular order.
 | **1. Table rows** | `public` schema | `pg_dump`, or `npm run backup` |
 | **2. Auth users** | `auth` schema, behind the Auth API | Dump the `auth` schema, or `npm run backup`. **Passwords cannot move** unless you dump `auth` at the SQL level. |
 | **3. Files** | Storage, two private buckets: `visit-photos` and `materials` | Files, not rows. `npm run backup`, or the Storage API. Both buckets, since the four-pass audit: `materials` holds posters and fee sheets that exist nowhere else. |
-| **4. Supabase-only pieces** | Vault + pg_cron | **Cannot be exported at all.** Re-created by re-running migration `0004`. |
+| **4. Supabase-only pieces** | Vault + pg_cron | **Cannot be exported at all.** Re-created by re-running migrations `0004` (the photo purge) **and `0018`** (the nightly check-in sweep). There are two scheduled jobs, not one. |
 
 Skip domain 2 and the restore fails immediately: `profiles.id` references
 `auth.users`, so every row that names a person is refused. Skip domain 4 and
@@ -372,23 +372,35 @@ A visit whose photo is missing shows "Photo expired" rather than an error, so a
 partial photo restore degrades gracefully. Do not let that tempt you into
 skipping it.
 
-### 6. Re-establish Vault and cron — migration 0004
+### 6. Re-establish Vault and cron — migrations 0004 and 0018
 
-Nothing exports these. Run `0004_photo_retention_schedule.sql` in the new
+Nothing exports these, and there are **two** scheduled jobs.
+
+**The photo purge.** Run `0004_photo_retention_schedule.sql` in the new
 project's SQL editor, filling in the two placeholders on lines 51 and 52 **in
 the editor only** — the project URL and the service_role key of the *new*
 project. Do not save the filled-in file back into the repo, and do not use
 find-and-replace on it.
 
+**The check-in sweep.** Re-running `0018_core_flow.sql` reinstates it. It needs
+no Vault secret and no placeholders: unlike the purge it is pure SQL and calls
+no HTTP API, so the whole file is safe to paste as it stands.
+
 Then confirm:
 
 ```sql
-select jobid, schedule, jobname, active from cron.job;   -- one active job
+select jobid, schedule, jobname, active from cron.job;   -- TWO active jobs
 select * from public.purge_old_visit_photos();           -- considered = 0 is correct
+select public.sweep_open_checkins();                     -- 0 is correct
 ```
 
-Skip this and photos accumulate until the storage tier fills. There is no error
-message; it just never happens.
+Skip the purge and photos accumulate until the storage tier fills.
+
+Skip the sweep and it is worse than housekeeping: a rep may hold only one open
+visit at a time, so a visit orphaned by a dead phone blocks that rep from
+checking in **anywhere**, permanently, with nothing to clear it. An admin can
+clear one by hand from Overview, but nobody will think to look. Neither job
+reports an error when it is missing; both simply never happen.
 
 ### 7. Point the app at the new project
 
