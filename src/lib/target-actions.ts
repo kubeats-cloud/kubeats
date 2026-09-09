@@ -37,7 +37,6 @@ const LOCKED_MESSAGE =
 const MAX_AHEAD: Record<TargetPeriod, number> = {
   daily: 31,
   weekly: 8,
-  monthly: 6,
 };
 
 async function requireUser() {

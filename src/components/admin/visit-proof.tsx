@@ -59,7 +59,7 @@ export function VisitProof({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={photo.url}
-          alt={`Proof photo from ${caption}`}
+          alt={`Photo from ${caption}`}
           onError={() => setFailed(true)}
           className="mx-auto max-h-[60vh] w-full object-contain"
         />
@@ -72,13 +72,13 @@ export function VisitProof({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle className="text-base">Proof photo</DialogTitle>
+            <DialogTitle className="text-base">Photo</DialogTitle>
             <DialogDescription>{caption}</DialogDescription>
           </DialogHeader>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={photo.url}
-            alt={`Proof photo from ${caption}`}
+            alt={`Photo from ${caption}`}
             onError={() => {
               setFailed(true);
               setOpen(false);

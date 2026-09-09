@@ -29,7 +29,7 @@ import {
 } from "@/lib/validation/weekly";
 
 /**
- * The rep's commitment for one period — a day, a week or a month.
+ * The rep's commitment for one period — a day or a week.
  *
  * The eight numbers are the promise; the bars underneath are what has actually
  * happened, and they update as the rep types, so the size of a commitment is

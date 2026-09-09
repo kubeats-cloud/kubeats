@@ -5,21 +5,12 @@ import {
   CameraIcon,
   ImageIcon,
   Loader2Icon,
-  MapPinIcon,
   RotateCcwIcon,
   XIcon,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { asStale, bestFix, nameArea } from "@/lib/geolocate";
-import { formatArea } from "@/lib/location-display";
-import {
-  ACCURACY_BADGE,
-  accuracyBand,
-  describeAccuracy,
-  shouldRetryLocation,
-  type LocationFix,
-} from "@/lib/validation/location";
+import { type LocationFix } from "@/lib/validation/location";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -31,7 +22,6 @@ import {
 import { CameraCapture } from "@/components/visits/camera-capture";
 import { createClient } from "@/lib/supabase/client";
 import { preparePhoto } from "@/lib/photo";
-import { cn } from "@/lib/utils";
 
 /**
  * Rule 12 — geo-tag and photo, on every visit.
@@ -39,8 +29,24 @@ import { cn } from "@/lib/utils";
  * The two are deliberately not equal. The photograph is the evidence the visit
  * happened, so it blocks: no photo, no save, enforced again in the shared
  * schema and once more in the database. The location does not block — a denied
- * permission leaves a message and an empty hidden field, because a rep standing
- * in a basement staff room with no GPS lock must not be stuck.
+ * permission leaves an empty hidden field, because a rep standing in a basement
+ * staff room with no GPS lock must not be stuck.
+ *
+ * THE LOCATION IS CAPTURED SILENTLY, AND HAS NO UI HERE.
+ *
+ * It used to have a "Capture location" button, a coordinate readout, an area
+ * name, an accuracy badge and a retry link. The client asked for that step to
+ * go: a rep does not choose to share a location, so a control that looks like a
+ * choice was one more thing to tap and one more thing to get wrong. What it
+ * reported is not lost — the coordinates, the time and the area name are burnt
+ * into the photograph itself by preparePhoto(), which is the copy that actually
+ * has to stand up later.
+ *
+ * The state machine underneath is UNCHANGED and still has a `failed` case
+ * carrying a message nothing currently renders. That is deliberate rather than
+ * an oversight: making a missing location BLOCK the check-in, and showing that
+ * message when it does, is stage 3 of the redesign (docs/flow-redesign-plan.md,
+ * change 6). Gutting the state now would only mean rebuilding it then.
  *
  * Two ways to provide the photo, and only these two:
  *
@@ -145,14 +151,9 @@ export function CaptureFields({ userId }: { userId: string }) {
     applyFix(result.fix);
   }, [applyFix]);
 
-  /** The button: says what it is doing, then asks. */
-  const captureLocation = useCallback(() => {
-    setGeo({ status: "locating" });
-    requestPosition();
-  }, [requestPosition]);
-
   // Ask on mount: the location is most accurate at the moment of the visit, and
-  // one less tap matters when this is used one-handed at a school gate.
+  // with no button to press this is now the ONLY thing that starts a reading
+  // before the photo is taken.
   useEffect(() => {
     // Deferred by a tick: asking synchronously would set state from inside the
     // effect on the one path that fails immediately (a device with no
@@ -184,49 +185,21 @@ export function CaptureFields({ userId }: { userId: string }) {
   }, [applyFix]);
 
   /**
-   * The area the current fix falls in, shown under the coordinates.
+   * The area name for the stamp. Shared with check-in/out so both word it the
+   * same.
    *
-   * Held together with the position it describes rather than on its own, so a
-   * name can never be left sitting under coordinates it does not belong to —
-   * the moment the fix moves, the label stops matching and reads as pending
-   * again. Two outcomes worth telling apart: still looking, and looked and
-   * found nothing. Neither is ever filled in with the institute's name; the
-   * location is what the phone reports, not what was selected above.
+   * This is now the ONLY place an area is looked up. There used to be a second
+   * lookup driven by an effect, purely so the name could be shown on screen
+   * beside the coordinates before the photo was taken; with that readout gone
+   * it named an area nobody was going to read, once per position change. The
+   * stamp's own lookup below is unaffected, so the photograph still carries its
+   * area line.
    */
-  const [namedArea, setNamedArea] = useState<{
-    key: string;
-    label: string | null;
-  } | null>(null);
-
-  /** The area name for the stamp. Shared with check-in/out so both word it the same. */
   const namePlace = useCallback(
     async (fix: LocationFix | null): Promise<string | null> =>
       fix ? nameArea(fix.latitude, fix.longitude) : null,
     [],
   );
-
-  /**
-   * Name the area whenever the position changes, so a rep can see where the app
-   * thinks they are BEFORE they take the photo — not only afterwards, burned
-   * into an image. Coordinates alone are not something a person can check.
-   *
-   * Depends on the coordinates rather than the whole fix, so re-reading the same
-   * spot at a better accuracy does not re-ask for a name it already has.
-   */
-  const lat = geo.status === "ready" ? geo.latitude : null;
-  const lng = geo.status === "ready" ? geo.longitude : null;
-  const areaKey = lat !== null && lng !== null ? `${lat},${lng}` : null;
-
-  useEffect(() => {
-    if (lat === null || lng === null || areaKey === null) return;
-    let cancelled = false;
-    nameArea(lat, lng).then((label) => {
-      if (!cancelled) setNamedArea({ key: areaKey, label });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [areaKey, lat, lng]);
 
   /** The single path every photo takes, from either button. */
   const processAndUpload = useCallback(
@@ -340,79 +313,6 @@ export function CaptureFields({ userId }: { userId: string }) {
         name="photo_path"
         value={photo.status === "ready" ? photo.path : ""}
       />
-
-      {/* Location ---------------------------------------------------------- */}
-      <div className="space-y-2">
-        <Label>Location</Label>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={captureLocation}
-          disabled={geo.status === "locating"}
-          className={cn(
-            "h-11 w-full justify-start",
-            geo.status === "ready" && "border-success text-success-subtle-foreground",
-          )}
-        >
-          {geo.status === "locating" ? (
-            <Loader2Icon className="size-4 animate-spin" aria-hidden />
-          ) : (
-            <MapPinIcon className="size-4" aria-hidden />
-          )}
-          {geo.status === "ready"
-            ? `Captured · ${geo.latitude.toFixed(4)}, ${geo.longitude.toFixed(4)}`
-            : geo.status === "locating"
-              ? "Finding your location…"
-              : "Capture location"}
-        </Button>
-
-        {geo.status === "ready" && (
-          <div className="space-y-1">
-            {/* The area those coordinates fall in. Approximate by nature and
-                labelled as such; when the free lookup finds nothing it says so
-                rather than borrowing a name from anywhere else. */}
-            <p className="text-muted-foreground text-xs">
-              {namedArea?.key === areaKey
-                ? formatArea(namedArea.label)
-                : "Naming the area…"}
-            </p>
-
-            <p className="flex flex-wrap items-center gap-1.5 text-xs">
-              <Badge variant={ACCURACY_BADGE[accuracyBand(geo.accuracy)]}>
-                {describeAccuracy(geo.accuracy)}
-              </Badge>
-              {geo.stale && <Badge variant="danger">Remembered, not live</Badge>}
-            </p>
-
-            {/* Warn, never block. Rule 12 makes the photo mandatory and leaves
-                the location best-effort on purpose: a rep with no signal must
-                still be able to finish their work. */}
-            {(shouldRetryLocation(geo.accuracy) || geo.stale) && (
-              <p
-                role="status"
-                className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-xs"
-              >
-                {geo.stale
-                  ? "This is an earlier reading, not a live one."
-                  : accuracyBand(geo.accuracy) === "network"
-                    ? "That looks like a network location rather than GPS, so it may be a long way off. If you are indoors, stepping outside usually fixes it."
-                    : "That is only approximate. Tap to try again if you can."}{" "}
-                You can still save either way.
-              </p>
-            )}
-
-            <p className="text-muted-foreground text-xs">Tap to refresh.</p>
-          </div>
-        )}
-        {geo.status === "failed" && (
-          <p
-            role="status"
-            className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-xs"
-          >
-            {geo.message}
-          </p>
-        )}
-      </div>
 
       {/* Photo ------------------------------------------------------------- */}
       <div className="space-y-2">

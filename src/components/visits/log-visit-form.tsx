@@ -278,8 +278,8 @@ export function LogVisitForm({
       </FormSection>
 
       <FormSection
-        title="Proof"
-        description="Where you were and a photograph, captured now rather than remembered later."
+        title="Photo"
+        description="A photograph, taken now rather than remembered later."
       >
           <CaptureFields userId={userId} />
       </FormSection>

@@ -111,7 +111,7 @@ const children = [
   new Paragraph({ spacing: { after: 60 }, bullet: { level: 0 },
     children: [new TextRun({ text: "A check-in time cannot be changed. Wrong school? Remove the row with × and add it again.", size: 18 })] }),
   new Paragraph({ spacing: { after: 60 }, bullet: { level: 0 },
-    children: [new TextRun({ text: "A photo cannot be changed once saved. That is what makes it proof.", size: 18 })] }),
+    children: [new TextRun({ text: "A photo cannot be changed once saved. That is what makes it a record.", size: 18 })] }),
   new Paragraph({ spacing: { after: 60 }, bullet: { level: 0 },
     children: [new TextRun({ text: "Photos are deleted after 30 days. The visit, time, place and report are kept for ever.", size: 18 })] }),
   new Paragraph({ spacing: { after: 60 }, bullet: { level: 0 },

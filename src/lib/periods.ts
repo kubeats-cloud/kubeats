@@ -26,20 +26,30 @@ import { mondayOf, weekCountEnd, formatWeekRange, weekLabel } from "@/lib/weeks"
  * once. What differs is which periods a given screen offers:
  *
  *   PERIODS         all four — what the helpers here understand
- *   TARGET_PERIODS  daily, weekly, monthly — what public.targets accepts, and
- *                   what targets_period_valid enforces. There is no yearly
- *                   target: nobody commits to a year of numbers in this app.
+ *   TARGET_PERIODS  daily and weekly — what a rep may be OFFERED. There is no
+ *                   yearly target: nobody commits to a year of numbers in this
+ *                   app. Monthly was withdrawn by the client (see
+ *                   docs/flow-redesign-plan.md, change 5); the database still
+ *                   accepts it, so a monthly row committed before this stays
+ *                   readable rather than becoming invalid data.
  *   REPORT_PERIODS  daily, monthly, yearly — how the activity report is read.
  *                   No weekly, because month-and-year is how the client asked
  *                   to see history, and a fourth tab nobody uses is clutter.
+ *                   Monthly stays HERE: the client withdrew the monthly
+ *                   commitment, not the ability to read a month of history.
  *
  * Keeping them as separate lists over one union is what stops a yearly row
  * reaching the targets table, which the database would refuse anyway.
+ *
+ * Note that TARGET_PERIODS is now NARROWER than targets_period_valid, which
+ * still permits 'monthly'. That asymmetry is deliberate and is the whole
+ * reason no migration was needed: the app stops offering a period, the
+ * database stops nothing, and restoring the option later is this one list.
  */
 export const PERIODS = ["daily", "weekly", "monthly", "yearly"] as const;
 export type Period = (typeof PERIODS)[number];
 
-export const TARGET_PERIODS = ["daily", "weekly", "monthly"] as const;
+export const TARGET_PERIODS = ["daily", "weekly"] as const;
 export type TargetPeriod = (typeof TARGET_PERIODS)[number];
 
 export const REPORT_PERIODS = ["daily", "monthly", "yearly"] as const;

@@ -206,7 +206,13 @@ describe("targetsSchema", () => {
     ).toBe(false);
   });
 
-  it("insists a monthly period starts on the 1st", () => {
+  it("refuses a monthly period outright — the option was withdrawn", () => {
+    // This used to assert the 1st-of-the-month alignment rule. Monthly is no
+    // longer a period a rep may commit to (docs/flow-redesign-plan.md, change
+    // 5), so the schema now rejects it before alignment is ever considered —
+    // a well-formed 1st-of-the-month is refused exactly like a mid-month date.
+    // The DATABASE still permits 'monthly', deliberately, so the rows already
+    // committed stay valid; this is the app declining to offer it.
     expect(
       targetsSchema.safeParse({
         ...zeros,
@@ -220,7 +226,7 @@ describe("targetsSchema", () => {
         period: "monthly",
         period_start: "2026-09-01",
       }).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("takes any date for a daily period", () => {

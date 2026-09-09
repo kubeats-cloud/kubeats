@@ -285,12 +285,14 @@ export const targetsSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["period_start"],
+        // Monthly's branch went with the monthly option itself. It is not
+        // unreachable code left behind: `period` is z.enum(TARGET_PERIODS), so
+        // "monthly" is no longer a value this can hold, and TypeScript rejects
+        // the comparison outright.
         message:
           value.period === "weekly"
             ? "That is not the start of a week."
-            : value.period === "monthly"
-              ? "That is not the start of a month."
-              : "That is not a valid date.",
+            : "That is not a valid date.",
       });
     }
   });
