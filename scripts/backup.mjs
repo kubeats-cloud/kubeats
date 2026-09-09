@@ -139,6 +139,25 @@ async function main() {
   // 1. Table rows -----------------------------------------------------------
   const counts = {};
   for (const { name: table } of BACKUP_TABLES) {
+    // A table this list names but the database does not have yet.
+    //
+    // assertCoverage already calls that case "harmless" and warns rather than
+    // throwing - and then this loop killed the run anyway, which made the two
+    // disagree. It matters because of WHEN it happens: a table is listed here
+    // in the same commit as the migration that creates it, so the gap is the
+    // window between merging and applying. That is exactly when somebody would
+    // want a backup, and refusing to take one then is the worst possible
+    // moment to refuse.
+    //
+    // Skipped, counted as absent, and reported. The file is deliberately not
+    // written: an empty tables/campuses.json would look like a table that
+    // exists and is empty, and a restore would read it as authority.
+    if (coverage.checked && !coverage.liveTables.includes(table)) {
+      counts[table] = null;
+      console.log(`  ${table.padEnd(20)} - (not in the database yet)`);
+      continue;
+    }
+
     const rows = await readAll(db, table);
     counts[table] = rows.length;
     writeFileSync(
