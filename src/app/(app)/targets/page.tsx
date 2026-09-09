@@ -72,7 +72,7 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
         description={
           viewingOther
             ? `Their commitment for this ${noun}, and what they have achieved.`
-            : `Set what you are aiming for by day, week or month, and watch it fill in as you work.`
+            : `Set what you are aiming for by day or week, and watch it fill in as you work.`
         }
         action={
           percent !== null ? (

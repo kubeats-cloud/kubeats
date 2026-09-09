@@ -245,10 +245,31 @@ describe("the two period vocabularies", () => {
   it("offers weekly to targets and yearly to the report, never the reverse", () => {
     // The split is what stops a yearly row reaching public.targets, whose
     // targets_period_valid CHECK would refuse it anyway.
-    expect(TARGET_PERIODS).toEqual(["daily", "weekly", "monthly"]);
+    expect(TARGET_PERIODS).toEqual(["daily", "weekly"]);
     expect(REPORT_PERIODS).toEqual(["daily", "monthly", "yearly"]);
     expect(TARGET_PERIODS).not.toContain("yearly");
     expect(REPORT_PERIODS).not.toContain("weekly");
+  });
+
+  it("no longer offers a monthly TARGET, but still reads a monthly REPORT", () => {
+    // The client withdrew the monthly commitment, not the monthly history.
+    // Asserted as a pair because collapsing the two lists into one is exactly
+    // how the report would lose its month.
+    expect(TARGET_PERIODS).not.toContain("monthly");
+    expect(isTargetPeriod("monthly")).toBe(false);
+    expect(REPORT_PERIODS).toContain("monthly");
+    expect(isReportPeriod("monthly")).toBe(true);
+  });
+
+  it("still understands monthly as a period, so an existing row stays readable", () => {
+    // targets_period_valid still permits 'monthly' and no migration dropped it.
+    // The helpers must therefore keep answering for it, or a monthly row
+    // committed before this change becomes unreadable rather than merely
+    // unoffered.
+    expect(PERIODS).toContain("monthly");
+    expect(periodStartOf("monthly", "2026-09-16")).toBe("2026-09-01");
+    expect(periodRange("monthly", "2026-09-01").end).toBe("2026-09-30");
+    expect(PERIOD_NOUN.monthly).toBe("month");
   });
 
   it("recognises each vocabulary's own members and no others", () => {

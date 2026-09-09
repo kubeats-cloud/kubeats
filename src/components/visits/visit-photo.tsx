@@ -55,7 +55,7 @@ export function VisitPhotoThumb({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={photo.url}
-          alt={`Proof photo from ${caption}`}
+          alt={`Photo from ${caption}`}
           loading="lazy"
           onError={() => setFailed(true)}
           className="size-full object-contain"
@@ -65,13 +65,13 @@ export function VisitPhotoThumb({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle className="text-base">Proof photo</DialogTitle>
+            <DialogTitle className="text-base">Photo</DialogTitle>
             <DialogDescription>{caption}</DialogDescription>
           </DialogHeader>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={photo.url}
-            alt={`Proof photo from ${caption}`}
+            alt={`Photo from ${caption}`}
             onError={() => {
               setFailed(true);
               setOpen(false);

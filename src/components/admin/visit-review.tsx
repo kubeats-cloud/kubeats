@@ -250,7 +250,7 @@ export function VisitReview({
                 </caption>
                 <thead>
                   <tr className="border-border bg-secondary/40 text-muted-foreground border-b text-left">
-                    <Th className="w-20">Proof</Th>
+                    <Th className="w-20">Photo</Th>
                     <Th>Date</Th>
                     <Th>Rep</Th>
                     <Th>Institute</Th>

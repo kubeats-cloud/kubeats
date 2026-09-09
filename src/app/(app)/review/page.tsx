@@ -50,7 +50,7 @@ export default async function ReviewPage(props: PageProps<"/review">) {
     <>
       <PageHeader
         title="Review"
-        description="Every visit the team has logged, with its proof photo and closing report."
+        description="Every visit the team has logged, with its photo and closing report."
       />
 
       {result.ok ? (

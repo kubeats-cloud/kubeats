@@ -59,7 +59,7 @@ export function PhotoFlushPanel({
       <CardContent className="space-y-4">
         <p className="text-muted-foreground text-sm">
           {storedPhotos === null
-            ? "Photos are attached to visits as proof of attendance."
+            ? "Photos are attached to visits as a record of attendance."
             : `${storedPhotos} ${storedPhotos === 1 ? "visit carries" : "visits carry"} a photo right now.`}{" "}
           Photos are deleted automatically after {retentionDays} days. Use this to
           clear them sooner. The visits themselves, with their location and

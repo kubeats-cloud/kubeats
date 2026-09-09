@@ -275,7 +275,7 @@ children.push(
   p("For Session and Campus Visit you also choose Set or Done. Set means you have arranged it for a future date — it stays on your Pending list until you come back and log it as Done."),
 
   h3("The photograph — always required"),
-  p("Every visit needs a photo. There is no way to save without one; this is the proof the whole system rests on."),
+  p("Every visit needs a photo. There is no way to save without one; this is the record the whole system rests on."),
   phone("Take photo opens your camera, facing outwards. Point it at the school gate, the signage, or the room you are in, and take the picture."),
   p("On a computer, Take photo may not work — use Upload photo and pick a file instead."),
   p("Whichever you use, KUbeats writes your position, the area name and the exact time onto the picture before it is sent. That stamp is part of the image and cannot be changed afterwards."),
@@ -363,11 +363,11 @@ children.push(
   img("admin-assign"),
   caption("Assigning a visit. Outstanding assignments stay listed on the right until the rep logs them."),
 
-  h2("3.3  Review — every visit, with its proof"),
+  h2("3.3  Review — every visit, with its photo"),
   path_("WHERE", "Review tab"),
   p("Everything the team has logged, newest first, with the photograph and the closing report. Filter by rep, institute, activity, date range, or whether a report has been filed."),
   img("admin-review"),
-  caption("The Review list. The Proof column shows each visit's photograph; the arrow opens the full record."),
+  caption("The Review list. The Photo column shows each visit's photograph; the arrow opens the full record."),
   p("Click any row to open the full visit. There you will find:"),
   bullet("The photograph, with the location and time stamped into it."),
   bullet("GPS location — the exact coordinates and the area name."),
