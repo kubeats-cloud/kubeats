@@ -61,7 +61,14 @@ alter table public.daily_plans
   -- device. Never set silently - the app only writes it when the rep has typed
   -- a reason, and the CHECK below makes that the database's rule too.
   add column if not exists checkin_location_manual boolean not null default false,
-  add column if not exists checkin_manual_reason    text;
+  add column if not exists checkin_manual_reason    text,
+  -- Who closed a visit that was never finished, and when. Null in BOTH when
+  -- nobody has; null in the first with the second set means the nightly sweep
+  -- did it. An admin doing it by hand leaves their name, because closing
+  -- somebody else's visit is exactly the kind of quiet correction the audit's
+  -- N-1 finding was about.
+  add column if not exists checkout_closed_by       uuid references public.profiles (id) on delete set null,
+  add column if not exists checkout_closed_at       timestamptz;
 
 alter table public.visits
   -- The visit's own link to the check-in it came from. Nothing joined them
@@ -90,6 +97,10 @@ comment on column public.daily_plans.checkin_location_manual is
 comment on column public.daily_plans.checkin_manual_reason is
   'Why the location could not be read, in the rep''s own words. Required '
   'whenever checkin_location_manual is true.';
+comment on column public.daily_plans.checkout_closed_by is
+  'The admin who closed a visit the rep never finished. Null with '
+  'checkout_closed_at set means the nightly sweep did it. Stamped by '
+  'guard_checkout_missing, never trusted from a client.';
 comment on column public.visits.daily_plan_id is
   'The check-in this visit came from. The meeting time a screen shows is that '
   'row''s checkin_at - server-stamped, so it cannot be mistyped or backdated.';
@@ -413,6 +424,71 @@ create trigger visits_require_checkin
 -- The meetings-only version is now unreachable. Dropped so a search of pg_proc
 -- gives a straight answer about which rule is live.
 drop function if exists public.enforce_checkin_before_meeting();
+
+
+/**
+ * Only an admin may close a visit that was never finished.
+ *
+ * checkout_missing is the "completed, duration not recorded" state. It used to
+ * be set by the rep, from a "Close without check-out" button that stage 3
+ * deletes: with a forced chain there is no half-open state to sit in, and a rep
+ * who was interrupted can always come back and finish. Leaving them an "I give
+ * up" tap would have been offering the easier one, and it is the one that loses
+ * the duration.
+ *
+ * DELETING THE BUTTON WAS NOT ENOUGH. daily_plans_update is
+ * `member = auth.uid() or is_admin()`, so a rep could still have set the column
+ * directly through the API - an abandon button with no button. This closes that,
+ * and leaves exactly two ways in:
+ *
+ *   the nightly sweep    runs with no auth.uid(), so caller is null
+ *   an admin, by hand    for a rep stuck mid-day who cannot wait for 01:30
+ *
+ * The credentials are stamped HERE rather than trusted from the caller, the
+ * same reasoning as guard_plan_assignment and the weekly lock's reopened_by.
+ */
+create or replace function public.guard_checkout_missing()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  caller uuid := (select auth.uid());
+begin
+  if new.checkout_missing is not distinct from old.checkout_missing then
+    return new;
+  end if;
+
+  if caller is not null and not public.is_admin() then
+    raise exception
+      'Only an admin can close a visit that was never finished.'
+      using errcode = 'FO020';
+  end if;
+
+  if new.checkout_missing then
+    -- Null for the sweep, a real id for a person. That is what tells the two
+    -- apart later, and it is why this is not a boolean.
+    new.checkout_closed_by := caller;
+    new.checkout_closed_at := now();
+  else
+    new.checkout_closed_by := null;
+    new.checkout_closed_at := null;
+  end if;
+
+  return new;
+end;
+$$;
+
+comment on function public.guard_checkout_missing is
+  'checkout_missing may only be set by an admin or by the nightly sweep, and '
+  'the credentials are stamped here. Reps have no abandon button and no API '
+  'path to one. Raises FO020.';
+
+drop trigger if exists daily_plans_checkout_missing_guard on public.daily_plans;
+create trigger daily_plans_checkout_missing_guard
+  before update of checkout_missing on public.daily_plans
+  for each row execute function public.guard_checkout_missing();
 
 
 /**
@@ -740,6 +816,10 @@ begin
 
   get diagnostics v_closed = row_count;
 
+  -- checkout_closed_at is stamped by guard_checkout_missing, and
+  -- checkout_closed_by is left null because nobody did this - the job did.
+  -- That null is what tells a swept visit from one an admin closed by hand.
+
   insert into public.checkin_sweep_runs (swept_for, closed)
   values (v_today, v_closed);
 
@@ -789,7 +869,8 @@ declare
   problems text[] := '{}';
   c text;
   expected_cols text[] := array[
-    'checkin_location_manual', 'checkin_manual_reason'
+    'checkin_location_manual', 'checkin_manual_reason',
+    'checkout_closed_by', 'checkout_closed_at'
   ];
   expected_visit_cols text[] := array[
     'daily_plan_id', 'closes_visit_id', 'session_taken_by', 'met_name',
@@ -797,7 +878,8 @@ declare
   ];
   expected_trig text[] := array[
     'daily_plans_checkin_located', 'daily_plans_one_open_visit_guard',
-    'daily_plans_checkin_cycle_final', 'daily_plans_checkout_final'
+    'daily_plans_checkin_cycle_final', 'daily_plans_checkout_final',
+    'daily_plans_checkout_missing_guard'
   ];
 begin
   foreach c in array expected_cols loop
@@ -896,7 +978,7 @@ begin
   end if;
 
   raise notice
-    'Stage 3 core flow in place: 8 columns, 4 CHECKs, 6 triggers, 1 unique '
+    'Stage 3 core flow in place: 10 columns, 4 CHECKs, 7 triggers, 1 unique '
     'index, close_visit(), and the nightly sweep. Rule 2, Rule 12 and FO011 '
     'all still installed.';
 end $$;

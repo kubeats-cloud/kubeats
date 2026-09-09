@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { requireAdmin } from "@/lib/admin";
+import { planIdSchema } from "@/lib/validation/visit";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import type { FormState } from "@/lib/visit-form-state";
 import {
@@ -117,6 +119,74 @@ export async function checkIn(
   // a rep coming back to a visit they started. That is not an error and it
   // leads to exactly the same place, which is the point of the chain.
   redirect(`/log?plan=${parsed.data.plan_id}`);
+}
+
+/**
+ * An admin unblocking a rep whose visit was orphaned.
+ *
+ * The gap this fills is narrow and real. With no rep-facing abandon button and
+ * one-open-visit-at-a-time, a rep whose phone dies mid-visit cannot check in
+ * anywhere else. The common case recovers itself — they come back, the
+ * Dashboard offers the visit, they finish it — and the nightly sweep catches
+ * whatever is left. But a rep genuinely stuck at 10am should not lose the day
+ * waiting for 01:30, and until now nobody could do anything about it.
+ *
+ * ADMIN ONLY, three times over: this gate for a decent sentence, the
+ * `daily_plans_update` RLS policy keyed on `is_admin()`, and
+ * `guard_checkout_missing()` (FO020) which refuses the column to a rep even
+ * through a hand-made request. The last is the one that matters — deleting the
+ * rep's button never closed the API path, and this is what does.
+ *
+ * It sets the SAME state the old escape valve did: `checkout_missing = true`,
+ * "completed, duration not recorded". It deliberately does not invent a
+ * `checkout_at`, because there is not one — the honest answer to how long the
+ * visit took is that nobody knows. The trigger stamps who did it and when, so
+ * an admin closing somebody else's visit leaves a trail rather than a silence.
+ */
+export async function clearStuckCheckIn(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return { error: gate.error, fieldErrors: {} };
+
+  const parsed = planIdSchema.safeParse(String(formData.get("plan_id") ?? ""));
+  if (!parsed.success) {
+    return { error: "That visit could not be identified.", fieldErrors: {} };
+  }
+
+  // No member filter: closing somebody else's stuck visit is the entire point.
+  // RLS decides whether this caller may touch the row at all.
+  const { data, error } = await gate.supabase
+    .from("daily_plans")
+    .update({ checkout_missing: true })
+    .eq("id", parsed.data)
+    .not("checkin_at", "is", null)
+    .is("checkout_at", null)
+    .eq("checkout_missing", false)
+    .select("id");
+
+  if (error) {
+    logError("checkin:clear-stuck", error);
+    if (error.code === "FO020" || error.code === "42501") {
+      return { error: "Only an admin can close a visit that was never finished.", fieldErrors: {} };
+    }
+    return {
+      error: toFriendlyMessage(error, "We could not close that visit."),
+      fieldErrors: {},
+    };
+  }
+
+  if (!data || data.length === 0) {
+    // Already finished, already cleared, or gone. None of those is an error
+    // worth a red box for the person who just wanted it unstuck.
+    revalidatePath("/");
+    return { error: null, fieldErrors: {}, ok: true };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/report");
+  return { error: null, fieldErrors: {}, ok: true };
 }
 
 /*

@@ -2861,6 +2861,86 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       });
     });
 
+
+    describe("clearing a stuck visit is an admin's to do", () => {
+      it("REFUSES a rep closing their own unfinished visit (FO020)", async () => {
+        // Deleting the rep's "close without check-out" button never closed the
+        // API path behind it: daily_plans_update is `member = auth.uid() or
+        // is_admin()`, so a rep could set the column by hand. This is what
+        // actually removes the abandon button.
+        const { planId } = await freshPlan("rep abandon");
+        await arrive(planId);
+
+        const { error } = await repA.db
+          .from("daily_plans")
+          .update({ checkout_missing: true })
+          .eq("id", planId);
+        expect(error?.code).toBe("FO020");
+
+        const { data } = await admin
+          .from("daily_plans")
+          .select("checkout_missing")
+          .eq("id", planId)
+          .single();
+        expect(data?.checkout_missing, "still open").toBe(false);
+      });
+
+      it("lets an ADMIN close it, and records who and when", async () => {
+        const { planId } = await freshPlan("admin clears");
+        await arrive(planId);
+
+        const { error } = await boss.db
+          .from("daily_plans")
+          .update({ checkout_missing: true })
+          .eq("id", planId);
+        expect(error).toBeNull();
+
+        const { data } = await admin
+          .from("daily_plans")
+          .select("checkout_missing, checkout_closed_by, checkout_closed_at, checkout_at")
+          .eq("id", planId)
+          .single();
+        expect(data?.checkout_missing).toBe(true);
+        expect(data?.checkout_closed_by, "the admin is named").toBe(boss.id);
+        expect(data?.checkout_closed_at).not.toBeNull();
+        // Never invents a departure time — there is not one.
+        expect(data?.checkout_at, "no invented checkout_at").toBeNull();
+      });
+
+      it("leaves checkout_closed_by null when the SWEEP does it", async () => {
+        // That null is the whole difference between "a job tidied this up" and
+        // "a person decided to", which is why it is a uuid and not a boolean.
+        const stale = await freshPlan("sweep attribution", iso(-2));
+        await arrive(stale.planId);
+
+        await admin.rpc("sweep_open_checkins");
+
+        const { data } = await admin
+          .from("daily_plans")
+          .select("checkout_missing, checkout_closed_by, checkout_closed_at")
+          .eq("id", stale.planId)
+          .single();
+        expect(data?.checkout_missing).toBe(true);
+        expect(data?.checkout_closed_by, "nobody did this — the job did").toBeNull();
+        expect(data?.checkout_closed_at).not.toBeNull();
+      });
+
+      it("unblocks the rep, which is the point of it", async () => {
+        const stuck = await freshPlan("blocking");
+        await arrive(stuck.planId);
+
+        const next = await freshPlan("wants in");
+        expect(["FO013", "23505"]).toContain((await arrive(next.planId)).error?.code);
+
+        await boss.db
+          .from("daily_plans")
+          .update({ checkout_missing: true })
+          .eq("id", stuck.planId);
+
+        expect((await arrive(next.planId)).error).toBeNull();
+      });
+    });
+
     describe("the nightly sweep", () => {
       it("closes a visit left open from a previous day, inventing nothing", async () => {
         const stale = await freshPlan("stale", iso(-2));

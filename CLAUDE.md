@@ -131,8 +131,8 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2873
-KiB** — about 199 KiB, 6.5% spare. The budget is real: measure before adding
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2875
+KiB** — about 197 KiB, 6.4% spare. The budget is real: measure before adding
 anything sizable, and re-measure rather than trusting this line. It has been
 wrong before, in both directions — it read 2949 for a while after the figure it
 described had already moved, which is how a stale number becomes a wrong
@@ -253,6 +253,15 @@ already claimed the easy 0.9 MiB between them; see README for both.
   "abandon" — a visit nobody can finish is swept overnight by
   `sweep_open_checkins()` into the same "closed, time not recorded" state the
   old escape valve used.
+- **`checkout_missing` is an admin's to set, never a rep's.** Deleting the rep's
+  "close without check-out" button did not close the API path behind it —
+  `daily_plans_update` is `member = auth.uid() or is_admin()`, so a rep could
+  have set the column by hand. `guard_checkout_missing()` (FO020) is what
+  actually removes the abandon button, and it stamps `checkout_closed_by` /
+  `checkout_closed_at` itself rather than trusting a client. A null `_by` with a
+  set `_at` means the nightly sweep did it; a name means an admin did, from the
+  "Still checked in" panel on Overview — the same-day unblock for a rep whose
+  visit was orphaned, since one open visit stops them working anywhere.
 - A week runs Monday to Saturday for reporting, but counts Monday through
   Sunday: a Sunday's work folds into the week that just ended rather than
   falling out of every total. `weekEnd()` is the Saturday shown to the rep;
