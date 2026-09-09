@@ -14,6 +14,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { createMaterial } from "@/lib/material-actions";
+import { campusLabel, type Campus } from "@/lib/campus-display";
+
+/** Not "" — that is indistinguishable from a control nobody has touched. */
+const ALL_CAMPUSES = "__all__";
 import { createClient } from "@/lib/supabase/client";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import {
@@ -44,13 +48,23 @@ type Upload =
   | { status: "ready"; path: string; name: string; type: string; size: number }
   | { status: "failed"; message: string };
 
-export function MaterialUploadForm({ userId }: { userId: string }) {
+export function MaterialUploadForm({
+  userId,
+  campuses,
+}: {
+  userId: string;
+  campuses: Campus[];
+}) {
   const [serverState, formAction, isPending] = useActionState(
     createMaterial,
     EMPTY_STATE,
   );
   const [upload, setUpload] = useState<Upload>({ status: "idle" });
   const [category, setCategory] = useState<string>("");
+  // "" would be indistinguishable from "not chosen yet", so the shared case has
+  // its own sentinel and is submitted as an empty campus_id. Null in the column
+  // means every campus — the library the app had before scoping.
+  const [campusId, setCampusId] = useState<string>(ALL_CAMPUSES);
   const fileInput = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -129,6 +143,11 @@ export function MaterialUploadForm({ userId }: { userId: string }) {
         </>
       )}
       <input type="hidden" name="category" value={category} />
+      <input
+        type="hidden"
+        name="campus_id"
+        value={campusId === ALL_CAMPUSES ? "" : campusId}
+      />
 
       <div className="space-y-2">
         <Label htmlFor="material-title">Title</Label>
@@ -162,6 +181,33 @@ export function MaterialUploadForm({ userId }: { userId: string }) {
         {fieldErrors.category && (
           <p className="text-danger-subtle-foreground text-xs">
             {fieldErrors.category}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label>Campus</Label>
+        <Select value={campusId} onValueChange={setCampusId}>
+          <SelectTrigger className="h-11 w-full" aria-label="Campus">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_CAMPUSES}>
+              All campuses (everyone sees it)
+            </SelectItem>
+            {campuses.map((campus) => (
+              <SelectItem key={campus.id} value={campus.id}>
+                {campusLabel(campus)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-muted-foreground text-xs">
+          A campus-specific file is visible only to that campus&rsquo;s reps.
+        </p>
+        {fieldErrors.campus_id && (
+          <p className="text-danger-subtle-foreground text-xs">
+            {fieldErrors.campus_id}
           </p>
         )}
       </div>

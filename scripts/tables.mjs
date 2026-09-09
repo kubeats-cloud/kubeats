@@ -19,6 +19,9 @@
  * lists here as part of the migration that creates it.
  */
 export const BACKUP_TABLES = [
+  // Before profiles and institutes: both carry a campus_id that references it,
+  // and a restore replays in this order.
+  { name: "campuses", conflict: "id" },
   { name: "profiles", conflict: "id" },
   { name: "location_states", conflict: "id" },
   { name: "location_cities", conflict: "id" },

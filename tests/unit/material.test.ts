@@ -47,6 +47,9 @@ const validInput = {
   file_name: "poster.png",
   file_type: "image/png",
   file_size: 240_000,
+  // Empty is a real answer: null campus_id means every campus, which is the
+  // shared library the app had before scoping.
+  campus_id: ""
 };
 
 describe("the materials vocabulary", () => {
@@ -220,5 +223,29 @@ describe("materialFormDataToInput", () => {
     const input = materialFormDataToInput(formData({ title: "x" }));
     expect(input.file_size).toBe(0);
     expect(materialSchema.safeParse(input).success).toBe(false);
+  });
+});
+
+describe("materialSchema — the campus rule", () => {
+  it("treats an empty campus as 'every campus' rather than as missing", () => {
+    // Unlike the feedback form's yes/no, "" here is a choice: a brochure that
+    // is not campus-specific belongs to all five. The column is nullable for
+    // exactly this, and materials_select reads `campus_id is null or mine`.
+    const parsed = materialSchema.safeParse({ ...validInput, campus_id: "" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.campus_id).toBeNull();
+  });
+
+  it("takes a campus when one is chosen", () => {
+    const id = "11111111-2222-4333-8444-555555555555";
+    const parsed = materialSchema.safeParse({ ...validInput, campus_id: id });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.campus_id).toBe(id);
+  });
+
+  it("refuses a campus that is not an id", () => {
+    expect(
+      materialSchema.safeParse({ ...validInput, campus_id: "Kolkata" }).success,
+    ).toBe(false);
   });
 });

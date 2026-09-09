@@ -4,6 +4,7 @@ import { cellFor } from "@/lib/places";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
+import { instituteNameOr } from "@/lib/institute-scope";
 import { periodRange, type Period } from "@/lib/periods";
 import { ACTIVITIES, activityLabelFor } from "@/lib/validation/visit";
 import { TYPE_LABELS, type InstituteType } from "@/lib/validation/institute";
@@ -257,7 +258,7 @@ export async function getActivityReport(
       const type = (visit.institutes?.type ?? null) as InstituteType | null;
       institutes.set(visit.institute_id, {
         id: visit.institute_id,
-        name: visit.institutes?.name ?? "Unknown institute",
+        name: instituteNameOr(visit.institutes?.name, "activity-report"),
         type,
         typeLabel: type ? TYPE_LABELS[type] : "Other",
         visits: 1,
@@ -320,7 +321,7 @@ export async function getActivityReport(
       return {
         id: plan.id,
         date: plan.date,
-        instituteName: plan.institutes?.name ?? "Unknown institute",
+        instituteName: instituteNameOr(plan.institutes?.name, "activity-report"),
         purpose: plan.purpose,
         checkinAt: plan.checkin_at,
         checkinLat: plan.checkin_lat,

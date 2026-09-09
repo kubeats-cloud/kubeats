@@ -216,6 +216,8 @@ describe("newMemberSchema", () => {
     email: "asha@example.com",
     password: "temporary-123",
     role: "rep",
+    // A rep works from exactly one campus (FO021).
+    campus_id: "11111111-2222-4333-8444-555555555555"
   };
 
   it("accepts a sensible new member", () => {
@@ -241,6 +243,43 @@ describe("newMemberSchema", () => {
     const result = newMemberSchema.safeParse({ ...valid, email: "Asha@Example.com" });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.email).toBe("asha@example.com");
+  });
+});
+
+describe("newMemberSchema — the campus rule", () => {
+  const rep = {
+    name: "Asha Rao",
+    email: "asha@example.com",
+    password: "a-long-enough-password",
+    role: "rep",
+    campus_id: "11111111-2222-4333-8444-555555555555",
+  };
+
+  it("insists a rep has a campus", () => {
+    // Mirrors enforce_profile_campus (FO021). A rep with no campus would see
+    // nothing at all once scoping is live — empty picker, empty institutes —
+    // so this is caught on the form rather than at the constraint.
+    expect(newMemberSchema.safeParse({ ...rep, campus_id: "" }).success).toBe(false);
+    expect(newMemberSchema.safeParse(rep).success).toBe(true);
+  });
+
+  it("insists an admin has none", () => {
+    // The asymmetry is the point: an admin sees every campus, so a campus on
+    // one would be a fact that decides nothing and could later be mistaken for
+    // a scope.
+    expect(
+      newMemberSchema.safeParse({ ...rep, role: "admin", campus_id: "" }).success,
+    ).toBe(true);
+    expect(
+      newMemberSchema.safeParse({ ...rep, role: "admin" }).success,
+      "an admin posted to a campus",
+    ).toBe(false);
+  });
+
+  it("refuses a campus that is not an id", () => {
+    expect(
+      newMemberSchema.safeParse({ ...rep, campus_id: "Bangalore" }).success,
+    ).toBe(false);
   });
 });
 

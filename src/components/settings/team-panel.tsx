@@ -22,6 +22,7 @@ import {
   newMemberSchema,
 } from "@/lib/validation/admin";
 import type { TeamMember } from "@/lib/admin";
+import { campusLabel, type Campus } from "@/lib/campus-display";
 
 /**
  * The team, and the only way an account gets created.
@@ -31,13 +32,25 @@ import type { TeamMember } from "@/lib/admin";
  * on success and the password is never echoed back — the admin has just typed
  * it, so showing it again adds nothing and puts it on a screen in an office.
  */
-export function TeamPanel({ members }: { members: TeamMember[] }) {
+export function TeamPanel({
+  members,
+  campuses,
+}: {
+  members: TeamMember[];
+  /** The five. The demo campus is excluded — nobody is posted to it. */
+  campuses: Campus[];
+}) {
   const [serverState, formAction, isPending] = useActionState(
     createMember,
     EMPTY_MEMBER_STATE,
   );
   const [clientState, setClientState] = useState<MemberState>(EMPTY_MEMBER_STATE);
   const [role, setRole] = useState("rep");
+  // A rep works from one campus; an admin sees every campus and has none. The
+  // field clears itself when the role flips to admin so a stale choice cannot
+  // be submitted — FO021 would refuse it, and a rejection the form could have
+  // prevented is a rejection the form should have prevented.
+  const [campusId, setCampusId] = useState("");
   const [values, setValues] = useState({ name: "", email: "", password: "" });
   const [adding, setAdding] = useState(false);
 
@@ -47,7 +60,11 @@ export function TeamPanel({ members }: { members: TeamMember[] }) {
     : clientState.fieldErrors;
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    const parsed = newMemberSchema.safeParse({ ...values, role });
+    const parsed = newMemberSchema.safeParse({
+      ...values,
+      role,
+      campus_id: role === "rep" ? campusId : "",
+    });
     if (!parsed.success) {
       event.preventDefault();
       setClientState({
@@ -94,6 +111,11 @@ export function TeamPanel({ members }: { members: TeamMember[] }) {
               >
                 {member.role}
               </Badge>
+              {member.campusName && (
+                <span className="text-muted-foreground truncate text-xs">
+                  {member.campusName}
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -131,6 +153,11 @@ export function TeamPanel({ members }: { members: TeamMember[] }) {
                     >
                       {member.role}
                     </Badge>
+                      {member.campusName && (
+                        <span className="text-muted-foreground ml-2 text-xs">
+                          {member.campusName}
+                        </span>
+                      )}
                   </td>
                 </tr>
               ))}
@@ -234,6 +261,32 @@ export function TeamPanel({ members }: { members: TeamMember[] }) {
               </Select>
               {field("role")}
             </div>
+
+            {/* Shown only for a rep. An admin is not posted to a campus, so
+                offering them one would be offering a choice with no meaning. */}
+            {role === "rep" && (
+              <div className="space-y-2">
+                <Label>Campus</Label>
+                <Select value={campusId} onValueChange={setCampusId}>
+                  <SelectTrigger className="h-11 w-full" aria-label="Campus">
+                    <SelectValue placeholder="Which campus do they work from?" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {campuses.map((campus) => (
+                      <SelectItem key={campus.id} value={campus.id}>
+                        {campusLabel(campus)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <input type="hidden" name="campus_id" value={campusId} />
+                <p className="text-muted-foreground text-xs">
+                  They will see only this campus&rsquo;s institutes, visits and
+                  materials. It cannot be changed from here afterwards.
+                </p>
+                {field("campus_id")}
+              </div>
+            )}
 
             {error && (
               <p

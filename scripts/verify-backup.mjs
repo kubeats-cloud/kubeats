@@ -80,7 +80,28 @@ export function verifyBackup(root) {
   if (!hasShape) return done();
 
   // ---- tables --------------------------------------------------------------
+  //
+  // A table BACKUP_TABLES names that the source database does not have YET has
+  // no file, and that is correct rather than a gap. It happens for exactly one
+  // window: a table is listed in the same commit as the migration that creates
+  // it, so between merging and applying, the list is ahead of the database.
+  //
+  // The manifest records it as null rather than 0 - "we did not read this"
+  // rather than "we read it and it was empty" - and the backup deliberately
+  // writes no file, because an empty tables/x.json would look like an empty
+  // table and a restore would treat it as authority.
+  const absentUpstream = new Set(
+    Object.entries(manifest.tables ?? {})
+      .filter(([, count]) => count === null)
+      .map(([name]) => name),
+  );
+
   for (const { name, conflict } of BACKUP_TABLES) {
+    if (absentUpstream.has(name)) {
+      add(true, `tables/${name}.json`,
+          "not in the source database yet — correctly absent, not missing");
+      continue;
+    }
     const file = join(root, "tables", `${name}.json`);
     if (!existsSync(file)) {
       add(false, `tables/${name}.json`, "file missing");
@@ -219,7 +240,7 @@ export function verifyBackup(root) {
           : `not covered: ${uncovered.join(", ")}`);
 
     const missingFiles = (coverage.backedUp ?? []).filter(
-      (t) => !existsSync(join(root, "tables", `${t}.json`)));
+      (t) => !absentUpstream.has(t) && !existsSync(join(root, "tables", `${t}.json`)));
     add(missingFiles.length === 0, "every table it claims to back up has a file",
         missingFiles.length === 0 ? "" : `no file for: ${missingFiles.join(", ")}`);
   }

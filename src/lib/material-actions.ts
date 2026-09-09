@@ -72,6 +72,8 @@ export async function createMaterial(
   const { error } = await gate.supabase.from("materials").insert({
     title: parsed.data.title,
     category: parsed.data.category,
+    // Null means every campus — the shared library the app had before scoping.
+    campus_id: parsed.data.campus_id,
     description: parsed.data.description,
     file_path: parsed.data.file_path,
     file_name: parsed.data.file_name,

@@ -128,6 +128,25 @@ export const materialSchema = z.object({
     .trim()
     .min(1, "Give this material a title.")
     .max(200, "That title is too long."),
+  /**
+   * Which campus this is for, or nothing for every campus.
+   *
+   * Empty is a real answer here, unlike the yes/no on the feedback form: a
+   * brochure that is not campus-specific belongs to all five, which is exactly
+   * what the library was before scoping. `materials.campus_id` is nullable for
+   * that reason and the policy reads `campus_id is null or campus_id = mine`.
+   */
+  campus_id: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : v))
+    .nullable()
+    .refine(
+      (v) =>
+        v === null ||
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+      "Choose one of the listed campuses.",
+    ),
   category: z.enum(MATERIAL_CATEGORIES, {
     message: "Choose a category.",
   }),
@@ -157,6 +176,7 @@ export function materialFormDataToInput(formData: FormData) {
   return {
     title: text("title"),
     category: text("category"),
+    campus_id: text("campus_id"),
     description: text("description"),
     file_path: text("file_path"),
     file_name: text("file_name"),

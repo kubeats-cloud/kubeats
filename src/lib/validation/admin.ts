@@ -77,10 +77,46 @@ export const newMemberSchema = z
       .min(MIN_PASSWORD, `At least ${MIN_PASSWORD} characters.`)
       .max(72, "That password is too long."),
     role: z.enum(ROLES),
+    /**
+     * The campus a REP belongs to, and the campus an ADMIN must not have.
+     *
+     * Mirrors enforce_profile_campus() (FO021) so the admin filling this form
+     * gets a sentence rather than a constraint rejection. The asymmetry is the
+     * point and is worth stating twice: a rep is scoped to one campus, an admin
+     * sees every campus and a campus on one would be a fact that decides
+     * nothing.
+     */
+    campus_id: z
+      .string()
+      .trim()
+      .transform((v) => (v === "" ? null : v))
+      .nullable()
+      .refine(
+        (v) =>
+          v === null ||
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+        "Choose one of the listed campuses.",
+      ),
   })
   .refine((v) => v.password.toLowerCase() !== v.email, {
     path: ["password"],
     message: "The password must not be the email address.",
+  })
+  .superRefine((v, ctx) => {
+    if (v.role === "rep" && !v.campus_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["campus_id"],
+        message: "A rep works from one campus. Choose which.",
+      });
+    }
+    if (v.role === "admin" && v.campus_id) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["campus_id"],
+        message: "An admin sees every campus, so they are not posted to one.",
+      });
+    }
   });
 
 export type NewMemberInput = z.infer<typeof newMemberSchema>;

@@ -69,6 +69,8 @@ export interface TeamMember {
   id: string;
   name: string;
   role: string;
+  /** Null for an admin, who has no campus and sees every one. */
+  campusName: string | null;
   /** From auth.users, which only the service-role client can read. */
   email: string | null;
   createdAt: string | null;
@@ -85,7 +87,7 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
   const supabase = await createClient();
   const { data: profiles, error } = await supabase
     .from("profiles")
-    .select("id, name, role, created_at")
+    .select("id, name, role, created_at, campuses(name)")
     .order("name");
 
   if (error) {
@@ -111,6 +113,18 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
     id: profile.id,
     name: profile.name ?? "Unnamed member",
     role: profile.role,
+    // Embedded through the foreign key. Null is the correct answer for an
+    // admin, who has no campus — not a scoping failure, so no warning here.
+    // PostgREST returns a many-to-one embed as an object at runtime, and the
+    // inferred type calls it an array. Both are read, so neither shape can
+    // silently produce null and be mistaken for "this admin has no campus".
+    campusName: (() => {
+      const embed = (profile as unknown as {
+        campuses?: { name: string | null } | { name: string | null }[] | null;
+      }).campuses;
+      if (!embed) return null;
+      return Array.isArray(embed) ? (embed[0]?.name ?? null) : embed.name;
+    })(),
     email: emails.get(profile.id) ?? null,
     createdAt: profile.created_at ?? null,
   }));
