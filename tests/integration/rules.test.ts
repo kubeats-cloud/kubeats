@@ -6,7 +6,7 @@ import {
   isOpenStatus,
   statusCategory,
 } from "@/lib/validation/institute";
-import { followUpHidden, followUpRequired } from "@/lib/validation/visit";
+import { followUpRequired } from "@/lib/validation/visit";
 import { visitMinutes, visitStatusOf } from "@/lib/validation/checkin";
 
 /**
@@ -137,6 +137,36 @@ if (configured && !has0014) {
  * over the wrong range — a bug that looks like nothing at all until a rep's
  * month quietly reports their week's numbers.
  */
+/**
+ * Migration 0018 is the stage 3 core-flow rework, and it is applied at SHIP
+ * TIME rather than ahead of the code — it both loosens and tightens, so neither
+ * direction is safe to leave open.
+ *
+ * That means this suite has to describe TWO databases: the one before it, where
+ * a follow-up is forbidden on a scheduled status and only meetings need a
+ * check-in, and the one after, where an open status demands a date and a time
+ * and every activity needs one. Each expectation is gated rather than flipped,
+ * so the suite is honest on both sides of the migration instead of red on one.
+ */
+const has0018 = configured
+  ? await admin
+      .from("daily_plans")
+      .select("checkin_location_manual")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0018) {
+  console.warn(
+    [
+      "",
+      "  i migration 0018 is not applied. The stage 3 suites are SKIPPED and the",
+      "    pre-0018 follow-up rules are asserted instead. Apply it at ship time.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
 const has0013 = configured
   ? await admin
       .from("targets")
@@ -1444,28 +1474,62 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         }
       });
 
-      it("requires a follow-up for exactly the statuses the app does", async () => {
-        // The app decides what a rep is asked for; this constraint decides what
-        // may be stored. A status the app lets through but the database rejects
-        // is a rep staring at a save that will not work, so the two lists are
-        // compared status by status rather than trusted.
-        for (const status of INSTITUTE_STATUSES) {
-          if (followUpHidden(status)) continue; // covered below, on its own terms
-          const { error } = await admin.from("visits").insert(visitWith(status, null));
-          expect(Boolean(error), `${status} without a follow-up`).toBe(
-            followUpRequired(status),
-          );
-        }
+      it.skipIf(!has0018)(
+        "requires a follow-up for exactly the OPEN statuses, as the app does",
+        async () => {
+          // Stage 3's rule, and the reason it is a TRIGGER rather than a CHECK:
+          // two of the three live visits carry an open status with no follow-up
+          // time, so a constraint could not have been added without failing on
+          // them. enforce_follow_up_when_open() only ever sees new rows.
+          //
+          // It asks institute_status_is_open() rather than keeping its own
+          // list, and followUpRequired() asks isOpenStatus(), so this compares
+          // two answers to one question rather than two copies of a list.
+          for (const status of INSTITUTE_STATUSES) {
+            const { error } = await admin
+              .from("visits")
+              .insert(visitWith(status, null));
+            expect(Boolean(error), `${status} without a follow-up`).toBe(
+              followUpRequired(status),
+            );
+          }
+        },
+      );
+
+      it.skipIf(!has0018)(
+        "no longer forbids a follow-up on the two scheduled statuses",
+        async () => {
+          // The reversal itself. Before 0018 these were refused outright;
+          // now they are the statuses that most need a date and a time.
+          for (const status of ["Session scheduled", "Campus visit scheduled"]) {
+            const { error } = await admin
+              .from("visits")
+              .insert({ ...visitWith(status, iso(7)), follow_up_time: "10:30" });
+            expect(error, status).toBeNull();
+          }
+        },
+      );
+
+      it.skipIf(!has0018)("wants a TIME as well as a date", async () => {
+        // The half that is genuinely new. A date alone puts a loop in a day
+        // rather than in a diary, which is how it goes quiet.
+        const { error } = await admin
+          .from("visits")
+          .insert(visitWith("Session scheduled", iso(7)));
+        expect(error?.code).toBe("FO016");
       });
 
-      it("still forbids a follow-up on the two scheduled statuses", async () => {
-        for (const status of ["Session scheduled", "Campus visit scheduled"]) {
-          const { error } = await admin
-            .from("visits")
-            .insert(visitWith(status, iso(7)));
-          expect(error?.code, status).toBe(CHECK_VIOLATION);
-        }
-      });
+      it.skipIf(has0018)(
+        "PRE-0018: forbids a follow-up on the two scheduled statuses",
+        async () => {
+          for (const status of ["Session scheduled", "Campus visit scheduled"]) {
+            const { error } = await admin
+              .from("visits")
+              .insert(visitWith(status, iso(7)));
+            expect(error?.code, status).toBe(CHECK_VIOLATION);
+          }
+        },
+      );
 
       it("lets a closed status carry a follow-up anyway", async () => {
         // "They said no, ask again next intake" is a real note to leave.
@@ -2467,10 +2531,11 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(error).toBeNull();
     });
 
-    it("leaves the other activities alone", async () => {
-      // Sessions and the one-shots do not run off the daily plan, so they are
+    it.skipIf(has0018)("PRE-0018: leaves the other activities alone", async () => {
+      // Sessions and the one-shots did not run off the daily plan, so they were
       // exempt from the presence guarantee exactly as they are exempt from the
-      // meeting gate.
+      // meeting gate. Stage 3 ends that exemption — see the stage 3 suite — so
+      // this describes the database only until 0018 is applied.
       const { error } = await repA.db.from("visits").insert({
         institute_id: houseId,
         member: repA.id,
@@ -2479,6 +2544,340 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         photo_url: photoFor(repA.id),
       });
       expect(error).toBeNull();
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!configured || !has0018)("stage 3 — the core flow", () => {
+    /**
+     * The rules migration 0018 adds, and the audited guards it must not have
+     * broken.
+     *
+     * Every one of these is a TRIGGER rather than a CHECK or a unique index,
+     * and that is the finding worth recording: three of the four had live rows
+     * that violated them, so a constraint would have refused to build and left
+     * the database part-migrated. A trigger only ever sees the rows it is given.
+     */
+    let houseId: string;
+    const day = iso();
+
+    const freshPlan = async (label: string, date = day) => {
+      const { data: house, error: hErr } = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} s3 ${label}`, type: "school", boards: BOARDS })
+        .select("id")
+        .single();
+      if (hErr) throw new Error(`institute: ${hErr.message}`);
+      const { data, error } = await repA.db
+        .from("daily_plans")
+        .insert({
+          member: repA.id,
+          date,
+          institute_id: house.id,
+          purpose: `${TAG} ${label}`,
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(`plan: ${error.message}`);
+      return { planId: data.id as string, instituteId: house.id as string };
+    };
+
+    const arrive = (planId: string) =>
+      repA.db
+        .from("daily_plans")
+        .update({
+          checkin_at: new Date().toISOString(),
+          checkin_lat: 23.0225,
+          checkin_lng: 72.5714,
+        })
+        .eq("id", planId);
+
+    beforeAll(async () => {
+      const { data } = await admin
+        .from("institutes")
+        .insert({ name: `${TAG} s3 base`, type: "school", boards: BOARDS })
+        .select("id")
+        .single();
+      houseId = data!.id;
+    });
+
+    describe("#6 — a check-in is located, or says why not", () => {
+      it("REFUSES an arrival with no coordinates and no reason", async () => {
+        // The reversal, at the layer that enforces it. This is the exact insert
+        // the check-in suite above used to assert SUCCEEDS.
+        const { planId } = await freshPlan("bare");
+        const { error } = await repA.db
+          .from("daily_plans")
+          .update({ checkin_at: new Date().toISOString() })
+          .eq("id", planId);
+        expect(error?.code).toBe("FO012");
+      });
+
+      it("accepts one with coordinates", async () => {
+        const { planId } = await freshPlan("located");
+        expect((await arrive(planId)).error).toBeNull();
+      });
+
+      it("accepts a declared reason instead, and flags it", async () => {
+        const { planId } = await freshPlan("declared");
+        const { error } = await repA.db
+          .from("daily_plans")
+          .update({
+            checkin_at: new Date().toISOString(),
+            checkin_location_manual: true,
+            checkin_manual_reason: "No signal indoors",
+          })
+          .eq("id", planId);
+        expect(error).toBeNull();
+
+        const { data } = await admin
+          .from("daily_plans")
+          .select("checkin_location_manual, checkin_manual_reason, checkin_lat")
+          .eq("id", planId)
+          .single();
+        expect(data?.checkin_location_manual).toBe(true);
+        expect(data?.checkin_manual_reason).toBe("No signal indoors");
+        expect(data?.checkin_lat).toBeNull();
+      });
+
+      it("refuses the flag without the reason", async () => {
+        // Otherwise the override is a checkbox, which is a silent bypass
+        // wearing a flag.
+        const { planId } = await freshPlan("flag only");
+        const { error } = await repA.db
+          .from("daily_plans")
+          .update({
+            checkin_at: new Date().toISOString(),
+            checkin_location_manual: true,
+          })
+          .eq("id", planId);
+        expect(error?.code).toBe(CHECK_VIOLATION);
+      });
+
+      it("does NOT retro-apply to a row that predates the rule", async () => {
+        // The whole reason this is a trigger. One live row has an arrival and
+        // no coordinates, and it must stay updatable.
+        const { planId } = await freshPlan("historic");
+        await admin
+          .from("daily_plans")
+          .update({ checkin_at: new Date().toISOString() })
+          .eq("id", planId);
+        const { error } = await admin
+          .from("daily_plans")
+          .update({ purpose: `${TAG} renamed` })
+          .eq("id", planId);
+        expect(error).toBeNull();
+      });
+    });
+
+    describe("#7 — one open visit at a time", () => {
+      it("refuses a second check-in while one is open, then allows it", async () => {
+        const first = await freshPlan("open one");
+        await arrive(first.planId);
+
+        const second = await freshPlan("open two");
+        const { error } = await arrive(second.planId);
+        expect(["FO013", "23505"]).toContain(error?.code);
+
+        await admin
+          .from("daily_plans")
+          .update({ checkout_at: new Date().toISOString() })
+          .eq("id", first.planId);
+        expect((await arrive(second.planId)).error).toBeNull();
+      });
+
+      it("treats a swept visit as finished, so it stops blocking", async () => {
+        const first = await freshPlan("swept one");
+        await arrive(first.planId);
+        await admin
+          .from("daily_plans")
+          .update({ checkout_missing: true })
+          .eq("id", first.planId);
+
+        const second = await freshPlan("swept two");
+        expect((await arrive(second.planId)).error).toBeNull();
+      });
+    });
+
+    describe("#8 — one check-in cycle per institute per day", () => {
+      it("stops a rep deleting a plan row they have checked in to", async () => {
+        // The bypass this closes: delete, re-add, check in again — which also
+        // walked through FO011's write-once arrival, because a NEW row gets a
+        // new timestamp honestly.
+        const { planId } = await freshPlan("no delete");
+        await arrive(planId);
+
+        const { error } = await repA.db.from("daily_plans").delete().eq("id", planId);
+        expect(error?.code).toBe("FO014");
+
+        const { data } = await admin
+          .from("daily_plans")
+          .select("id")
+          .eq("id", planId)
+          .maybeSingle();
+        expect(data, "the row must still be there").not.toBeNull();
+      });
+
+      it("still lets a rep remove one they have not started", async () => {
+        const { planId } = await freshPlan("removable");
+        const { error } = await repA.db.from("daily_plans").delete().eq("id", planId);
+        expect(error).toBeNull();
+      });
+
+      it("does NOT refuse two activities in one cycle", async () => {
+        // Q3: one CYCLE per institute per day, not one row. The live data
+        // already holds a legitimate olympiad + meeting on one day, and
+        // refusing that would be refusing real work.
+        const { planId, instituteId } = await freshPlan("two activities");
+        await arrive(planId);
+
+        for (const activity of ["olympiad", "application"] as const) {
+          const { error } = await repA.db.from("visits").insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity,
+            date: day,
+            photo_url: photoFor(repA.id),
+          });
+          expect(error, activity).toBeNull();
+        }
+      });
+    });
+
+    describe("the presence guarantee, widened to every activity", () => {
+      it("refuses EVERY activity without a check-in, not just a meeting", async () => {
+        for (const activity of ["olympiad", "application", "admission"] as const) {
+          const { error } = await repA.db.from("visits").insert({
+            institute_id: houseId,
+            member: repA.id,
+            activity,
+            date: day,
+            photo_url: photoFor(repA.id),
+          });
+          expect(error?.code, activity).toBe("FO009");
+        }
+      });
+
+      it("leaves Rule 2 standing as its own separate trigger", async () => {
+        // 0014 kept the meeting gate and the presence guarantee apart on
+        // purpose. A meeting whose plan row is for the WRONG day must still be
+        // refused, and by the gate rather than by the new rule.
+        const { planId, instituteId } = await freshPlan("gate intact", iso(-3));
+        await arrive(planId);
+        const { error } = await repA.db.from("visits").insert({
+          institute_id: instituteId,
+          member: repA.id,
+          activity: "meeting",
+          date: day,
+          photo_url: photoFor(repA.id),
+        });
+        expect(error).not.toBeNull();
+      });
+    });
+
+    describe("Q2 — a Set is closed without double-counting", () => {
+      it("keeps the Set as a Set and stamps closed_at instead", async () => {
+        // The trap this avoids: flipping the old row to Done would move the
+        // Done credit into the week the Set was logged AND let the new row
+        // count as a second Done. Rule 7 counts by (activity, lifecycle) over
+        // date, so leaving it alone is what keeps each week honest.
+        const { planId, instituteId } = await freshPlan("set then done");
+        await arrive(planId);
+
+        const { data: setRow } = await repA.db
+          .from("visits")
+          .insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "session",
+            lifecycle_status: "Set",
+            date: day,
+            expected_date: iso(7),
+            photo_url: photoFor(repA.id),
+          })
+          .select("id")
+          .single();
+
+        const { data: doneRow } = await repA.db
+          .from("visits")
+          .insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "session",
+            lifecycle_status: "Done",
+            date: day,
+            photo_url: photoFor(repA.id),
+          })
+          .select("id")
+          .single();
+
+        const { error } = await repA.db.rpc("close_visit", {
+          p_visit_id: doneRow!.id,
+          p_daily_plan_id: planId,
+          p_closes_visit_id: setRow!.id,
+        });
+        expect(error).toBeNull();
+
+        const { data: after } = await admin
+          .from("visits")
+          .select("id, lifecycle_status, closed_at")
+          .in("id", [setRow!.id, doneRow!.id]);
+
+        const set = after!.find((r) => r.id === setRow!.id)!;
+        expect(set.lifecycle_status, "the Set stays a Set").toBe("Set");
+        expect(set.closed_at, "and gains a closed_at").not.toBeNull();
+
+        // ...and the check-out happened in the same transaction.
+        const { data: plan } = await admin
+          .from("daily_plans")
+          .select("checkout_at")
+          .eq("id", planId)
+          .single();
+        expect(plan?.checkout_at).not.toBeNull();
+      });
+
+      it("refuses to close a loop that is not the caller's", async () => {
+        const { planId, instituteId } = await freshPlan("not mine");
+        await arrive(planId);
+        const { data: mine } = await repA.db
+          .from("visits")
+          .insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "meeting",
+            date: day,
+            photo_url: photoFor(repA.id),
+          })
+          .select("id")
+          .single();
+
+        const { error } = await repA.db.rpc("close_visit", {
+          p_visit_id: mine!.id,
+          p_daily_plan_id: planId,
+          p_closes_visit_id: "00000000-0000-0000-0000-000000000000",
+        });
+        expect(error?.code).toBe("FO019");
+      });
+    });
+
+    describe("the nightly sweep", () => {
+      it("closes a visit left open from a previous day, inventing nothing", async () => {
+        const stale = await freshPlan("stale", iso(-2));
+        await arrive(stale.planId);
+
+        const { error } = await admin.rpc("sweep_open_checkins");
+        expect(error).toBeNull();
+
+        const { data } = await admin
+          .from("daily_plans")
+          .select("checkout_missing, checkout_at")
+          .eq("id", stale.planId)
+          .single();
+        expect(data?.checkout_missing, "swept").toBe(true);
+        // It must never invent a departure time, because there is not one.
+        expect(data?.checkout_at, "no invented checkout_at").toBeNull();
+      });
     });
   });
 });

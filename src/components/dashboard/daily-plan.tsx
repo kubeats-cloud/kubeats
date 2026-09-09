@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import Link from "next/link";
-import { CheckCircle2Icon, PlusIcon, XIcon } from "lucide-react";
+import { CheckCircle2Icon, MapPinOffIcon, PlusIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,11 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
-import {
-  CheckInButton,
-  CheckOutButton,
-  CloseWithoutCheckoutButton,
-} from "@/components/dashboard/check-buttons";
+import { CheckInButton } from "@/components/dashboard/check-buttons";
 import { addToDailyPlan, removeFromDailyPlan } from "@/lib/visit-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import type { PickerInstitute, PlanEntry } from "@/lib/visits";
@@ -93,6 +89,19 @@ export function DailyPlan({
     : shown.error;
   const held = entries.filter((entry) => entry.meetings_actual !== null);
   const open = entries.filter((entry) => entry.meetings_actual === null);
+
+  // #7 — one active visit at a time. Whichever entry is checked in and not yet
+  // checked out is holding this rep; every other Check in button says so
+  // instead of offering a tap the database would refuse (FO013).
+  const openElsewhere =
+    entries.find(
+      (entry) =>
+        visitStatusOf({
+          checkinAt: entry.checkinAt,
+          checkoutAt: entry.checkoutAt,
+          checkoutMissing: entry.checkoutMissing,
+        }) === "In Progress",
+    ) ?? null;
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     const parsed = dailyPlanSchema.safeParse(
@@ -252,13 +261,29 @@ export function DailyPlan({
                     <CheckInButton
                       planId={entry.id}
                       instituteName={entry.instituteName}
+                      blockedBy={
+                        openElsewhere && openElsewhere.id !== entry.id
+                          ? openElsewhere.instituteName
+                          : null
+                      }
                     />
                   ) : (
-                    <div className="flex items-center gap-1">
-                      <Badge variant="warning">In progress</Badge>
-                      <Button asChild className="h-11">
-                        <Link href={`/log?plan=${entry.id}`}>Log</Link>
-                      </Button>
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="flex items-center gap-1">
+                        <Badge variant="warning">In progress</Badge>
+                        {/* The whole recovery path, and the reason there is no
+                            "abandon" button: a rep who was interrupted comes
+                            back to the same visit and finishes it. */}
+                        <Button asChild className="h-11">
+                          <Link href={`/log?plan=${entry.id}`}>Continue</Link>
+                        </Button>
+                      </div>
+                      {entry.checkinLocationManual && (
+                        <Badge variant="warning">
+                          <MapPinOffIcon className="size-3" aria-hidden />
+                          No location
+                        </Badge>
+                      )}
                     </div>
                   )}
                   {/* An assignment is not the rep's to dismiss — it came from
@@ -307,22 +332,9 @@ export function DailyPlan({
                     <CheckCircle2Icon className="size-3" aria-hidden />
                     Held
                   </Badge>
-                  {visitStatusOf({
-                    checkinAt: entry.checkinAt,
-                    checkoutAt: entry.checkoutAt,
-                    checkoutMissing: entry.checkoutMissing,
-                  }) === "In Progress" && (
-                    <>
-                      <CheckOutButton
-                        planId={entry.id}
-                        instituteName={entry.instituteName}
-                      />
-                      <CloseWithoutCheckoutButton
-                        planId={entry.id}
-                        instituteName={entry.instituteName}
-                      />
-                    </>
-                  )}
+                  {/* No check-out button. Filing the feedback checked them out
+                      in the same transaction, so by the time an entry reads
+                      "Held" the departure is already recorded. */}
                   {entry.checkoutAt && (
                     <span className="text-muted-foreground text-xs">
                       {formatDuration(

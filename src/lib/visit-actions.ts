@@ -1,15 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import { todayISO } from "@/lib/visits";
 import { requireAdmin } from "@/lib/admin";
-import {
-  assignVisitSchema,
-  needsClosingReport,
-} from "@/lib/validation/closing-report";
+import { assignVisitSchema } from "@/lib/validation/closing-report";
 import type { FormState } from "@/lib/visit-form-state";
 import {
   dailyPlanFormDataToInput,
@@ -17,27 +13,8 @@ import {
   dailyPlanSummary,
   planIdSchema,
   visitFieldErrors,
-  visitFormDataToInput,
-  visitSchema,
 } from "@/lib/validation/visit";
 
-const CHECK_VIOLATION = "23514";
-
-/**
- * The SQLSTATEs log_visit() raises for the cases a rep can actually cause.
- * Mapping on the code rather than the message means the wording lives here, in
- * one place, and no database text ever reaches the browser.
- */
-const RPC_MESSAGES: Record<string, string> = {
-  FO001: "That institute is not on today's plan. Add it on the Dashboard, then log the meeting.",
-  FO002: "That meeting is already marked as held.",
-  FO003: "That photo could not be attached.",
-  FO004: "Your session has expired. Please sign in again.",
-  FO005: "That entry is no longer on today's plan. Add it again on the Dashboard.",
-  FO006: "That institute no longer exists.",
-  FO007: "A photo is required to log this visit.",
-  FO008: "The photo was taken during the visit and cannot be changed afterwards.",
-};
 
 async function requireUser() {
   const supabase = await createClient();
@@ -179,7 +156,14 @@ export async function removeFromDailyPlan(planId: string): Promise<FormState> {
     .from("daily_plans")
     .delete()
     .eq("id", parsed.data)
-    .is("meetings_actual", null); // a held visit stays on the record
+    .is("meetings_actual", null) // a held visit stays on the record
+    // ...and so does one the rep has already arrived at. Without this, "check
+    // in, remove the entry, add it again, check in again" bought a second
+    // arrival at the same institute on the same day — defeating #8 and walking
+    // straight through FO011's write-once checkin_at, because a new ROW gets a
+    // new timestamp honestly. guard_checkin_cycle_final (FO014) says the same
+    // thing in the database, where a tampered request also has to hear it.
+    .is("checkin_at", null);
 
   if (error) {
     logError("plan:remove", error);
@@ -198,88 +182,13 @@ export async function removeFromDailyPlan(planId: string): Promise<FormState> {
 /* B–D. Logging a visit                                                */
 /* ------------------------------------------------------------------ */
 
-export async function createVisit(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const { supabase, user } = await requireUser();
-  if (!user) {
-    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
-  }
-
-  const parsed = visitSchema.safeParse(visitFormDataToInput(formData));
-  if (!parsed.success) {
-    return {
-      error: "Please check the highlighted fields.",
-      fieldErrors: visitFieldErrors(parsed.error),
-    };
-  }
-  const input = parsed.data;
-
-  // A photo may only ever live under the uploader's own folder — the same rule
-  // the storage policy enforces, checked here so a tampered form cannot record
-  // a path pointing at someone else's file.
-  if (input.photo_path && !input.photo_path.startsWith(`${user.id}/`)) {
-    return { error: "That photo could not be attached.", fieldErrors: {} };
-  }
-
-  // One call, one transaction. The RPC inserts the visit, marks today's plan
-  // entry held and updates the institute's status together, so a failure part
-  // way through leaves nothing behind. Its rule checks run inside that
-  // transaction alongside the meeting-gate trigger — see
-  // supabase/migrations/0002_log_visit_rpc.sql.
-  const { data: newVisitId, error } = await supabase.rpc("log_visit", {
-    p_institute_id: input.institute_id,
-    p_activity: input.activity,
-    p_lifecycle_status: input.lifecycle_status,
-    p_expected_date: input.expected_date,
-    p_latitude: input.latitude,
-    p_longitude: input.longitude,
-    p_photo_url: input.photo_path,
-    p_notes: input.notes,
-    p_status_set_to: input.status_set_to,
-    p_accuracy: input.accuracy,
-    p_follow_up_date: input.follow_up_date,
-    p_follow_up_time: input.follow_up_time,
-    p_daily_plan_id: input.daily_plan_id,
-  });
-
-  if (error) {
-    logError("visit:create", error);
-
-    const known = RPC_MESSAGES[error.code ?? ""];
-    if (known) return { error: known, fieldErrors: {} };
-
-    // The gate trigger is the backstop behind FO001: it raises check_violation,
-    // and so do the lifecycle and follow-up constraints.
-    if (error.code === CHECK_VIOLATION) {
-      return {
-        error:
-          input.activity === "meeting"
-            ? "A meeting can only be logged for an institute on today's plan. Add it on the Dashboard first."
-            : "That combination is not allowed. Please check the dates and status.",
-        fieldErrors: {},
-      };
-    }
-
-    return {
-      error: toFriendlyMessage(error, "We could not save this visit. Please try again."),
-      fieldErrors: {},
-    };
-  }
-
-  revalidatePath("/");
-  revalidatePath("/log");
-  revalidatePath("/pending");
-  revalidatePath(`/institutes/${input.institute_id}`);
-
-  // A meeting, session or campus visit that is already complete goes straight
-  // to its closing report — that is the only moment the rep still has the
-  // detail in their head. One logged as "Set" hasn't happened yet, so its
-  // report is filed later, from Pending, when they close it.
-  const stillToHappen = input.lifecycle_status === "Set";
-  if (needsClosingReport(input.activity) && !stillToHappen && typeof newVisitId === "string") {
-    redirect(`/pending/${newVisitId}`);
-  }
-  redirect("/");
-}
+/*
+ * createVisit() lived here — the single-step "log a visit" that redirected to
+ * the closing report afterwards.
+ *
+ * Stage 3 replaced it with logAndFileVisit() in feedback-actions.ts, which logs
+ * the visit AND files its short feedback AND checks the rep out from one
+ * submit. Keeping this one alongside would have left a second way into
+ * log_visit() that skipped the feedback and the check-out entirely — which is
+ * exactly the dodge the forced chain exists to close.
+ */

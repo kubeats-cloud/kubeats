@@ -1,7 +1,21 @@
 import { z } from "zod";
+import { MANAGEMENT_INTERESTS } from "@/lib/validation/feedback";
 
 /**
- * The closing report's vocabulary and its conditional rules.
+ * The closing report's vocabulary — and, until stage 3, its conditional rules.
+ *
+ * THE FORM THIS BELONGED TO IS GONE. `closing-report-form.tsx` and
+ * `submitClosingReport` were deleted with it; the short feedback form in
+ * `validation/feedback.ts` replaced them, and `close_visit()` files it.
+ *
+ * This file stays because the vocabularies are still needed to READ an old
+ * report — `report-view.tsx` renders every filed report, and one filed before
+ * stage 3 has all of these fields in it. `MANAGEMENT_INTERESTS` is used by the
+ * new form as well; it was always a good list.
+ *
+ * `closingReportSchema` below is no longer submitted by anything. It is kept
+ * rather than deleted for the same reason the columns are kept: restoring the
+ * rich report means restoring a form, not writing a migration.
  *
  * Every list here is mirrored by a CHECK constraint in migration 0005. The
  * constraint is the backstop; this is what the rep sees and what decides which
@@ -117,8 +131,15 @@ export const STUDENT_INTENTS = [
   "Ready for Campus Visit",
 ] as const;
 
-/** C — management interest level, distinct from the response checkboxes. */
-export const MANAGEMENT_INTERESTS = ["Low", "Medium", "High", "Very High"] as const;
+/**
+ * C — management interest level, distinct from the response checkboxes.
+ *
+ * Defined in validation/feedback.ts and re-exported here for the readers that
+ * still expect it in this module. The dependency points that way on purpose:
+ * client components import feedback.ts, and importing it FROM here would drag
+ * closingReportSchema below into the browser bundle.
+ */
+export { MANAGEMENT_INTERESTS };
 
 /** D — the primary outcome category, distinct from visit_outcome. */
 export const PRIMARY_OUTCOMES = [

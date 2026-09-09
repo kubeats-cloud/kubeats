@@ -357,13 +357,14 @@ exist purely to fit:
 Those two together were the cheap wins, and they are spent. Neither is worth
 extending.
 
-**Where it stands: 2826 KiB against a 3072 KiB ceiling — 246 KiB, about 8%.**
+**Where it stands: 2873 KiB against a 3072 KiB ceiling — 199 KiB, about 6.5%.**
 
 Read that as a budget, not a comfort. It was 2831 KiB before the in-app camera
 and the area-name lookup; two ordinary features spent nearly two thirds of the
-room that existed then. The redesign has since given some back — stage 1 freed
-7 KiB and stage 2 another 7 by deleting the target-setting form — which is a
-reprieve, not a change of situation. Treat the number as a release gate:
+room that existed then. The redesign gave some back and then spent more: stage 1
+freed 7 KiB and stage 2 another 7, and stage 3 cost 47 — the forced check-in
+chain adds two client components and a server-action module, and deleting the
+1076-line closing report did not cover it. Treat the number as a release gate:
 
 | Measured | Do |
 | --- | --- |

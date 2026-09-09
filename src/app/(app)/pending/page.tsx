@@ -21,8 +21,8 @@ export default async function PendingPage() {
         title="Pending"
         description={
           isAdmin(user)
-            ? "Sessions and campus visits the team has set but not yet closed."
-            : "Sessions and campus visits you have set but not yet closed."
+            ? "Sessions and campus visits the team has set but not yet completed."
+            : "What you have set but not yet completed. Close one by visiting that institute again."
         }
       />
 

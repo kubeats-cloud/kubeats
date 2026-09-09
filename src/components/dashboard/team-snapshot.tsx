@@ -48,6 +48,7 @@ interface Row {
   total: number;
   loops: number;
   href: string;
+  reportHref: string;
 }
 
 function rowsFrom(
@@ -65,6 +66,10 @@ function rowsFrom(
     total: METRICS.reduce((sum, m) => sum + member.achieved[m.key], 0),
     loops: openLoops.get(member.member) ?? 0,
     href: `/targets?week=${weekStart}&member=${member.member}`,
+    // /team and /report answer different questions — all reps for one week
+    // against one rep over months — so they stay separate screens. What they
+    // needed was a door between them, which is this.
+    reportHref: `/report?period=monthly&member=${member.member}`,
   }));
 }
 
@@ -172,6 +177,9 @@ export function TeamSnapshot({
                 <th scope="col" className="px-5 py-2.5 text-right text-xs font-medium">
                   All activity
                 </th>
+                <th scope="col" className="px-3 py-2.5 text-xs font-medium">
+                  <span className="sr-only">Report</span>
+                </th>
                 <th scope="col" className="w-10 px-2 py-2.5">
                   <span className="sr-only">Open</span>
                 </th>
@@ -218,6 +226,14 @@ export function TeamSnapshot({
                     ) : (
                       row.total
                     )}
+                  </td>
+                  <td className="px-3 py-3">
+                    <Link
+                      href={row.reportHref}
+                      className="text-muted-foreground hover:text-foreground text-xs underline underline-offset-2"
+                    >
+                      Report
+                    </Link>
                   </td>
                   <td className="px-2 py-3">
                     <Link

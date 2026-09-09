@@ -15,7 +15,7 @@ import {
   accuracyBand,
   describeAccuracy,
 } from "@/lib/validation/location";
-import { FileTextIcon } from "lucide-react";
+import { FileTextIcon, MapPinOffIcon } from "lucide-react";
 
 /**
  * One rep's activity, aggregated and read-only.
@@ -281,14 +281,35 @@ export function ActivitySummary({ report }: { report: ActivityReport }) {
                             {formatArea(visit.checkinArea)}
                           </span>
                         )}
-                        {visit.checkinAt && (
-                          <span className="block text-xs">
-                            <Badge
-                              variant={ACCURACY_BADGE[accuracyBand(visit.checkinAccuracy)]}
-                            >
-                              {describeAccuracy(visit.checkinAccuracy)}
-                            </Badge>
-                          </span>
+                        {/* #6 — an arrival the device could not place, and the
+                            rep's own reason for it. Shown INSTEAD of an
+                            accuracy badge, because there is no accuracy to
+                            describe and a "no location" badge beside a
+                            confident-looking one would read as a measurement. */}
+                        {visit.checkinAt && visit.checkinLocationManual ? (
+                          <>
+                            <span className="block text-xs">
+                              <Badge variant="warning">
+                                <MapPinOffIcon className="size-3" aria-hidden />
+                                No location
+                              </Badge>
+                            </span>
+                            {visit.checkinManualReason && (
+                              <span className="text-muted-foreground mt-0.5 block max-w-56 text-xs">
+                                &ldquo;{visit.checkinManualReason}&rdquo;
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          visit.checkinAt && (
+                            <span className="block text-xs">
+                              <Badge
+                                variant={ACCURACY_BADGE[accuracyBand(visit.checkinAccuracy)]}
+                              >
+                                {describeAccuracy(visit.checkinAccuracy)}
+                              </Badge>
+                            </span>
+                          )
                         )}
                       </td>
                       <td className="px-3 py-2 align-top whitespace-nowrap">

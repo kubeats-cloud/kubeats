@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentUser } from "@/lib/auth";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import type { FormState } from "@/lib/visit-form-state";
 import {
+  NO_LOCATION_GUIDANCE,
+  checkInBlocked,
   checkPointFormDataToInput,
   checkPointSchema,
 } from "@/lib/validation/checkin";
@@ -18,11 +20,16 @@ import {
  * open, must not be able to claim they were somewhere at a time they were not.
  * That is the whole value of the record.
  *
- * The coordinates are the opposite: they can only come from the device, and
- * they are allowed to be missing. A denied permission or no signal still
- * records the arrival, because a rep standing at a gate must never be stranded
- * by their phone. Migration 0014 makes every coordinate column nullable for the
- * same reason Rule 12 lets a photo save without a geo-tag.
+ * The coordinates can only come from the device — and as of stage 3 they are
+ * no longer optional. A check-in needs a position, or the rep's own account of
+ * why there is not one (docs/stage3-plan.md, #6). That reverses the rule 0014
+ * and 0015 both state, deliberately, and it keeps a LOGGED escape rather than
+ * a silent one: `checkin_location_manual` flags it and
+ * `checkin_manual_reason` carries their words, both visible to an admin.
+ *
+ * The column stays nullable, because the escape is real and because one row
+ * predating this rule has an arrival and no coordinates.
+ * `enforce_checkin_located()` (FO012) is the backstop.
  */
 
 async function requireUser() {
@@ -33,7 +40,16 @@ async function requireUser() {
   return { supabase, user };
 }
 
-const GONE = "That planned visit is no longer on your plan.";
+/**
+ * What the check-in triggers raise, mapped by CODE rather than by message so no
+ * database text ever reaches a rep. FO012 and FO013 are 0018's.
+ */
+const CHECKIN_MESSAGES: Record<string, string> = {
+  FO012: `A location is needed to check in. ${NO_LOCATION_GUIDANCE}`,
+  FO013:
+    "You are still checked in somewhere else. Finish that visit first — it is on your Dashboard.",
+  FO014: "This visit has already started, so it cannot be removed from the plan.",
+};
 
 export async function checkIn(
   _prev: FormState,
@@ -49,137 +65,81 @@ export async function checkIn(
     return { error: "We could not record that check-in.", fieldErrors: {} };
   }
 
+  // #6 — refused here so the rep gets a sentence rather than FO012. The
+  // trigger still runs and is what holds against a tampered form.
+  if (checkInBlocked(parsed.data)) {
+    return {
+      error: `A location is needed to check in. ${NO_LOCATION_GUIDANCE}`,
+      fieldErrors: {},
+    };
+  }
+
+  const manual = parsed.data.latitude === null;
+
   // `.is("checkin_at", null)` makes this idempotent: a double tap, or two
   // phones, cannot overwrite the first arrival with a later one.
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from("daily_plans")
     .update({
       checkin_at: new Date().toISOString(),
       checkin_lat: parsed.data.latitude,
       checkin_lng: parsed.data.longitude,
       checkin_accuracy: parsed.data.accuracy,
+      // Only ever true when there is no position to record. Writing the reason
+      // alongside a good fix would put a note in the record that contradicts
+      // the coordinates beside it.
+      checkin_location_manual: manual,
+      checkin_manual_reason: manual ? parsed.data.manual_reason : null,
     })
     .eq("id", parsed.data.plan_id)
     .eq("member", user.id)
-    .is("checkin_at", null)
-    .select("id");
+    .is("checkin_at", null);
 
   if (error) {
     logError("checkin:in", error);
+    const known = CHECKIN_MESSAGES[error.code ?? ""];
+    if (known) return { error: known, fieldErrors: {} };
     return {
       error: toFriendlyMessage(error, "We could not record that check-in."),
       fieldErrors: {},
     };
   }
 
-  if (!data || data.length === 0) {
-    // Either the row is gone, or the rep is already checked in. Both are fine
-    // outcomes for the person tapping; neither is an error worth a red box.
-    revalidatePath("/");
-    return { error: null, fieldErrors: {}, ok: true };
-  }
-
   revalidatePath("/");
   revalidatePath("/log");
-  return { error: null, fieldErrors: {}, ok: true };
+
+  // #9 — the forced chain. An arrival is not a thing a rep does and then
+  // decides about; it is the first step of logging the visit, so the next
+  // screen is the log itself, with the institute and purpose already filled in
+  // from the plan row.
+  //
+  // `data` being empty means the row was already checked in — a double tap, or
+  // a rep coming back to a visit they started. That is not an error and it
+  // leads to exactly the same place, which is the point of the chain.
+  redirect(`/log?plan=${parsed.data.plan_id}`);
 }
 
-export async function checkOut(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const { supabase, user } = await requireUser();
-  if (!user) {
-    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
-  }
-
-  const parsed = checkPointSchema.safeParse(checkPointFormDataToInput(formData));
-  if (!parsed.success) {
-    return { error: "We could not record that check-out.", fieldErrors: {} };
-  }
-
-  const { data, error } = await supabase
-    .from("daily_plans")
-    .update({
-      checkout_at: new Date().toISOString(),
-      checkout_lat: parsed.data.latitude,
-      checkout_lng: parsed.data.longitude,
-      checkout_accuracy: parsed.data.accuracy,
-    })
-    .eq("id", parsed.data.plan_id)
-    .eq("member", user.id)
-    .not("checkin_at", "is", null)
-    .is("checkout_at", null)
-    .select("id");
-
-  if (error) {
-    logError("checkin:out", error);
-    return {
-      error: toFriendlyMessage(error, "We could not record that check-out."),
-      fieldErrors: {},
-    };
-  }
-
-  if (!data || data.length === 0) {
-    return {
-      error: "That visit is not open for check-out.",
-      fieldErrors: {},
-    };
-  }
-
-  revalidatePath("/");
-  return { error: null, fieldErrors: {}, ok: true };
-}
-
-/**
- * The escape valve: closing a visit whose check-out never happened.
+/*
+ * checkOut() and closeWithoutCheckout() BOTH lived here, and both are gone.
  *
- * A rep finishes at a school, drives off, and remembers at nine that evening.
- * Without this the visit sits In Progress for ever and the day never balances.
- * So it is marked Completed with the duration recorded honestly as unknown,
- * rather than inventing a check-out time that would make the record a lie.
+ * checkOut was the rep tapping "Check out" when they left. Stage 3 makes the
+ * departure automatic: submitting the feedback form calls public.close_visit(),
+ * which stamps checkout_at in the same transaction as the report. A rep never
+ * taps it, so a button that could be forgotten no longer exists.
  *
- * Open to the rep themselves and to an admin — 0014 widens daily_plans_update
- * for exactly this, and an admin could already delete the row outright.
+ * closeWithoutCheckout was the escape valve for a visit left open — "completed,
+ * duration unknown". It is gone for a sharper reason: the flow is now a forced
+ * chain, and a rep who is still on it can always finish it — the Dashboard
+ * offers an in-progress visit straight back to them. Leaving an "I give up"
+ * button beside that would be offering the easier tap, and it is the one tap
+ * that loses the duration.
+ *
+ * What catches a visit nobody CAN finish — a dead phone, a closed browser, a
+ * rep who drove away — is public.sweep_open_checkins(), scheduled nightly in
+ * migration 0018. It sets the same checkout_missing = true this action used to,
+ * so the state and its wording are unchanged; only who does it has moved, from
+ * the rep to a job they never see.
+ *
+ * An admin with a rep genuinely stuck mid-day has no button either. The
+ * one-liner for it is in 0018's footer.
  */
-export async function closeWithoutCheckout(
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const user = await getCurrentUser();
-  if (!user) {
-    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
-  }
-
-  const planId = String(formData.get("plan_id") ?? "").trim();
-  if (!planId) {
-    return { error: "We could not tell which visit to close.", fieldErrors: {} };
-  }
-
-  const supabase = await createClient();
-  // No member filter: an admin closing a rep's forgotten visit is the point.
-  // RLS decides whether this caller may touch the row at all.
-  const { data, error } = await supabase
-    .from("daily_plans")
-    .update({ checkout_missing: true })
-    .eq("id", planId)
-    .not("checkin_at", "is", null)
-    .is("checkout_at", null)
-    .select("id");
-
-  if (error) {
-    logError("checkin:close", error);
-    return {
-      error: toFriendlyMessage(error, "We could not close that visit."),
-      fieldErrors: {},
-    };
-  }
-
-  if (!data || data.length === 0) {
-    return { error: GONE, fieldErrors: {} };
-  }
-
-  revalidatePath("/");
-  revalidatePath("/report");
-  return { error: null, fieldErrors: {}, ok: true };
-}

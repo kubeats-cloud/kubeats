@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { FormSection } from "@/components/form-section";
 import { Input } from "@/components/ui/input";
@@ -15,105 +14,90 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { CaptureFields } from "@/components/visits/capture-fields";
-import { createVisit } from "@/lib/visit-actions";
+import {
+  EMPTY_FEEDBACK,
+  FeedbackFields,
+  type FeedbackState,
+} from "@/components/visits/feedback-fields";
+import { logAndFileVisit } from "@/lib/feedback-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
-import type { PickerInstitute, PlanEntry } from "@/lib/visits";
+import type { OpenLoop, PlanEntry } from "@/lib/visits";
 import {
   CATEGORY_LABELS,
   STATUS_CATEGORIES,
-  institutePickerLabel,
   statusesInCategory,
 } from "@/lib/validation/institute";
 import {
   ACTIVITIES,
-  followUpHidden,
+  activityForPurpose,
+  expectedDateRequired,
+  fieldLabel,
   followUpRequired,
   hasLifecycle,
-  fieldLabel,
-  visitFieldErrors,
-  visitFormDataToInput,
-  visitSchema,
 } from "@/lib/validation/visit";
-import { cn } from "@/lib/utils";
 
 const NO_CHANGE = "__no_change__";
 
+/**
+ * Log a visit — now the second step of a forced chain, not a screen a rep
+ * chooses.
+ *
+ * They arrive here from a check-in, which is why the institute and the purpose
+ * are shown rather than asked: both were decided when the visit was planned,
+ * and asking again would invite a second, disagreeing answer. The activity and
+ * its Set/Done state are pre-filled from the purpose through
+ * `activityForPurpose()`, and stay editable — the map covers four of the five
+ * purposes and "Other" was always going to need a choice.
+ *
+ * The feedback form is at the foot of this same screen rather than a step
+ * later. One submit logs the visit, files the report, closes any earlier "Set"
+ * it completed, and checks the rep out. There is no check-out button anywhere
+ * any more.
+ */
 export function LogVisitForm({
   userId,
-  institutes,
-  openPlan,
-  initialPlanId,
+  plan,
+  openLoops,
 }: {
   userId: string;
-  institutes: PickerInstitute[];
-  /** Today's plan entries not yet marked held — the only meetings allowed. */
-  openPlan: PlanEntry[];
-  initialPlanId?: string;
+  /** The checked-in plan entry this visit belongs to. */
+  plan: PlanEntry;
+  openLoops: OpenLoop[];
 }) {
   const [serverState, formAction, isPending] = useActionState(
-    createVisit,
+    logAndFileVisit,
     EMPTY_STATE,
   );
-  const [clientState, setClientState] = useState<FormState>(EMPTY_STATE);
+  const [clientState] = useState<FormState>(EMPTY_STATE);
 
-  const [activity, setActivity] = useState("meeting");
-  const [planId, setPlanId] = useState(initialPlanId ?? "");
-  const [instituteId, setInstituteId] = useState("");
-  const [lifecycleStatus, setLifecycleStatus] = useState("Done");
+  const prefill = activityForPurpose(plan.purpose);
+  const [activity, setActivity] = useState<string>(prefill?.activity ?? "meeting");
+  const [lifecycleStatus, setLifecycleStatus] = useState<string>(
+    prefill?.lifecycle ?? "Done",
+  );
   const [expectedDate, setExpectedDate] = useState("");
   const [statusSetTo, setStatusSetTo] = useState(NO_CHANGE);
-  const [followUpDate, setFollowUpDate] = useState("");
-  const [followUpTime, setFollowUpTime] = useState("");
+  const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
 
   const lifecycle = hasLifecycle(activity);
-  const isMeeting = activity === "meeting";
-  const selectedPlan = openPlan.find((entry) => entry.id === planId);
-
-  // A meeting's institute is whichever plan row was picked — never free-form.
-  const effectiveInstituteId = isMeeting
-    ? (selectedPlan?.institute_id ?? "")
-    : instituteId;
-
   const status = statusSetTo === NO_CHANGE ? null : statusSetTo;
-  const hideFollowUp = followUpHidden(status);
-  const needFollowUp = followUpRequired(status);
+  const needsDate = expectedDateRequired(activity, lifecycle ? lifecycleStatus : null);
 
   const error = serverState.error ?? clientState.error;
   const fieldErrors = serverState.error
     ? serverState.fieldErrors
     : clientState.fieldErrors;
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    const parsed = visitSchema.safeParse(
-      visitFormDataToInput(new FormData(event.currentTarget)),
-    );
-    if (!parsed.success) {
-      event.preventDefault();
-      setClientState({
-        error: "Please check the highlighted fields.",
-        fieldErrors: visitFieldErrors(parsed.error),
-      });
-      return;
-    }
-    setClientState(EMPTY_STATE);
-  }
-
   const fieldError = (key: string) =>
-    fieldErrors[key] ? (
-      <p className="text-danger text-xs">{fieldErrors[key]}</p>
-    ) : null;
+    fieldErrors[key] ? <p className="text-danger text-xs">{fieldErrors[key]}</p> : null;
 
   return (
-    <form action={formAction} onSubmit={handleSubmit} className="space-y-4">
+    <form action={formAction} className="space-y-4">
+      {/* Everything the plan already decided, carried rather than re-asked. */}
+      <input type="hidden" name="institute_id" value={plan.institute_id} />
+      <input type="hidden" name="daily_plan_id" value={plan.id} />
       <input type="hidden" name="activity" value={activity} />
-      <input type="hidden" name="institute_id" value={effectiveInstituteId} />
-      <input
-        type="hidden"
-        name="daily_plan_id"
-        value={isMeeting ? planId : ""}
-      />
       <input
         type="hidden"
         name="lifecycle_status"
@@ -124,244 +108,122 @@ export function LogVisitForm({
         name="expected_date"
         value={lifecycle && lifecycleStatus === "Set" ? expectedDate : ""}
       />
-      <input type="hidden" name="status_set_to" value={status ?? ""} />
       <input
         type="hidden"
-        name="follow_up_date"
-        value={hideFollowUp ? "" : followUpDate}
-      />
-      <input
-        type="hidden"
-        name="follow_up_time"
-        value={hideFollowUp ? "" : followUpTime}
+        name="status_set_to"
+        value={statusSetTo === NO_CHANGE ? "" : statusSetTo}
       />
 
       <FormSection
         title="What happened?"
-        description="The activity, and which institute it was at."
+        description="Pre-filled from what you planned. Change it if the visit turned out differently."
       >
+        <div className="border-border bg-muted/40 rounded-md border px-3 py-2">
+          <p className="text-sm font-medium">{plan.instituteName}</p>
+          <p className="text-muted-foreground text-xs">{plan.purpose}</p>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Activity</Label>
+          <Select value={activity} onValueChange={setActivity}>
+            <SelectTrigger className="h-11 w-full" aria-label="Activity">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ACTIVITIES.map((option) => (
+                <SelectItem key={option.key} value={option.key}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {fieldError("activity")}
+          {fieldError("daily_plan_id")}
+        </div>
+
+        {lifecycle && (
           <div className="space-y-2">
-            <Label>Activity</Label>
-            <Select
-              value={activity}
-              onValueChange={(value) => {
-                setActivity(value);
-                // Each activity has its own shape; carrying selections across
-                // them is how you end up submitting a stale institute.
-                setPlanId("");
-                setInstituteId("");
-                setLifecycleStatus("Done");
-                setExpectedDate("");
-              }}
-            >
-              <SelectTrigger className="h-11 w-full">
+            <Label>Is it set for later, or done?</Label>
+            <Select value={lifecycleStatus} onValueChange={setLifecycleStatus}>
+              <SelectTrigger className="h-11 w-full" aria-label="Set or Done">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {ACTIVITIES.map((option) => (
-                  <SelectItem key={option.key} value={option.key}>
-                    {option.label}
-                  </SelectItem>
-                ))}
+                <SelectItem value="Set">Set for a later date</SelectItem>
+                <SelectItem value="Done">Done today</SelectItem>
               </SelectContent>
             </Select>
+            {fieldError("lifecycle_status")}
           </div>
+        )}
 
-          {/* Rule 2 — the gate. Meetings come only from today's plan. */}
-          {isMeeting ? (
-            <div className="space-y-2">
-              <Label>Open for today</Label>
-              {openPlan.length === 0 ? (
-                <div className="border-border rounded-md border border-dashed px-4 py-6 text-center">
-                  <p className="text-sm font-medium">Nothing open today</p>
-                  <p className="text-muted-foreground mt-1 text-sm">
-                    A meeting can only be logged for an institute on today&rsquo;s
-                    plan.
-                  </p>
-                  <Button asChild variant="outline" className="mt-3 h-11">
-                    <Link href="/">Add one on the Dashboard</Link>
-                  </Button>
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {openPlan.map((entry) => {
-                    const selected = entry.id === planId;
-                    return (
-                      <li key={entry.id}>
-                        <button
-                          type="button"
-                          onClick={() => setPlanId(entry.id)}
-                          aria-pressed={selected}
-                          className={cn(
-                            "min-h-11 w-full rounded-md border px-3 py-2 text-left transition-colors",
-                            selected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-border bg-card hover:bg-accent",
-                          )}
-                        >
-                          <span className="block text-sm font-medium">
-                            {entry.instituteName}
-                          </span>
-                          <span
-                            className={cn(
-                              "block text-xs",
-                              selected
-                                ? "text-primary-foreground/80"
-                                : "text-muted-foreground",
-                            )}
-                          >
-                            {entry.purpose}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {fieldError("daily_plan_id")}
-              {fieldError("institute_id")}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label>Institute</Label>
-              <Select value={instituteId} onValueChange={setInstituteId}>
-                <SelectTrigger className="h-11 w-full">
-                  <SelectValue placeholder="Select an institute" />
-                </SelectTrigger>
-                <SelectContent>
-                  {institutes.map((institute) => (
-                    <SelectItem key={institute.id} value={institute.id}>
-                      {institutePickerLabel(institute)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {institutes.length === 0 && (
-                <p className="text-muted-foreground text-xs">
-                  No institutes registered yet. Add one first.
-                </p>
-              )}
-              {fieldError("institute_id")}
-            </div>
-          )}
-
-          {/* Rule 3 — Set -> Done, independent of the plan. */}
-          {lifecycle && (
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={lifecycleStatus} onValueChange={setLifecycleStatus}>
-                <SelectTrigger className="h-11 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Set">Set (scheduled, closes later)</SelectItem>
-                  <SelectItem value="Done">Done (it already happened)</SelectItem>
-                </SelectContent>
-              </Select>
-              {fieldError("lifecycle_status")}
-            </div>
-          )}
-
-          {lifecycle && lifecycleStatus === "Set" && (
-            <div className="space-y-2">
-              <Label htmlFor="expected-date">Expected date</Label>
-              <Input
-                id="expected-date"
-                type="date"
-                className="h-11"
-                value={expectedDate}
-                onChange={(event) => setExpectedDate(event.target.value)}
-              />
-              {fieldError("expected_date")}
-            </div>
-          )}
+        {needsDate && (
+          <div className="space-y-2">
+            <Label htmlFor="expected-date">When is it expected?</Label>
+            <Input
+              id="expected-date"
+              type="date"
+              className="h-11"
+              value={expectedDate}
+              onChange={(event) => setExpectedDate(event.target.value)}
+              aria-required
+            />
+            {fieldError("expected_date")}
+          </div>
+        )}
       </FormSection>
 
       <FormSection
         title="Photo"
         description="A photograph, taken now rather than remembered later."
       >
-          <CaptureFields userId={userId} />
+        <CaptureFields userId={userId} />
       </FormSection>
 
       <FormSection
-        title="Notes and status"
-        description="Anything worth saying, and whether this changes where the institute stands."
+        title="Where does this leave the institute?"
+        description="Rule 4 — chosen by hand, never guessed from the activity."
       >
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
-            <Textarea id="notes" name="notes" rows={3} maxLength={2000} />
-            {fieldError("notes")}
-          </div>
-
-          {/* Rule 4 — always chosen by hand, never derived from the activity. */}
-          <div className="space-y-2">
-            <Label>Update institute status</Label>
-            <Select value={statusSetTo} onValueChange={setStatusSetTo}>
-              <SelectTrigger className="h-11 w-full">
-                <SelectValue />
-              </SelectTrigger>
-              {/* Grouped by category so it is obvious which choices leave the
-                  institute in play and which close the loop. */}
-              <SelectContent>
-                <SelectItem value={NO_CHANGE}>No change</SelectItem>
-                {STATUS_CATEGORIES.map((category) => (
-                  <SelectGroup key={category}>
-                    <SelectLabel>{CATEGORY_LABELS[category]}</SelectLabel>
-                    {statusesInCategory(category).map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
-            {fieldError("status_set_to")}
-          </div>
-
-          {/* Rule 5 — hidden for the two "scheduled" statuses, required for
-              approval, optional otherwise. Mirrors the CHECK constraints, so
-              the rep is never surprised by one. */}
-          {hideFollowUp ? (
+        <div className="space-y-2">
+          <Label>Status</Label>
+          <Select value={statusSetTo} onValueChange={setStatusSetTo}>
+            <SelectTrigger className="h-11 w-full" aria-label="Institute status">
+              <SelectValue />
+            </SelectTrigger>
+            {/* Grouped so it is obvious which choices leave the institute in
+                play — and an open one is what makes the follow-up mandatory
+                below. */}
+            <SelectContent>
+              <SelectItem value={NO_CHANGE}>No change</SelectItem>
+              {STATUS_CATEGORIES.map((category) => (
+                <SelectGroup key={category}>
+                  <SelectLabel>{CATEGORY_LABELS[category]}</SelectLabel>
+                  {statusesInCategory(category).map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+          {fieldError("status_set_to")}
+          {followUpRequired(status) && (
             <p className="text-muted-foreground text-xs">
-              No separate follow-up needed. The expected date above already
-              covers this.
+              That leaves the institute open, so the next date and time are
+              needed below.
             </p>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="follow-up-date">
-                  Follow-up date {needFollowUp ? "(required)" : "(optional)"}
-                </Label>
-                <Input
-                  id="follow-up-date"
-                  type="date"
-                  className="h-11"
-                  value={followUpDate}
-                  onChange={(event) => setFollowUpDate(event.target.value)}
-                  // aria-required rather than required: the form runs the
-                  // shared schema itself, and the native bubble would fire
-                  // first and say something we did not write.
-                  aria-required={needFollowUp || undefined}
-                  aria-invalid={fieldErrors.follow_up_date ? true : undefined}
-                />
-                {fieldError("follow_up_date")}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="follow-up-time">Follow-up time (optional)</Label>
-                <Input
-                  id="follow-up-time"
-                  type="time"
-                  className="h-11"
-                  value={followUpTime}
-                  onChange={(event) => setFollowUpTime(event.target.value)}
-                />
-                {fieldError("follow_up_time")}
-              </div>
-            </div>
           )}
+        </div>
       </FormSection>
+
+      <FeedbackFields
+        status={status}
+        value={feedback}
+        onChange={setFeedback}
+        fieldErrors={fieldErrors}
+        openLoops={openLoops}
+      />
 
       {error && (
         <div
@@ -373,8 +235,7 @@ export function LogVisitForm({
             <ul className="list-inside list-disc">
               {Object.entries(fieldErrors).map(([field, message]) => (
                 <li key={field}>
-                  <span className="font-medium">{fieldLabel(field)}</span>
-                  : {message}
+                  <span className="font-medium">{fieldLabel(field)}</span>: {message}
                 </li>
               ))}
             </ul>
@@ -382,8 +243,11 @@ export function LogVisitForm({
         </div>
       )}
 
+      {/* One tap ends the visit: the report is filed and the check-out is
+          stamped in the same transaction. Said on the button, because a rep
+          who does not know that will go looking for a check-out afterwards. */}
       <Button type="submit" className="h-11 w-full" disabled={isPending}>
-        {isPending ? "Saving…" : "Save visit"}
+        {isPending ? "Saving…" : "Save and check out"}
       </Button>
     </form>
   );

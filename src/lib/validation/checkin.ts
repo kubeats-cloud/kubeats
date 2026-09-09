@@ -75,11 +75,18 @@ export const formatCoords = formatCoordinates;
 /**
  * Coordinates as they arrive from a form.
  *
- * Optional on purpose, and this is the escape valve rather than an oversight: a
- * denied permission, a basement staff room or a dead GPS must not stop a rep
- * recording that they arrived. The timestamp is what the presence guarantee
- * rests on; the coordinates corroborate it. Rule 12 makes the same call for the
- * visit photo, where the photo blocks and the geo-tag does not.
+ * STILL OPTIONAL AT THE FIELD LEVEL, BUT NO LONGER FREELY SO.
+ *
+ * Through stage 2 a check-in with no location simply saved: "the timestamp is
+ * what the presence guarantee rests on; the coordinates corroborate it".
+ * Stage 3 reverses that (docs/stage3-plan.md, #6). A check-in now needs a
+ * position — or the rep's own account of why there is not one.
+ *
+ * The field stays nullable because the ESCAPE is real: `manual_reason` carries
+ * it, the schema below insists on one or the other, and
+ * `enforce_checkin_located()` (FO012) says the same thing in the database. What
+ * is gone is the silent version, where a missing location looked identical to
+ * a recorded one.
  */
 const optionalCoord = (limit: number) =>
   z
@@ -93,10 +100,25 @@ const optionalCoord = (limit: number) =>
     )
     .transform((v) => (v === null ? null : Number(v)));
 
+/**
+ * The rep's reason for checking in without a position.
+ *
+ * Free text on purpose. A dropdown would have been tidier to report on and
+ * would have taught everyone to pick the first option; a sentence they had to
+ * type is the thing an admin can actually read.
+ */
+const manualReason = z
+  .string()
+  .trim()
+  .max(300, "Keep it short — a line is plenty.")
+  .transform((v) => (v === "" ? null : v))
+  .nullable();
+
 export const checkPointSchema = z.object({
   plan_id: z.uuid("That planned visit could not be identified."),
   latitude: optionalCoord(90),
   longitude: optionalCoord(180),
+  manual_reason: manualReason,
   /**
    * Metres. Optional, and never a reason to refuse a check-in — including when
    * the key is missing altogether, which is what a page cached from before this
@@ -116,6 +138,29 @@ export const checkPointSchema = z.object({
 
 export type CheckPointInput = z.infer<typeof checkPointSchema>;
 
+/**
+ * #6 — a check-in is located, or it says why not.
+ *
+ * The one place the browser and the server agree on what "located" means, so a
+ * rep is told before the database tells them. `enforce_checkin_located()` in
+ * migration 0018 is the backstop that holds against a tampered form.
+ *
+ * A location is EITHER coordinate being present rather than both: 0016's
+ * daily_plans_checkin_coords_paired already guarantees a pair arrives whole, so
+ * a half pair cannot reach here, and asking for both would only invite the two
+ * rules to disagree about a row neither can produce.
+ */
+export function checkInBlocked(input: {
+  latitude: number | null;
+  manual_reason: string | null;
+}): boolean {
+  return input.latitude === null && !input.manual_reason;
+}
+
+/** What a rep sees when the device could not place them. */
+export const NO_LOCATION_GUIDANCE =
+  "Turn location on, then try again. If you are indoors, moving near a window or stepping outside usually fixes it.";
+
 /** Shared so the browser and the server action read the form identically. */
 export function checkPointFormDataToInput(formData: FormData) {
   const text = (key: string) => {
@@ -127,5 +172,6 @@ export function checkPointFormDataToInput(formData: FormData) {
     latitude: text("latitude"),
     longitude: text("longitude"),
     accuracy: text("accuracy"),
+    manual_reason: text("manual_reason"),
   };
 }

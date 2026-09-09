@@ -1,25 +1,24 @@
-import Link from "next/link";
 import { formatDate, todayISO } from "@/lib/dates";
-import { CalendarIcon, ClockIcon, FileTextIcon } from "lucide-react";
+import { CalendarIcon, ClockIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/states";
 import type { PendingVisit } from "@/lib/visits";
 import { activityLabelFor } from "@/lib/validation/visit";
 
 /**
- * Rule 3's other half — everything still at "Set", oldest first.
+ * Rule 3's other half — everything still at "Set" and not yet closed, oldest
+ * first.
  *
- * Closing one now opens its closing report rather than a four-field dialog: a
- * session that actually happened has more to say than a headcount, and the
- * report is what completes the visit.
+ * A READ-ONLY NOTICE BOARD as of stage 3. There is no button here any more,
+ * for anybody, because closing a loop is no longer something you do to a list:
+ * a "Set" session is completed by going back to the institute, checking in and
+ * logging the visit that completes it, which is the same chain as every other
+ * visit. The feedback form on that visit offers the open loop and closes it.
  *
- * Admins see the whole team's open loops but cannot close them: the RLS update
- * policy is `member = auth.uid()`, and the account of a visit belongs to the
- * person who made it. Rather than offer a button that would always fail, the
- * row says whose it is.
+ * So this screen answers one question — what is still owed — and hands the
+ * answer to the Dashboard, which is where work starts.
  */
 export function PendingList({
   visits,
@@ -33,7 +32,7 @@ export function PendingList({
       <EmptyState
         icon={ClockIcon}
         title="No open loops"
-        description="Sessions and campus visits you schedule will wait here until you close them off."
+        description="Sessions and campus visits you schedule wait here until you go back and complete them."
       />
     );
   }
@@ -94,25 +93,13 @@ export function PendingList({
                 </p>
               )}
 
-              <div className="mt-4">
-                {mine ? (
-                  <Button asChild className="h-11 w-full">
-                    <Link href={`/pending/${visit.id}`}>
-                      <FileTextIcon className="size-4" aria-hidden />
-                      File the closing report
-                    </Link>
-                  </Button>
-                ) : (
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-muted-foreground text-xs">
-                      Only {visit.memberName ?? "the owner"} can close this off.
-                    </p>
-                    <Button asChild variant="outline" className="h-11 shrink-0">
-                      <Link href={`/pending/${visit.id}`}>Open</Link>
-                    </Button>
-                  </div>
-                )}
-              </div>
+              {/* No action. Closing happens by visiting the institute again,
+                  not from here — see the note at the top of this file. */}
+              <p className="text-muted-foreground mt-3 text-xs">
+                {mine
+                  ? "Closed by visiting again: check in at this institute and log the visit that completes it."
+                  : `${visit.memberName ?? "The owner"} closes this by visiting again.`}
+              </p>
             </Card>
           </li>
         );

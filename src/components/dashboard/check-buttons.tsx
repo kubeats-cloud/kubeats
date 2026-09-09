@@ -1,13 +1,16 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { LogInIcon, LogOutIcon, TriangleAlertIcon } from "lucide-react";
+import { LogInIcon, MapPinOffIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { checkIn, checkOut, closeWithoutCheckout } from "@/lib/checkin-actions";
-import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
-import { bestFix, nameArea } from "@/lib/geolocate";
-import { formatArea, formatCoordinates } from "@/lib/location-display";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { checkIn } from "@/lib/checkin-actions";
+import { EMPTY_STATE } from "@/lib/visit-form-state";
+import { bestFix } from "@/lib/geolocate";
+import { formatCoordinates } from "@/lib/location-display";
+import { NO_LOCATION_GUIDANCE } from "@/lib/validation/checkin";
 import {
   ACCURACY_BADGE,
   accuracyBand,
@@ -17,273 +20,215 @@ import {
 } from "@/lib/validation/location";
 
 /**
- * Recording arrival and departure at a planned visit.
+ * Arriving at a planned visit.
  *
- * THE LOCATION NEVER BLOCKS. The button asks the device for a fix, waits a few
- * seconds, and submits with or without one — a denied permission, a basement
- * staff room or a flat GPS still records the arrival. The timestamp is what the
- * presence guarantee rests on and it is stamped on the server; the coordinates
- * corroborate it when the phone can manage. This is the same judgement Rule 12
- * already makes for the visit photo, where the photo blocks and the geo-tag
- * deliberately does not.
+ * THE LOCATION NOW BLOCKS — and this is the one screen in the app where it
+ * does. Through stage 2 a check-in saved with or without a position; stage 3
+ * reverses that (docs/stage3-plan.md, #6) because a visit record whose location
+ * is optional is a visit record that cannot be relied on.
  *
- * The coordinates go in hidden fields rather than being read inside the action,
+ * What it does NOT do is strand anybody. A rep who genuinely cannot get a fix —
+ * a basement staff room, a dead GPS, a denied permission — types why, and goes
+ * in flagged. That is the difference between a blocked flow and a broken one,
+ * and it is why this is an override rather than a wall: the check-in still
+ * happens, it just stops pretending it was located.
+ *
+ * There is no Check out button here any more, and no "close without check-out"
+ * either. Submitting the feedback form checks the rep out, and a visit nobody
+ * can finish is swept up overnight — see checkin-actions.ts.
+ *
+ * The location goes in hidden fields rather than being read inside the action,
  * because a server action has no device to ask.
  */
 
-/**
- * The location comes from bestFix, which watches for a few seconds and keeps
- * the most accurate reading rather than taking the first one offered. A single
- * getCurrentPosition returns whatever arrives first, and on a phone that is
- * usually the Wi-Fi or cell fix rather than the satellite one — which is how a
- * visit in Ahmedabad was once recorded in Gandhinagar.
- *
- * It never rejects. A missing location must never be the reason a rep cannot
- * record that they arrived.
- */
+type Phase =
+  | { step: "idle" }
+  | { step: "locating" }
+  | { step: "located"; fix: LocationFix }
+  | { step: "failed" };
 
-function CheckButton({
+export function CheckInButton({
   planId,
   instituteName,
-  action,
-  label,
-  busyLabel,
-  icon,
-  variant = "default",
+  blockedBy,
 }: {
   planId: string;
   instituteName: string;
-  action: (prev: FormState, formData: FormData) => Promise<FormState>;
-  label: string;
-  busyLabel: string;
-  icon: React.ReactNode;
-  variant?: "default" | "outline";
+  /** #7 — the institute already holding this rep, when there is one. */
+  blockedBy?: string | null;
 }) {
-  const [state, formAction, isPending] = useActionState(action, EMPTY_STATE);
-  const [locating, setLocating] = useState(false);
-  const [fix, setFix] = useState<LocationFix | null>(null);
-  const [noGps, setNoGps] = useState(false);
-  const [asked, setAsked] = useState(false);
-  const [area, setArea] = useState<string | null>(null);
-  const [areaPending, setAreaPending] = useState(false);
+  const [state, formAction, isPending] = useActionState(checkIn, EMPTY_STATE);
+  const [phase, setPhase] = useState<Phase>({ step: "idle" });
+  const [reason, setReason] = useState("");
+  const [overriding, setOverriding] = useState(false);
 
-  // Two taps by design, and the first one is the honest part: it says what it
-  // is doing while the device thinks, instead of appearing to hang.
-  async function locate() {
-    setLocating(true);
-    setArea(null);
-    const result = await bestFix();
-    setFix(result.fix);
-    setNoGps(result.unsupported);
-    setAsked(true);
-    setLocating(false);
-
-    // Deliberately AFTER the button becomes usable, and never awaited by it.
-    // The area name is a courtesy; a rep must be able to confirm arrival the
-    // moment they have a position, not once a free geocoder has answered.
-    if (result.fix) {
-      setAreaPending(true);
-      const label = await nameArea(result.fix.latitude, result.fix.longitude);
-      setArea(label);
-      setAreaPending(false);
-    }
+  // #7, said before the tap rather than after. The trigger and the unique index
+  // both refuse it anyway; this is so the rep is not sent looking for a reason.
+  if (blockedBy) {
+    return (
+      <p className="text-muted-foreground max-w-56 text-right text-xs">
+        Finish your visit at <span className="font-medium">{blockedBy}</span>{" "}
+        before checking in here.
+      </p>
+    );
   }
 
-  if (!asked) {
+  async function locate() {
+    setPhase({ step: "locating" });
+    const result = await bestFix();
+    setPhase(result.fix ? { step: "located", fix: result.fix } : { step: "failed" });
+  }
+
+  if (phase.step === "idle") {
     return (
-      <Button
-        type="button"
-        variant={variant}
-        className="h-11"
-        disabled={locating}
-        onClick={locate}
-      >
-        {icon}
-        {locating ? "Finding you…" : label}
+      <Button type="button" className="h-11" onClick={locate}>
+        <LogInIcon className="size-4" aria-hidden />
+        Check in
       </Button>
     );
   }
 
-  return (
-    <form action={formAction} className="flex flex-col items-end gap-1">
-      <input type="hidden" name="plan_id" value={planId} />
-      <input
-        type="hidden"
-        name="latitude"
-        value={fix ? String(fix.latitude) : ""}
-      />
-      <input
-        type="hidden"
-        name="longitude"
-        value={fix ? String(fix.longitude) : ""}
-      />
-      <input
-        type="hidden"
-        name="accuracy"
-        value={fix?.accuracy != null ? String(fix.accuracy) : ""}
-      />
-      {/* The institute names the BUTTON's target — several plan rows can each
-          offer "Confirm check in", so a screen reader needs to tell them apart.
-          It is the button's accessible name rather than loose text after the
-          location, where it used to sit and could be read as the place the GPS
-          had resolved to. */}
-      <Button
-        type="submit"
-        variant={variant}
-        className="h-11"
-        disabled={isPending}
-        aria-label={`Confirm ${label.toLowerCase()} at ${instituteName}`}
-      >
-        {icon}
-        {isPending ? busyLabel : `Confirm ${label.toLowerCase()}`}
+  if (phase.step === "locating") {
+    return (
+      <Button type="button" className="h-11" disabled>
+        <LogInIcon className="size-4" aria-hidden />
+        Finding you…
       </Button>
+    );
+  }
 
-      {fix ? (
+  // ------------------------------------------------------------------
+  // Located: confirm, with the fix shown so a bad one can be retried.
+  // ------------------------------------------------------------------
+  if (phase.step === "located") {
+    const { fix } = phase;
+    return (
+      <form action={formAction} className="flex flex-col items-end gap-1">
+        <input type="hidden" name="plan_id" value={planId} />
+        <input type="hidden" name="latitude" value={String(fix.latitude)} />
+        <input type="hidden" name="longitude" value={String(fix.longitude)} />
+        <input
+          type="hidden"
+          name="accuracy"
+          value={fix.accuracy != null ? String(fix.accuracy) : ""}
+        />
+        <input type="hidden" name="manual_reason" value="" />
+
+        <Button
+          type="submit"
+          className="h-11"
+          disabled={isPending}
+          aria-label={`Confirm check in at ${instituteName}`}
+        >
+          <LogInIcon className="size-4" aria-hidden />
+          {isPending ? "Checking in…" : "Confirm check in"}
+        </Button>
+
         <div className="flex max-w-56 flex-col items-end gap-1">
-          {/* Where the phone is: exact coordinates, approximate area. The
-              institute this visit is for is named on the plan row above and
-              deliberately not repeated here — it is not evidence of position. */}
           <span className="text-muted-foreground text-right text-xs tabular-nums">
             {formatCoordinates(fix.latitude, fix.longitude)}
-          </span>
-          <span className="text-muted-foreground text-right text-xs">
-            {areaPending ? "Naming the area…" : formatArea(area)}
           </span>
           <Badge variant={ACCURACY_BADGE[accuracyBand(fix.accuracy)]}>
             {describeAccuracy(fix.accuracy)}
           </Badge>
-          {/* Warn and offer another go — never block. The timestamp is what the
-              presence guarantee rests on, and it is stamped on the server. */}
+          {/* A poor fix warns and offers another go; it does NOT block. Blocking
+              on accuracy would strand a rep in a staff room indefinitely, and
+              with one-visit-at-a-time that would end their day. */}
           {shouldRetryLocation(fix.accuracy) && (
             <p className="text-muted-foreground text-right text-xs">
               {accuracyBand(fix.accuracy) === "network"
-                ? "Looks like a network location, not GPS. Step outside and try again if you can."
+                ? "Looks like a network location rather than GPS."
                 : "Only approximate."}{" "}
               <button
                 type="button"
                 className="underline underline-offset-2"
                 onClick={locate}
-                disabled={locating}
               >
-                {locating ? "Trying…" : "Try again"}
+                Try again
               </button>
             </p>
           )}
         </div>
-      ) : (
-        <p className="text-muted-foreground max-w-56 text-right text-xs">
-          {noGps
-            ? "Location is approximate or unavailable — this device may not have GPS. The time is still recorded."
-            : "No location available. The time is still recorded."}
-        </p>
-      )}
-      {state.error && (
-        <p role="alert" className="text-danger-subtle-foreground text-xs">
-          {state.error}
-        </p>
-      )}
-    </form>
-  );
-}
-
-export function CheckInButton({
-  planId,
-  instituteName,
-}: {
-  planId: string;
-  instituteName: string;
-}) {
-  return (
-    <CheckButton
-      planId={planId}
-      instituteName={instituteName}
-      action={checkIn}
-      label="Check in"
-      busyLabel="Checking in…"
-      icon={<LogInIcon className="size-4" aria-hidden />}
-    />
-  );
-}
-
-export function CheckOutButton({
-  planId,
-  instituteName,
-}: {
-  planId: string;
-  instituteName: string;
-}) {
-  return (
-    <CheckButton
-      planId={planId}
-      instituteName={instituteName}
-      action={checkOut}
-      label="Check out"
-      busyLabel="Checking out…"
-      icon={<LogOutIcon className="size-4" aria-hidden />}
-      variant="outline"
-    />
-  );
-}
-
-/**
- * The escape valve, shown only on a visit left open from an earlier day.
- *
- * Deliberately not offered on today's visit: a rep who is still at the school
- * should check out properly, and this would be the easier tap. It appears once
- * the day has passed and the check-out is not coming.
- */
-export function CloseWithoutCheckoutButton({
-  planId,
-  instituteName,
-}: {
-  planId: string;
-  instituteName: string;
-}) {
-  const [state, formAction, isPending] = useActionState(
-    closeWithoutCheckout,
-    EMPTY_STATE,
-  );
-  const [confirming, setConfirming] = useState(false);
-
-  if (!confirming) {
-    return (
-      <Button
-        type="button"
-        variant="ghost"
-        className="h-9"
-        onClick={() => setConfirming(true)}
-      >
-        <TriangleAlertIcon className="size-4" aria-hidden />
-        Close without check-out
-      </Button>
+        {state.error && (
+          <p role="alert" className="text-danger-subtle-foreground text-xs">
+            {state.error}
+          </p>
+        )}
+      </form>
     );
   }
 
+  // ------------------------------------------------------------------
+  // Failed: retry, or say why and go in flagged.
+  // ------------------------------------------------------------------
   return (
-    <form action={formAction} className="space-y-2">
-      <input type="hidden" name="plan_id" value={planId} />
-      <p className="text-muted-foreground text-xs">
-        Mark {instituteName} complete? The time on site will read “not
-        recorded”, which is the honest answer — it cannot be worked out now.
+    <div className="flex max-w-64 flex-col items-end gap-2">
+      <p
+        role="status"
+        className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-right text-xs"
+      >
+        {NO_LOCATION_GUIDANCE}
       </p>
-      <div className="flex gap-2">
-        <Button type="submit" className="h-9" disabled={isPending}>
-          {isPending ? "Closing…" : "Yes, close it"}
-        </Button>
+
+      <Button type="button" className="h-11" onClick={locate}>
+        <LogInIcon className="size-4" aria-hidden />
+        Try again
+      </Button>
+
+      {!overriding ? (
         <Button
           type="button"
           variant="ghost"
           className="h-9"
-          onClick={() => setConfirming(false)}
+          onClick={() => setOverriding(true)}
         >
-          Cancel
+          <MapPinOffIcon className="size-4" aria-hidden />
+          Check in without location
         </Button>
-      </div>
+      ) : (
+        <form action={formAction} className="w-full space-y-2">
+          <input type="hidden" name="plan_id" value={planId} />
+          <input type="hidden" name="latitude" value="" />
+          <input type="hidden" name="longitude" value="" />
+          <input type="hidden" name="accuracy" value="" />
+
+          <div className="space-y-1.5">
+            <Label htmlFor={`reason-${planId}`} className="text-xs">
+              Why is there no location?
+            </Label>
+            <Input
+              id={`reason-${planId}`}
+              name="manual_reason"
+              className="h-11"
+              maxLength={300}
+              required
+              placeholder="No signal indoors"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+            {/* Said plainly. A rep who knows this is recorded is far less
+                likely to use it as the quick way past the location. */}
+            <p className="text-muted-foreground text-xs">
+              This is saved with the visit and your admin can see it.
+            </p>
+          </div>
+
+          <Button
+            type="submit"
+            variant="outline"
+            className="h-11 w-full"
+            disabled={isPending || reason.trim() === ""}
+          >
+            {isPending ? "Checking in…" : "Check in without location"}
+          </Button>
+        </form>
+      )}
+
       {state.error && (
         <p role="alert" className="text-danger-subtle-foreground text-xs">
           {state.error}
         </p>
       )}
-    </form>
+    </div>
   );
 }

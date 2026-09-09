@@ -120,6 +120,7 @@ describe("checkPointSchema — the escape valve", () => {
 
   it("accepts a check-in with coordinates", () => {
     const result = checkPointSchema.safeParse({
+      manual_reason: "",
       ...plan,
       latitude: "23.0225",
       longitude: "72.5714",
@@ -132,6 +133,7 @@ describe("checkPointSchema — the escape valve", () => {
     // This is the rule the whole escape valve rests on: a denied permission or
     // no signal must never stop a rep recording that they arrived.
     const result = checkPointSchema.safeParse({
+      manual_reason: "",
       ...plan,
       latitude: "",
       longitude: "",
@@ -145,6 +147,7 @@ describe("checkPointSchema — the escape valve", () => {
 
   it("records the accuracy when the device reported one", () => {
     const result = checkPointSchema.safeParse({
+      manual_reason: "",
       ...plan,
       latitude: "23.0225",
       longitude: "72.5714",
@@ -158,6 +161,7 @@ describe("checkPointSchema — the escape valve", () => {
     // Mid-deploy, a rep's cached page posts the old form. Accuracy is a
     // diagnostic, so its absence must cost nothing.
     const result = checkPointSchema.safeParse({
+      manual_reason: "",
       ...plan,
       latitude: "23.0225",
       longitude: "72.5714",
@@ -168,22 +172,26 @@ describe("checkPointSchema — the escape valve", () => {
 
   it("still refuses coordinates that are not on the globe", () => {
     expect(
-      checkPointSchema.safeParse({ ...plan, latitude: "91", longitude: "0" })
+      checkPointSchema.safeParse({
+      manual_reason: "", ...plan, latitude: "91", longitude: "0" })
         .success,
     ).toBe(false);
     expect(
-      checkPointSchema.safeParse({ ...plan, latitude: "0", longitude: "-181" })
+      checkPointSchema.safeParse({
+      manual_reason: "", ...plan, latitude: "0", longitude: "-181" })
         .success,
     ).toBe(false);
     expect(
-      checkPointSchema.safeParse({ ...plan, latitude: "north", longitude: "0" })
+      checkPointSchema.safeParse({
+      manual_reason: "", ...plan, latitude: "north", longitude: "0" })
         .success,
     ).toBe(false);
   });
 
   it("insists on knowing which planned visit it is", () => {
     expect(
-      checkPointSchema.safeParse({ plan_id: "", latitude: "", longitude: "" })
+      checkPointSchema.safeParse({
+      manual_reason: "", plan_id: "", latitude: "", longitude: "" })
         .success,
     ).toBe(false);
   });
