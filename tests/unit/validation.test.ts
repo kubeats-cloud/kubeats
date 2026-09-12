@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { fieldLabel, visitSchema } from "@/lib/validation/visit";
 import { newMemberSchema } from "@/lib/validation/admin";
+import { targetsSchema } from "@/lib/validation/weekly";
 
 /**
  * The schemas the browser and the server share. These are the rules a rep meets
@@ -200,15 +201,74 @@ describe("visitSchema", () => {
   });
 });
 
-/*
- * The targetsSchema suite lived here. It is gone with the schema: stage 2 of
- * the redesign ended weekly and daily commitments (docs/flow-redesign-plan.md,
- * changes 3 and 4), so there is no longer a form that writes a target and
- * nothing left for those assertions to hold. public.targets and its
- * targets_period_start_aligned CHECK are untouched in the database, and the
- * targets suite in tests/integration/rules.test.ts still exercises them —
- * which is what keeps the reversibility honest rather than merely claimed.
- */
+describe("targetsSchema", () => {
+  const zeros = {
+    meetings: "",
+    sessions_set: "",
+    sessions_done: "",
+    campus_visits_set: "",
+    campus_visits_done: "",
+    olympiad: "",
+    application: "",
+    admission: "",
+  };
+  // 2026-08-31 is a Monday.
+  const week = { week_start: "2026-08-31" };
+
+  it("reads an empty box as zero", () => {
+    const result = targetsSchema.safeParse({ ...week, ...zeros });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.meetings).toBe(0);
+  });
+
+  it("refuses a target that is not a whole number", () => {
+    expect(
+      targetsSchema.safeParse({ ...week, ...zeros, meetings: "12a" }).success,
+    ).toBe(false);
+    expect(
+      targetsSchema.safeParse({ ...week, ...zeros, meetings: "-3" }).success,
+    ).toBe(false);
+  });
+
+  it("insists the week starts on a Monday", () => {
+    // The app's half of targets_period_start_aligned (migration 0013), whose
+    // weekly arm is `extract(isodow from period_start) = 1`. A rep never types
+    // this — it is a hidden field — so a Wednesday arriving here means the form
+    // was tampered with, and it is refused rather than quietly snapped.
+    expect(
+      targetsSchema.safeParse({ ...zeros, week_start: "2026-09-02" }).success,
+    ).toBe(false);
+    expect(
+      targetsSchema.safeParse({ ...zeros, week_start: "2026-08-31" }).success,
+    ).toBe(true);
+  });
+
+  it("refuses anything that is not a date at all", () => {
+    expect(
+      targetsSchema.safeParse({ ...zeros, week_start: "" }).success,
+    ).toBe(false);
+    expect(
+      targetsSchema.safeParse({ ...zeros, week_start: "last week" }).success,
+    ).toBe(false);
+  });
+
+  it("does not ask for a period, because there is only one", () => {
+    // A rep committed to a day, a week or a month before stage 2. Only the week
+    // came back, so the period is a constant target-actions.ts supplies rather
+    // than an input — and an extra key is ignored rather than accepted as a
+    // choice. The DATABASE still permits all three, deliberately, so the daily
+    // and monthly rows already committed stay valid.
+    const result = targetsSchema.safeParse({
+      ...week,
+      ...zeros,
+      period: "monthly",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(Object.keys(result.data)).not.toContain("period");
+    }
+  });
+});
 
 describe("newMemberSchema", () => {
   const valid = {

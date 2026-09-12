@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
  * URL: a rep can bookmark or share one, the back button behaves, and the page
  * keeps working before any JavaScript arrives — which on a phone at the back of
  * a school is not hypothetical. It is the same reasoning as WeekNavigator,
- * which serves /team and, since stage 2, the week screen at /targets.
+ * which serves /team and the week screen at /targets.
  *
  * Switching period keeps you on the same date rather than jumping to today.
  * Looking at last week and tapping Monthly should show the month that week sits
@@ -39,10 +39,9 @@ export function PeriodControls({
    *
    * Only the activity report renders this now, with REPORT_PERIODS. It used to
    * serve the Targets screen too, with a TARGET_PERIODS that no longer exists —
-   * stage 2 made that screen a single read-only week, and a switcher with one
-   * option is not a switcher. Kept general rather than hardcoded to the report:
-   * the generality is what let one control serve two screens, and it costs a
-   * prop.
+   * a rep commits to a week and to nothing else, and a switcher with one option
+   * is not a switcher. Kept general rather than hardcoded to the report: the
+   * generality is what let one control serve two screens, and it costs a prop.
    */
   options: readonly Period[];
   /** Carried through so an admin drilling into a rep stays on that rep. */

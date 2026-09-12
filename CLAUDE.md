@@ -12,9 +12,10 @@ against registered institutes; admins oversee the whole team.
 set, the "open for today" meeting gate, the Set → Done lifecycle, the follow-up
 visibility rules.
 
-The prototype's **weekly lock** is no longer one of these. Stage 2 of the
-redesign ended weekly commitments entirely (see below and
-`docs/flow-redesign-plan.md`), so there is nothing left to lock.
+The prototype's **weekly lock** is one of these again. Stage 2 of the redesign
+ended weekly commitments entirely; the client's own spec put them back, so the
+eight numbers, the submit-and-lock and the admin reopen are all live (see below
+and `docs/flow-redesign-plan.md`). What did NOT come back is the daily target.
 
 **Do not copy its visuals.** Its cream/teal/gold palette and Fraunces serif are
 not our design. The UI is specified below and nowhere else.
@@ -41,7 +42,7 @@ Clean, modern, mobile-first utility app.
 
 ### Screen ownership
 
-A rep has six screens: Dashboard, Institutes, Log Visit, Pending, This week
+A rep has six screens: Dashboard, Institutes, Log Visit, Pending, Targets
 and Materials. An admin has a workspace instead — Overview, Review, Assign, Team,
 Institutes, Settings — plus Data and Manage materials, which are deliberately
 off the bar and reached from Settings or Overview.
@@ -60,22 +61,41 @@ This is load-bearing, not a layout preference: the meeting gate (rule 2) checks
 a visit against that member's `daily_plans` rows for that date, so a meeting
 cannot be logged at all unless the Dashboard flow put it on the plan first.
 
-**Nothing in this app sets a target any more.** Stage 2 of the redesign
-(`docs/flow-redesign-plan.md`, changes 3 and 4) removed commitment altogether:
+**A rep commits to a week, and to nothing else.** Stage 2 of the redesign
+(`docs/flow-redesign-plan.md`, changes 3 and 4) removed commitment altogether;
+the client's authoritative spec restored half of it. The two halves went
+different ways and they are not symmetrical:
 
-- The **daily** target was found to be the daily plan wearing a second name —
-  both were exactly institute + purpose — so it was merged into the Dashboard
-  flow above rather than duplicated. There is still no Daily tab, and now there
-  is no daily target either.
-- The **weekly** tab became "This week": a read-only count of what was actually
-  recorded, with no numbers to set, no submit and no lock.
+- The **daily** target is gone and is not coming back. It was found to be the
+  daily plan wearing a second name — both were exactly institute + purpose — so
+  it was merged into the Dashboard flow above. There is still no Daily tab and
+  no daily target. Rebuilding one would put a second writer in front of the
+  `daily_plans` row rule 2 checks, which is the thing screen ownership exists to
+  prevent.
+- The **weekly** target is back, whole: a rep sets the eight metric targets on
+  `/targets`, saves a draft or submits, a submitted week locks, and only an
+  admin can reopen it. Rule 6 is reachable from the app again rather than merely
+  installed. The tab is labelled "Targets" again to match.
 
-`public.targets` is untouched in the database — table, columns, rows, RLS and
-the `enforce_target_lock` trigger all still there — but no code reads or writes
-it. That is the reversible choice, the same one taken for `institutes_covered`:
-reviving commitments means restoring the screens, not writing a migration. Rule
-6 (the lock) therefore still exists in SQL and is still covered by the
-integration tests; it is simply unreachable from the app.
+**The two screens show one thing, not two.** Achieved-vs-target IS the "what you
+did this week" count — the achieved figure is the numerator — so there is no
+separate read-only block anywhere. A metric with a target gets a bar; a metric
+with none still shows its count rather than being replaced by an instruction to
+go and set numbers, which is the one place `MetricRow` improves on the
+pre-stage-2 original.
+
+Rule 7's sourcing is untouched throughout: **Meetings** come from `daily_plans`
+where `meetings_actual = 1`, the other seven from `visits`, both counted by
+`date` over the week's range with its deliberate Sunday end.
+
+`public.targets` needed **no migration** for any of this — table, columns, rows,
+RLS, both CHECKs and the `enforce_target_lock` trigger were all still there,
+which was the entire point of retiring the feature from the app rather than from
+the schema. 0021 is comment-only and optional: it retracts the "DORMANT" notice
+0017 wrote onto the table, which would otherwise now be a lie. `period` still
+accepts `daily` and `monthly` and the app writes only `weekly`, so the rows
+committed under the old periods stay readable and unoffered — the same
+asymmetry, pointing the other way.
 
 ### How that maps to the code
 
@@ -131,8 +151,8 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2883
-KiB** — about 189 KiB, 6.1% spare. The budget is real: measure before adding
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2898
+KiB** — about 174 KiB, 5.7% spare. The budget is real: measure before adding
 anything sizable, and re-measure rather than trusting this line. It has been
 wrong before, in both directions — it read 2949 for a while after the figure it
 described had already moved, which is how a stale number becomes a wrong
@@ -153,9 +173,10 @@ already claimed the easy 0.9 MiB between them; see README for both.
   (Node runtime, no edge).
 - `npm run typecheck` runs `next typegen` first — `LayoutProps`/`PageProps` are
   generated into `.next/types` and `tsc` alone cannot see them.
-- Load-bearing rules (meeting gate, role visibility) belong in the database as
-  RLS and triggers, not only in the UI. The weekly lock was one of these and its
-  trigger is still installed; the app no longer reaches it.
+- Load-bearing rules (meeting gate, role visibility, the weekly lock) belong in
+  the database as RLS and triggers, not only in the UI. The lock survived stage
+  2 as an installed-but-unreachable trigger and that is exactly why restoring
+  the weekly target cost no migration: the rule had never left.
 - Validate every input on both client and server. Never surface stack traces,
   SQL or secrets to users.
 - A write that touches more than one table goes through a Postgres function so
@@ -256,8 +277,18 @@ already claimed the easy 0.9 MiB between them; see README for both.
 - **The closing report's field set is settled** (0019): a response note, is the
   institute interested, the OUTCOME, the MANAGEMENT RESPONSE, the STUDENT
   RESPONSE, next-session-set with its mandatory date and time, person met as
-  name + phone, and — only when the status says so — the session or campus-visit
-  head count with topic and who took it. Management interest LEVEL was collected
+  **name (required) + phone (optional)**, and — only when the status says so —
+  the session or campus-visit head count with topic and who took it. The name
+  and the phone were BOTH optional until the client's spec separated them, with
+  a rule that a phone had to have a name beside it; so a report could name
+  nobody at all, while a rep who never got a mobile had a field the form implied
+  they owed. There is always a person; there is not always a number. Optional
+  still means "may be absent", never "may be wrong" — a phone that is present is
+  still ten digits, which `visits_met_phone_valid` would insist on regardless.
+  Designation stays withdrawn.
+  This one needed no migration either: both columns are "null, or valid", so
+  requiring a name is a form rule. A NOT NULL would have refused to build
+  against the reports already filed without one. Management interest LEVEL was collected
   for the length of stage 3 and withdrawn: a level beside a response is two
   answers to one question. Every retired field keeps its column and its CHECK,
   so a report filed under any version still renders; `report-view.tsx` skips an

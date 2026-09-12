@@ -16,6 +16,27 @@ Read alongside `CLAUDE.md`, which states most of those decisions.
 
 ---
 
+> ## ⚠ SUPERSEDED IN TWO PLACES BY THE CLIENT'S PDF SPEC
+>
+> This document is the analysis that produced stages 1–3, and it is accurate
+> as history. Two of its conclusions were later reversed by the client's
+> authoritative PDF, which wins over anything here:
+>
+> - **The weekly target is back, whole** — eight numbers, submit-and-lock,
+>   admin reopen, achieved-vs-target. That undoes half of C1 and all of change
+>   4. Change 3 (the daily target) and change 5 (monthly) **stand**: the daily
+>   target really was the daily plan, and nobody asked for the month back. See
+>   CLAUDE.md, "A rep commits to a week, and to nothing else".
+> - **Change 14's phone is OPTIONAL and its name is REQUIRED** — the reverse of
+>   the "Phone required?" note in that section. See CLAUDE.md's closing-report
+>   field set.
+>
+> Each affected section is marked below. Nothing else in here has changed.
+
+---
+
+---
+
 ## Where the app actually stands
 
 Worth stating, because two of the changes below depend on it.
@@ -87,6 +108,14 @@ it would become unreachable code guarding a table nothing writes.
 
 **This is the single biggest consequence in the redesign and it is implied
 rather than asked for.** See Q1.
+
+> **PARTLY REVERSED.** The client's PDF restored the WEEKLY commitment, so
+> `public.targets` is written again, `enforce_target_lock` is reachable again,
+> and `TargetsForm`, `ReopenButton` and `completionPercent` are all back. The
+> daily and monthly halves stand. The one thing this section got exactly right
+> is the reason it cost nothing to undo: the rule was retired from the app and
+> left standing in the database, so the reversal was UI work plus a comment-only
+> 0021.
 
 ### C2 — a read-only Pending breaks the Set → Done lifecycle
 
@@ -223,6 +252,11 @@ Monday–**Sunday** for counting (`weekEnd()` vs `weekCountEnd()`). A read-only
 count must keep using `weekCountEnd()`, or every Sunday's work vanishes.
 
 **Size** S. **Migration** none. **Conflict:** feeds C1.
+
+> **REVERSED by the client's PDF.** The weekly screen sets numbers again. The
+> two notes above still hold and are the reason the reversal was cheap: the
+> achieved half was always Rule 7 and never moved, and the Monday–Sunday
+> counting boundary is still `weekCountEnd()`.
 
 ---
 
@@ -548,6 +582,12 @@ name-and-phone-only form has nothing to put in it. Three options:
 client says the phone is "for follow-up", which implies required. Enforce in zod
 and the action; **do not** add a NOT NULL CHECK — existing rows have nulls and it
 would fail on application.
+
+> **SETTLED THE OTHER WAY.** The client's PDF makes the **phone optional and the
+> name required**. What shipped between this note and that one was neither: both
+> were optional, with a rule that a phone had to carry a name. The "do not add a
+> NOT NULL CHECK" half of this note was right and still stands — it is why
+> requiring the name cost no migration.
 
 **Simplification available.** One person means the `people` JSON field, the
 add/remove row UI and the `people.0.name` error-path mapping in `fieldLabel()`

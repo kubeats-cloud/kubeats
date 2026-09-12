@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   METRICS,
+  ZERO_COUNTS,
+  completionPercent,
   tallyVisitMetrics,
+  toneFor,
+  type MetricCounts,
 } from "@/lib/validation/weekly";
 
 /** Rule 7, and the arithmetic the dashboards report. */
+
+const counts = (overrides: Partial<MetricCounts>): MetricCounts => ({
+  ...ZERO_COUNTS,
+  ...overrides,
+});
 
 describe("Rule 7 — where each metric is counted from", () => {
   it("counts meetings from nowhere in the visits tally", () => {
@@ -74,13 +83,54 @@ describe("Rule 7 — where each metric is counted from", () => {
 });
 
 /*
- * The toneFor and completionPercent suites lived here.
- *
- * Both measured achieved AGAINST A TARGET — the colour of a progress bar and
- * the percentage of a commitment. Stage 2 removed the commitment, so both
- * functions went with it and there is no denominator left to test.
- *
- * Rule 7 above is untouched, and that is the half that mattered: it says where
- * each number COMES FROM, which is still true and still load-bearing for the
- * read-only week summary.
+ * The suites below measure achieved AGAINST A PROMISE. They were deleted by
+ * stage 2, which ended commitment in this app, and restored with the weekly
+ * target. The assertions are the originals: the thresholds, the cap and the
+ * null are the behaviour two screens now read from, so they are worth pinning
+ * exactly as they were rather than re-derived.
  */
+
+describe("toneFor", () => {
+  it("is green at or past target, amber from half way, red below", () => {
+    expect(toneFor(5, 5)).toBe("met");
+    expect(toneFor(6, 5)).toBe("met");
+    expect(toneFor(3, 5)).toBe("progressing"); // 60%
+    expect(toneFor(1, 5)).toBe("behind"); // 20%
+    expect(toneFor(0, 5)).toBe("behind");
+  });
+
+  it("does not call an empty commitment an achievement", () => {
+    expect(toneFor(0, 0)).toBe("none");
+    expect(toneFor(3, 0)).toBe("met");
+  });
+});
+
+describe("completionPercent", () => {
+  it("ignores metrics with no commitment", () => {
+    expect(
+      completionPercent(counts({ meetings: 4 }), counts({ meetings: 4 })),
+    ).toBe(100);
+  });
+
+  it("weighs every committed metric equally", () => {
+    // 30 meetings and 2 admissions: missing the admissions costs half, even
+    // though it is a fraction of the volume.
+    const percent = completionPercent(
+      counts({ meetings: 30, admission: 0 }),
+      counts({ meetings: 30, admission: 2 }),
+    );
+    expect(percent).toBe(50);
+  });
+
+  it("caps each metric so one cannot cover for another", () => {
+    const percent = completionPercent(
+      counts({ meetings: 100, admission: 0 }),
+      counts({ meetings: 10, admission: 5 }),
+    );
+    expect(percent).toBe(50);
+  });
+
+  it("returns null when nothing was committed", () => {
+    expect(completionPercent(counts({ meetings: 3 }), ZERO_COUNTS)).toBeNull();
+  });
+});

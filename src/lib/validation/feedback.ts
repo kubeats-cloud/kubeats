@@ -180,8 +180,35 @@ const shape = {
       .nullable()
       .refine((v) => v === null || /^\d{2}:\d{2}$/.test(v), "Pick a time."),
 
-    /** Who to ring. One person, name and number. */
-    met_name: text(120),
+    /**
+     * Who was met. One person: a name, and a number if the rep got one.
+     *
+     * THE NAME IS REQUIRED AND THE NUMBER IS NOT, which is the client's spec
+     * and is the reverse of how this pair used to behave. It was name-optional,
+     * phone-optional, with a rule that a phone had to have a name attached to
+     * it; so a report could be filed naming nobody at all, and a rep who had a
+     * name but no mobile still had a field the form implied they owed.
+     *
+     * A visit with no name against it is the weaker half of that: "we met
+     * someone at St Xavier's" is not a record anybody can act on, and there is
+     * always a name — a rep standing in a school spoke to a person. A mobile is
+     * genuinely not always there. Hence: always ask who, never insist how to
+     * ring them.
+     *
+     * Designation is not here and is not coming back; it was withdrawn with the
+     * long report and the client's spec keeps it out.
+     *
+     * NOTHING IN THE DATABASE CHANGED for this. `visits_met_name_length` and
+     * `visits_met_phone_valid` (migration 0018) are both "null, or valid", and
+     * both still are: reports filed before this rule have a null met_name and
+     * still render. Requiring a name is a form rule, not an integrity one, and
+     * a NOT NULL would have refused to build against the rows already there.
+     */
+    met_name: z
+      .string()
+      .trim()
+      .min(1, "Who did you meet?")
+      .max(120, "That is longer than we can store."),
     met_phone: z
       .string()
       .trim()
@@ -219,10 +246,9 @@ const refine = (value: Shape, ctx: z.RefinementCtx) => {
       if (!value.follow_up_time) fail("follow_up_time", "And at what time?");
     }
 
-    // A phone with no name is a number nobody can place.
-    if (value.met_phone && !value.met_name) {
-      fail("met_name", "Whose number is this?");
-    }
+    // The "a phone with no name is a number nobody can place" rule stood here.
+    // It is gone because it cannot fire any more: met_name is required
+    // outright, so there is no report left that carries a number and no name.
 };
 
 /** Used by Log Visit, which files before a visit id exists. */

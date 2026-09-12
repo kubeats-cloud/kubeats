@@ -2,50 +2,51 @@ import Link from "next/link";
 import { ChevronRightIcon, UsersIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/states";
-import { METRICS, type MetricCounts } from "@/lib/validation/weekly";
+import {
+  TONE_BAR,
+  TONE_BADGE,
+  completionPercent,
+  toneFor,
+} from "@/lib/validation/weekly";
 import type { TeamMemberWeek } from "@/lib/week-summary";
 
 /**
- * The admin's view of the week.
+ * The admin's view of the week: who is on track, and who is behind.
  *
- * This used to be a progress table: a "% of commitment" per rep, a coloured
- * bar, and a status of "No commitment yet" / "In progress" / "Submitted".
- * Stage 2 of the redesign ended commitments (docs/flow-redesign-plan.md,
- * changes 3 and 4), which would have left every row reading 0%, no tone and
- * "No commitment yet" for ever — a table of dashes.
+ * Stage 2 turned this into a volume table — three activity counts and a total —
+ * because with commitments gone there was no denominator left and every row
+ * would have read 0%. The commitment is back, so the question is back with it:
+ * "did they do what they said", which is the one an admin actually opens this
+ * screen to ask.
  *
- * So the question it answers has changed rather than been dropped. It was
- * "did they do what they said"; it is now "what did they do". That is a
- * weaker question, and deliberately so: with nothing promised there is nothing
- * to measure against, and inventing a denominator would be making one up.
+ * The per-metric counts are not lost, and that is why this stays one column
+ * narrower than it could be: a row opens the member's own Targets screen, which
+ * shows all eight metrics as target-vs-achieved. Putting three of them here as
+ * well would be the same numbers in two places, and a ten-column table on a
+ * laptop is not readable.
  *
- * Two presentations of one list, kept from the original because the two
- * audiences are not the same person at the same desk. On a phone it is a stack
- * of tappable cards. From `md` it is a table — columns that line up, numbers
- * right-aligned on a tabular figure so they can be compared down the column,
- * and a row height tight enough to see a whole team at once.
+ * The percentage is the unweighted mean of the metrics they committed to, so a
+ * rep who promised a little and did it reads as complete — which is the honest
+ * answer to "did they do what they said", and not the same question as "who did
+ * the most work".
+ *
+ * Two presentations of one list, because the two audiences are not the same
+ * person at the same desk. On a phone it is a stack of tappable cards. From
+ * `md` it is a table — columns that line up, numbers right-aligned on a
+ * tabular figure so they can be compared down the column, and a row height
+ * tight enough to see a whole team at once. Stretching the card list across a
+ * monitor would have been the easy thing and would have read as unfinished.
  */
-
-/**
- * The columns worth putting in front of an admin.
- *
- * Not all eight metrics: a six-column table on a laptop is readable and a
- * ten-column one is not, and these are the three the client's own weekly
- * question is about. The rest are one tap away on the member's own week, which
- * shows all eight.
- */
-const COLUMNS = ["meetings", "sessions_done", "campus_visits_done"] as const;
-
-const columnLabel = (key: (typeof COLUMNS)[number]) =>
-  METRICS.find((m) => m.key === key)?.label ?? key;
 
 interface Row {
   id: string;
   name: string;
   role: string;
-  achieved: MetricCounts;
-  total: number;
+  percent: number | null;
+  tone: ReturnType<typeof toneFor> | "none";
+  status: string;
   loops: number;
   href: string;
   reportHref: string;
@@ -56,21 +57,29 @@ function rowsFrom(
   weekStart: string,
   openLoops: Map<string, number>,
 ): Row[] {
-  return members.map((member) => ({
-    id: member.member,
-    name: member.name,
-    role: member.role,
-    achieved: member.achieved,
-    // Every metric counts once. This is a volume figure, not a score — there is
-    // no target to weight it against and it is not pretending to be one.
-    total: METRICS.reduce((sum, m) => sum + member.achieved[m.key], 0),
-    loops: openLoops.get(member.member) ?? 0,
-    href: `/targets?week=${weekStart}&member=${member.member}`,
-    // /team and /report answer different questions — all reps for one week
-    // against one rep over months — so they stay separate screens. What they
-    // needed was a door between them, which is this.
-    reportHref: `/report?period=monthly&member=${member.member}`,
-  }));
+  return members.map((member) => {
+    const percent = completionPercent(member.achieved, member.record.targets);
+    return {
+      id: member.member,
+      name: member.name,
+      role: member.role,
+      percent,
+      // With nothing committed there is no bar to draw and no tone to pick.
+      tone: percent === null ? "none" : toneFor(percent, 100),
+      status:
+        member.record.id === null
+          ? "No commitment yet"
+          : member.record.locked
+            ? "Submitted"
+            : "In progress",
+      loops: openLoops.get(member.member) ?? 0,
+      href: `/targets?week=${weekStart}&member=${member.member}`,
+      // /team and /report answer different questions — all reps for one week
+      // against one rep over months — so they stay separate screens. What they
+      // needed was a door between them, which is this.
+      reportHref: `/report?period=monthly&member=${member.member}`,
+    };
+  });
 }
 
 export function TeamSnapshot({
@@ -82,100 +91,96 @@ export function TeamSnapshot({
   weekStart: string;
   openLoops: Map<string, number>;
 }) {
-  if (members.length === 0) {
+  const rows = rowsFrom(members, weekStart, openLoops);
+
+  if (rows.length === 0) {
     return (
-      <EmptyState
-        icon={UsersIcon}
-        title="No team members yet"
-        description="Accounts are created in Settings. Once reps are added, their week appears here."
-      />
+      <Card className="p-6">
+        <EmptyState
+          icon={UsersIcon}
+          title="No team members yet"
+          description="Accounts created in Settings appear here."
+        />
+      </Card>
     );
   }
 
-  const rows = rowsFrom(members, weekStart, openLoops);
-
   return (
     <>
-      {/* Phone: a stack of cards ---------------------------------------- */}
-      <ul className="space-y-3 md:hidden">
+      {/* Phone: a stack of tappable cards. */}
+      <div className="space-y-2 md:hidden">
         {rows.map((row) => (
-          <li key={row.id}>
-            <Card className="gap-0 p-0 shadow-xs">
-              <Link
-                href={row.href}
-                className="hover:bg-accent flex min-h-16 items-center gap-3 rounded-lg px-4 py-3 transition-colors"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="truncate font-semibold">{row.name}</p>
-                    {row.role === "admin" && (
-                      <Badge variant="neutral" className="shrink-0">
-                        Admin
-                      </Badge>
-                    )}
-                  </div>
-
-                  <p className="text-muted-foreground mt-0.5 truncate text-xs">
-                    {row.total === 0
-                      ? "Nothing recorded this week"
-                      : COLUMNS.map(
-                          (key) => `${row.achieved[key]} ${columnLabel(key).toLowerCase()}`,
-                        ).join(" · ")}
-                  </p>
-
-                  <p className="text-muted-foreground mt-0.5 truncate text-xs">
-                    {row.loops} open loop{row.loops === 1 ? "" : "s"}
-                  </p>
+          <Card key={row.id} className="p-0">
+            <Link
+              href={row.href}
+              className="focus-visible:ring-ring flex items-center gap-3 px-4 py-3 focus-visible:ring-2 focus-visible:outline-none"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate font-medium">{row.name}</p>
+                  {row.role === "admin" && (
+                    <Badge variant="neutral" className="shrink-0">
+                      Admin
+                    </Badge>
+                  )}
                 </div>
 
-                <div className="shrink-0 text-right">
-                  <span
-                    className={
-                      row.total === 0
-                        ? "text-muted-foreground text-lg"
-                        : "text-lg font-semibold tabular-nums"
-                    }
-                  >
-                    {row.total === 0 ? "—" : row.total}
-                  </span>
-                </div>
+                <p className="text-muted-foreground mt-0.5 truncate text-xs">
+                  {row.status}
+                  {" · "}
+                  {row.loops} open loop{row.loops === 1 ? "" : "s"}
+                </p>
 
-                <ChevronRightIcon
-                  className="text-muted-foreground size-4 shrink-0"
-                  aria-hidden
+                <Progress
+                  value={row.percent ?? 0}
+                  indicatorClassName={TONE_BAR[row.tone]}
+                  className="mt-2"
+                  aria-label={`${row.name}: ${row.percent ?? 0}% of commitment`}
                 />
-              </Link>
-            </Card>
-          </li>
-        ))}
-      </ul>
+              </div>
 
-      {/* Desktop: a table ----------------------------------------------- */}
-      <Card className="hidden gap-0 overflow-hidden p-0 shadow-xs md:block">
+              <div className="shrink-0 text-right">
+                {row.percent === null ? (
+                  <span className="text-muted-foreground text-lg">—</span>
+                ) : (
+                  <Badge variant={TONE_BADGE[row.tone]} className="tabular-nums">
+                    {row.percent}%
+                  </Badge>
+                )}
+              </div>
+
+              <ChevronRightIcon
+                className="text-muted-foreground size-4 shrink-0"
+                aria-hidden
+              />
+            </Link>
+          </Card>
+        ))}
+      </div>
+
+      {/* Desktop: a table, because a whole team at once is the point. */}
+      <Card className="hidden p-0 md:block">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <caption className="sr-only">
-              What each team member recorded this week
+              Each team member&rsquo;s progress against their commitment this week
             </caption>
             <thead>
               <tr className="border-border text-muted-foreground border-b text-left">
                 <th scope="col" className="px-5 py-2.5 text-xs font-medium">
                   Member
                 </th>
-                {COLUMNS.map((key) => (
-                  <th
-                    key={key}
-                    scope="col"
-                    className="px-5 py-2.5 text-right text-xs font-medium"
-                  >
-                    {columnLabel(key)}
-                  </th>
-                ))}
+                <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                  Commitment
+                </th>
                 <th scope="col" className="px-5 py-2.5 text-right text-xs font-medium">
                   Open loops
                 </th>
+                <th scope="col" className="w-[30%] px-5 py-2.5 text-xs font-medium">
+                  Progress
+                </th>
                 <th scope="col" className="px-5 py-2.5 text-right text-xs font-medium">
-                  All activity
+                  Complete
                 </th>
                 <th scope="col" className="px-3 py-2.5 text-xs font-medium">
                   <span className="sr-only">Report</span>
@@ -189,14 +194,14 @@ export function TeamSnapshot({
               {rows.map((row) => (
                 <tr
                   key={row.id}
-                  className="border-border hover:bg-accent/60 border-b transition-colors last:border-0"
+                  className="border-border hover:bg-muted/40 border-b last:border-0"
                 >
                   <td className="px-5 py-3">
                     <Link
                       href={row.href}
-                      className="focus-visible:ring-ring flex items-center gap-2 rounded-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
+                      className="focus-visible:ring-ring flex items-center gap-2 font-medium focus-visible:ring-2 focus-visible:outline-none"
                     >
-                      <span className="truncate">{row.name}</span>
+                      {row.name}
                       {row.role === "admin" && (
                         <Badge variant="neutral" className="shrink-0">
                           Admin
@@ -204,15 +209,7 @@ export function TeamSnapshot({
                       )}
                     </Link>
                   </td>
-                  {COLUMNS.map((key) => (
-                    <td key={key} className="px-5 py-3 text-right tabular-nums">
-                      {row.achieved[key] === 0 ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : (
-                        row.achieved[key]
-                      )}
-                    </td>
-                  ))}
+                  <td className="text-muted-foreground px-5 py-3">{row.status}</td>
                   <td className="px-5 py-3 text-right tabular-nums">
                     {row.loops === 0 ? (
                       <span className="text-muted-foreground">—</span>
@@ -220,11 +217,20 @@ export function TeamSnapshot({
                       row.loops
                     )}
                   </td>
-                  <td className="px-5 py-3 text-right font-semibold tabular-nums">
-                    {row.total === 0 ? (
-                      <span className="text-muted-foreground font-normal">—</span>
+                  <td className="px-5 py-3">
+                    <Progress
+                      value={row.percent ?? 0}
+                      indicatorClassName={TONE_BAR[row.tone]}
+                      aria-label={`${row.name}: ${row.percent ?? 0}% of commitment`}
+                    />
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    {row.percent === null ? (
+                      <span className="text-muted-foreground">—</span>
                     ) : (
-                      row.total
+                      <Badge variant={TONE_BADGE[row.tone]} className="tabular-nums">
+                        {row.percent}%
+                      </Badge>
                     )}
                   </td>
                   <td className="px-3 py-3">
@@ -238,9 +244,8 @@ export function TeamSnapshot({
                   <td className="px-2 py-3">
                     <Link
                       href={row.href}
-                      tabIndex={-1}
-                      aria-hidden
-                      className="text-muted-foreground hover:text-foreground block"
+                      className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-8 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none"
+                      aria-label={`Open ${row.name}`}
                     >
                       <ChevronRightIcon className="size-4" aria-hidden />
                     </Link>

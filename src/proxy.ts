@@ -119,11 +119,11 @@ export async function proxy(request: NextRequest) {
   // clients can see is not one.
   //
   // ?week= is carried straight through. It briefly became ?period=weekly&start=
-  // while /targets offered a daily/weekly/monthly switcher; stage 2 of the
-  // redesign took the switcher away and the screen reads ?week= again, so the
-  // old translation would now hand it two parameters it ignores and drop the
-  // saved week on the floor. A link saved when the screen was called Weekly
-  // lands on exactly the week it used to, which is the whole point of this.
+  // while /targets offered a daily/weekly/monthly switcher; only the week is
+  // committed to now, so the screen reads ?week= and the old translation would
+  // hand it two parameters it ignores and drop the saved week on the floor. A
+  // link saved when the screen was called Weekly lands on exactly the week it
+  // used to, which is the whole point of this.
   if (pathname === "/weekly" || pathname.startsWith("/weekly/")) {
     const params = new URLSearchParams();
     const week = request.nextUrl.searchParams.get("week");

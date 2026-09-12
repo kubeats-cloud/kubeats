@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
 import { periodRange } from "@/lib/periods";
 import {
+  METRIC_KEYS,
   ZERO_COUNTS,
   tallyVisitMetrics,
   type MetricCounts,
@@ -11,20 +12,23 @@ import {
 } from "@/lib/validation/weekly";
 
 /**
- * What a rep actually did in a week.
+ * A rep's week: what they committed to, and what they actually did.
  *
- * This file used to be targets.ts and answered two questions at once — what
- * was promised, and what happened. Stage 2 of the redesign
- * (docs/flow-redesign-plan.md, change 4) dropped the first: the weekly screen
- * is a read-only account of the work, not a commitment to be met. So the
- * `public.targets` query is gone from here and NOTHING in the app reads or
- * writes that table any more.
+ * This file was targets.ts, answered both questions, and was cut down to the
+ * second one by stage 2 of the redesign. The client's spec put the weekly
+ * commitment back, so the `public.targets` read is back with it and the table
+ * is live again rather than dormant. The name stays week-summary.ts — the
+ * screen is a week either way, and renaming a file back and forth buys nobody
+ * anything.
  *
- * The table itself is untouched, rows and all. Keeping it is the reversible
- * choice — the same one taken for `institutes_covered` — and reviving weekly
- * commitments means restoring the query and the form, not a migration.
+ * WEEKLY, AND ONLY WEEKLY. `public.targets` is keyed by (member, period,
+ * period_start) and its CHECK still accepts 'daily' and 'monthly'; every query
+ * here pins period = 'weekly'. Rows committed to a day or a month before stage
+ * 2 therefore stay exactly where they are, readable and untouched, and are
+ * simply not what this screen is about. Offering a period again is a form
+ * control plus a filter, not a migration.
  *
- * RULE 7 IS THE PART THAT SURVIVED, AND IT IS UNCHANGED. Meetings are counted
+ * RULE 7 IS UNCHANGED, AND IT IS THE PART THAT MATTERS. Meetings are counted
  * from `daily_plans` where `meetings_actual = 1`, never from the visits log;
  * the other seven metrics are counted from `visits`. Both are counted by
  * `date`, the day the work was logged, over the range periods.ts gives for the
@@ -36,11 +40,68 @@ import {
  * the answer, not for security.
  */
 
+/** One week's commitment. `id` is null when no row exists yet. */
+export interface WeekTargets {
+  id: string | null;
+  member: string;
+  week_start: string;
+  locked: boolean;
+  submitted_at: string | null;
+  reopened_at: string | null;
+  targets: MetricCounts;
+}
+
 export interface WeekSummary {
   member: string;
   weekStart: string;
+  /** Rule 6's row: the promise, and whether it has been locked. */
+  record: WeekTargets;
   /** Rule 7's eight counts for the week. Never null: a quiet week is zeroes. */
   achieved: MetricCounts;
+}
+
+/** A week with no row yet: nothing committed, nothing locked. */
+function emptyRecord(member: string, weekStart: string): WeekTargets {
+  return {
+    id: null,
+    member,
+    week_start: weekStart,
+    locked: false,
+    submitted_at: null,
+    reopened_at: null,
+    targets: { ...ZERO_COUNTS },
+  };
+}
+
+// Built from METRIC_KEYS so the column list cannot drift from the metrics.
+// supabase-js can only infer a row type from a literal select string, so the
+// rows come back untyped and `toRecord` below checks each field itself.
+const ROW_COLUMNS = `id, member, period_start, locked, submitted_at, reopened_at, ${METRIC_KEYS.join(", ")}`;
+
+type RawRow = Record<string, unknown> & {
+  id: string;
+  member: string;
+  period_start: string;
+  locked: boolean;
+  submitted_at: string | null;
+  reopened_at: string | null;
+};
+
+function toRecord(row: RawRow): WeekTargets {
+  const targets = { ...ZERO_COUNTS };
+  for (const key of METRIC_KEYS) {
+    const value = row[key];
+    targets[key] = typeof value === "number" ? value : 0;
+  }
+  return {
+    id: row.id,
+    member: row.member,
+    week_start: row.period_start,
+    locked: row.locked,
+    submitted_at: row.submitted_at,
+    reopened_at: row.reopened_at,
+    targets,
+  };
 }
 
 /**
@@ -70,7 +131,14 @@ export async function getWeekSummary(
   const supabase = await createClient();
   const { start, end } = periodRange("weekly", weekStart);
 
-  const [plansResult, visitsResult] = await Promise.all([
+  const [targetsResult, plansResult, visitsResult] = await Promise.all([
+    supabase
+      .from("targets")
+      .select(ROW_COLUMNS)
+      .eq("member", memberId)
+      .eq("period", "weekly")
+      .eq("period_start", weekStart)
+      .maybeSingle(),
     // Rule 7: the Meetings figure is the count of plan entries actually held.
     supabase
       .from("daily_plans")
@@ -87,6 +155,10 @@ export async function getWeekSummary(
       .lte("date", end),
   ]);
 
+  if (targetsResult.error) {
+    logError("week-summary:targets", targetsResult.error);
+    return { ok: false };
+  }
   if (plansResult.error) {
     logError("week-summary:meetings", plansResult.error);
     return { ok: false };
@@ -101,6 +173,9 @@ export async function getWeekSummary(
     summary: {
       member: memberId,
       weekStart,
+      record: targetsResult.data
+        ? toRecord(targetsResult.data as unknown as RawRow)
+        : emptyRecord(memberId, weekStart),
       achieved: achievedFrom(
         (visitsResult.data ?? []) as TallyableVisit[],
         plansResult.count ?? 0,
@@ -117,11 +192,12 @@ export interface TeamMemberWeek {
   member: string;
   name: string;
   role: string;
+  record: WeekTargets;
   achieved: MetricCounts;
 }
 
 /**
- * Every member's week in three queries rather than three per member.
+ * Every member's week in four queries rather than four per member.
  *
  * Only an admin's RLS scope returns other people's rows, so this is safe to
  * call from an admin surface; a rep calling it would simply see themselves.
@@ -132,23 +208,30 @@ export async function getTeamWeek(
   const supabase = await createClient();
   const { start, end } = periodRange("weekly", weekStart);
 
-  const [profilesResult, plansResult, visitsResult] = await Promise.all([
-    supabase.from("profiles").select("id, name, role").order("name"),
-    supabase
-      .from("daily_plans")
-      .select("member")
-      .eq("meetings_actual", 1)
-      .gte("date", start)
-      .lte("date", end),
-    supabase
-      .from("visits")
-      .select("member, activity, lifecycle_status")
-      .gte("date", start)
-      .lte("date", end),
-  ]);
+  const [profilesResult, targetsResult, plansResult, visitsResult] =
+    await Promise.all([
+      supabase.from("profiles").select("id, name, role").order("name"),
+      supabase
+        .from("targets")
+        .select(ROW_COLUMNS)
+        .eq("period", "weekly")
+        .eq("period_start", weekStart),
+      supabase
+        .from("daily_plans")
+        .select("member")
+        .eq("meetings_actual", 1)
+        .gte("date", start)
+        .lte("date", end),
+      supabase
+        .from("visits")
+        .select("member, activity, lifecycle_status")
+        .gte("date", start)
+        .lte("date", end),
+    ]);
 
   for (const [context, result] of [
     ["week-summary:team-profiles", profilesResult],
+    ["week-summary:team-targets", targetsResult],
     ["week-summary:team-meetings", plansResult],
     ["week-summary:team-visits", visitsResult],
   ] as const) {
@@ -156,6 +239,11 @@ export async function getTeamWeek(
       logError(context, result.error);
       return { ok: false };
     }
+  }
+
+  const records = new Map<string, WeekTargets>();
+  for (const row of (targetsResult.data ?? []) as unknown as RawRow[]) {
+    records.set(row.member, toRecord(row));
   }
 
   const heldByMember = new Map<string, number>();
@@ -176,6 +264,7 @@ export async function getTeamWeek(
     member: profile.id,
     name: profile.name ?? "Unnamed member",
     role: profile.role as string,
+    record: records.get(profile.id) ?? emptyRecord(profile.id, weekStart),
     achieved: achievedFrom(
       visitsByMember.get(profile.id) ?? [],
       heldByMember.get(profile.id) ?? 0,

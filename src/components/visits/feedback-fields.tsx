@@ -223,7 +223,7 @@ export function FeedbackFields({
 
       <FormSection
         title="Who did you meet?"
-        description="One person, and a number to reach them on."
+        description="One person. A number too, if you got one."
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-2">
@@ -235,11 +235,12 @@ export function FeedbackFields({
               maxLength={120}
               value={value.metName}
               onChange={(e) => set("metName", e.target.value)}
+              aria-required
             />
             {err("met_name")}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="met-phone">Mobile</Label>
+            <Label htmlFor="met-phone">Mobile (optional)</Label>
             <Input
               id="met-phone"
               name="met_phone"
