@@ -150,13 +150,34 @@ describe("the short form's rules", () => {
     ).toBe(true);
   });
 
-  it("refuses a phone with nobody attached to it", () => {
+  it("insists on a name for the person met", () => {
+    // The client's spec: name required, phone optional. This used to be the
+    // weaker "a phone with no name is a number nobody can place", which let a
+    // report be filed naming nobody at all.
     expect(
       feedbackFieldsSchema.safeParse(filled({ met_name: "" })).success,
     ).toBe(false);
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ met_name: "   " })).success,
+      "whitespace is not a name",
+    ).toBe(false);
   });
 
-  it("refuses a mobile that is not ten digits", () => {
+  it("takes a name with no mobile behind it", () => {
+    // The other half of the same rule, and the half that changed. A rep does
+    // not always come away with a number; they always come away with a name.
+    const result = feedbackFieldsSchema.safeParse(filled({ met_phone: "" }));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.met_phone).toBeNull();
+      expect(result.data.met_name).toBe("A Person");
+    }
+  });
+
+  it("still refuses a mobile that is not ten digits", () => {
+    // Optional means "may be absent", not "may be wrong". A half-typed number
+    // is a number that will not dial, and visits_met_phone_valid (0018) would
+    // refuse it anyway.
     expect(
       feedbackFieldsSchema.safeParse(filled({ met_phone: "98765" })).success,
     ).toBe(false);

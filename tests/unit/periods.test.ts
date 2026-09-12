@@ -13,7 +13,11 @@ import {
   shiftPeriod,
 } from "@/lib/periods";
 import { mondayOf, weekCountEnd } from "@/lib/weeks";
-import { METRIC_KEYS } from "@/lib/validation/weekly";
+import {
+  progressStatus,
+  remaining,
+  METRIC_KEYS,
+} from "@/lib/validation/weekly";
 
 /**
  * The date arithmetic behind daily, weekly and monthly targets.
@@ -161,12 +165,30 @@ describe("isPeriod", () => {
   });
 });
 
-/*
- * The "remaining and progressStatus" suite lived here. Both functions measured
- * achieved against a TARGET, and stage 2 removed the target — see
- * tests/unit/weekly-metrics.test.ts for the same note about toneFor and
- * completionPercent.
- */
+describe("remaining and progressStatus", () => {
+  it("never reports negative remaining", () => {
+    expect(remaining(12, 10)).toBe(0);
+    expect(remaining(3, 10)).toBe(7);
+    expect(remaining(0, 0)).toBe(0);
+  });
+
+  it("reads the three states the way a person would", () => {
+    expect(progressStatus(0, 10)).toBe("not-started");
+    expect(progressStatus(4, 10)).toBe("in-progress");
+    expect(progressStatus(10, 10)).toBe("completed");
+    expect(progressStatus(12, 10)).toBe("completed");
+  });
+
+  it("calls a commitment of nothing Not Started, not Completed", () => {
+    // Committing to nothing and achieving nothing is not an achievement — the
+    // same judgement toneFor() makes when it returns "none" rather than "met".
+    expect(progressStatus(0, 0)).toBe("not-started");
+  });
+
+  it("counts anything achieved against a zero target as in progress", () => {
+    expect(progressStatus(3, 0)).toBe("in-progress");
+  });
+});
 
 describe("the metric set", () => {
   it("is the eight the Targets screen commits to", () => {
@@ -219,9 +241,10 @@ describe("the yearly period (feature 1's report)", () => {
 
 describe("the period vocabulary", () => {
   it("reads the report by day, month and year, and never by week", () => {
-    // REPORT_PERIODS is now the only vocabulary. TARGET_PERIODS went with the
-    // commitments in stage 2: nothing sets a target, so a list of periods you
-    // may set one for described nothing.
+    // REPORT_PERIODS is the only vocabulary. TARGET_PERIODS went with the
+    // daily and monthly commitments and did NOT come back with the weekly one:
+    // a list of periods a rep may choose between needs at least two, and there
+    // is one. target-actions.ts writes the literal 'weekly' instead.
     expect(REPORT_PERIODS).toEqual(["daily", "monthly", "yearly"]);
     expect(REPORT_PERIODS).not.toContain("weekly");
     expect(isReportPeriod("weekly")).toBe(false);
@@ -229,10 +252,10 @@ describe("the period vocabulary", () => {
     for (const p of REPORT_PERIODS) expect(isReportPeriod(p), p).toBe(true);
   });
 
-  it("still understands weekly, which no screen commits to but the summary counts by", () => {
-    // The read-only week summary counts over periodRange("weekly", ...), which
-    // is the ONE place the weekly grid still matters. If weekly fell out of
-    // PERIODS with the targets, that summary would lose its range.
+  it("still understands weekly, which is the one period anything commits to", () => {
+    // The week summary counts over periodRange("weekly", ...), which is the ONE
+    // place the weekly grid matters. If weekly fell out of PERIODS, both the
+    // commitment and the achieved figures would lose their range.
     expect(PERIODS).toContain("weekly");
     expect(periodStartOf("weekly", "2026-09-16")).toBe(mondayOf("2026-09-16"));
     // The deliberate Sunday end, so a Sunday folds into the week that ended.
@@ -241,10 +264,10 @@ describe("the period vocabulary", () => {
   });
 
   it("still understands monthly and daily, so an existing targets row stays readable", () => {
-    // No migration dropped anything: public.targets keeps its rows and
+    // No migration ever dropped anything: public.targets keeps its rows and
     // targets_period_valid still permits all three. The helpers must keep
-    // answering for them, or a row committed before stage 2 becomes
-    // unreadable rather than merely unoffered.
+    // answering for them, or a row committed to a day or a month before stage 2
+    // becomes unreadable rather than merely unoffered.
     for (const p of ["daily", "weekly", "monthly"] as const) {
       expect(PERIODS, p).toContain(p);
       expect(periodRange(p, periodStartOf(p, "2026-09-16")).end, p).toBeTruthy();

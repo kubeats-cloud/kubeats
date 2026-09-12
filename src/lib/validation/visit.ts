@@ -87,6 +87,34 @@ export function expectedDateRequired(
   return hasLifecycle(activity) && lifecycle === "Set";
 }
 
+/**
+ * What to CALL that date, which depends on what was set.
+ *
+ * It read "When is it expected?" for both activities — true, and vague enough
+ * that a rep setting a campus visit and a rep setting a session were answering
+ * a question that named neither. The client's spec asks for the date to be
+ * labelled for the thing it belongs to, so it is.
+ *
+ * "Tentative" is deliberate and is not padding: `expected_date` is a plan, not
+ * an appointment. Nothing anywhere enforces that the visit happens on it — the
+ * loop is closed by VISITING AGAIN, whenever that turns out to be — so a label
+ * promising a firm date would misdescribe the column.
+ *
+ * The default is unreachable through the form, because expectedDateRequired()
+ * only ever fires for the two lifecycle activities. It is kept so adding a
+ * third lifecycle activity yields a vague label rather than a blank one.
+ */
+export function expectedDateLabel(activity: string): string {
+  switch (activity) {
+    case "session":
+      return "Tentative session date";
+    case "campus_visit":
+      return "Tentative campus visit date";
+    default:
+      return "When is it expected?";
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Purpose -> activity                                                 */
 /* ------------------------------------------------------------------ */

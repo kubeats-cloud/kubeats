@@ -1,7 +1,7 @@
 import { permanentRedirect } from "next/navigation";
 
 /**
- * /weekly is now /targets, which is the read-only account of the week.
+ * /weekly is now /targets, where a rep sets the week's eight numbers.
  *
  * NOTE: proxy.ts answers /weekly before this page is ever reached, so that the
  * redirect is a real HTTP 307 rather than a 200 with the redirect buried in the
@@ -15,8 +15,8 @@ import { permanentRedirect } from "next/navigation";
  * poor answer.
  *
  * ?week= is carried through unchanged. It briefly became ?period=weekly&start=
- * while /targets had a period switcher; stage 2 removed the switcher and the
- * screen reads ?week= again, so translating it now would drop the saved week.
+ * while /targets had a daily/weekly/monthly switcher; only the week is offered
+ * now, so the screen reads ?week= and translating it would drop the saved week.
  * This must stay in step with the same redirect in proxy.ts.
  */
 export default async function WeeklyRedirectPage(props: PageProps<"/weekly">) {

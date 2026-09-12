@@ -20,7 +20,7 @@ Six, and no more. The navigation is a thumb-reachable bottom bar.
 | Institutes | everyone | The shared registry: register, search, open one. |
 | Log Visit | everyone | Record a visit with location and an optional photo. |
 | Pending | everyone | Sessions and campus visits set but not yet closed. |
-| Weekly | everyone | The eight weekly targets, and progress against them. |
+| Targets | reps | The eight weekly targets, and progress against them. An admin reaches a rep's from Team. |
 | Settings | admins | Team accounts, meeting purposes, the location tree, photo cleanup. |
 
 ## Stack
@@ -43,8 +43,9 @@ change it in the database first.
 - **The meeting gate** — a meeting can only be logged for an institute on that
   member's plan for that day (`visits_enforce_meeting_gate`).
 - **The weekly lock** — a submitted week cannot be edited, and only an admin can
-  reopen it; the trigger stamps who and when (`targets_enforce_lock`). The same
-  rule covers daily, weekly and monthly periods.
+  reopen it; the trigger stamps who and when (`targets_enforce_lock`). The
+  trigger covers daily, weekly and monthly rows alike; the app commits to weeks
+  and nothing else, so only the weekly ones are ever written now.
 - **Role visibility** — a rep sees only their own work, an admin sees the team.
 - **Rule 7 sourcing** — the weekly *Meetings* figure comes from `daily_plans`
   entries marked held; the other seven come from the `visits` log.
@@ -357,7 +358,7 @@ exist purely to fit:
 Those two together were the cheap wins, and they are spent. Neither is worth
 extending.
 
-**Where it stands: 2883 KiB against a 3072 KiB ceiling — 189 KiB, about 6.1%.**
+**Where it stands: 2898 KiB against a 3072 KiB ceiling — 174 KiB, about 5.7%.**
 
 Read that as a budget, not a comfort. It was 2831 KiB before the in-app camera
 and the area-name lookup; two ordinary features spent nearly two thirds of the

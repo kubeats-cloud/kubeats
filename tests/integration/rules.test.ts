@@ -2451,6 +2451,113 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(after?.reopened_by).toBe(boss.id);
     });
 
+    it("walks the weekly commitment exactly as target-actions.ts does", async () => {
+      // The suite above proves Rule 6 on a DAY, which is the general case and
+      // the one nothing in the app writes any more. This walks the WEEK, using
+      // the same upsert-with-onConflict the restored screen uses, so a change
+      // to that write path is caught here rather than under a rep's thumb.
+      const w = mondayOf(iso(-21));
+      const row = (over: Record<string, unknown>) => ({
+        member: subject.id,
+        period: "weekly",
+        period_start: w,
+        ...over,
+      });
+
+      // Save a draft. Nothing locks; the row simply exists.
+      const draft = await subject.db
+        .from("targets")
+        .upsert(row({ meetings: 5 }), { onConflict: "member,period,period_start" });
+      expect(draft.error, "saving a draft").toBeNull();
+
+      // Save it again with different numbers. This is the upsert doing its job:
+      // one row per week, revised, not a second row.
+      const revise = await subject.db
+        .from("targets")
+        .upsert(row({ meetings: 8 }), { onConflict: "member,period,period_start" });
+      expect(revise.error, "revising a draft").toBeNull();
+
+      const { data: drafts } = await admin
+        .from("targets")
+        .select("id, meetings, locked, submitted_at")
+        .eq("member", subject.id)
+        .eq("period", "weekly")
+        .eq("period_start", w);
+      expect(drafts).toHaveLength(1);
+      expect(drafts?.[0].meetings).toBe(8);
+      expect(drafts?.[0].locked, "a draft never locks").toBe(false);
+      expect(drafts?.[0].submitted_at, "and is never stamped").toBeNull();
+
+      // Submit. The trigger stamps submitted_at itself.
+      const submit = await subject.db
+        .from("targets")
+        .upsert(row({ meetings: 8, locked: true }), {
+          onConflict: "member,period,period_start",
+        });
+      expect(submit.error, "submitting").toBeNull();
+
+      const { data: locked } = await admin
+        .from("targets")
+        .select("locked, submitted_at")
+        .eq("member", subject.id)
+        .eq("period", "weekly")
+        .eq("period_start", w)
+        .single();
+      expect(locked?.locked).toBe(true);
+      expect(locked?.submitted_at).not.toBeNull();
+
+      // A locked week refuses the rep's next save, and refuses their unlock.
+      const afterLock = await subject.db
+        .from("targets")
+        .upsert(row({ meetings: 1, locked: true }), {
+          onConflict: "member,period,period_start",
+        });
+      expect(afterLock.error?.code, "editing a locked week").toBe(CHECK_VIOLATION);
+
+      const selfUnlock = await subject.db
+        .from("targets")
+        .update({ locked: false })
+        .eq("member", subject.id)
+        .eq("period", "weekly")
+        .eq("period_start", w);
+      expect(selfUnlock.error?.code, "a rep unlocking their own week").toBe(
+        INSUFFICIENT_PRIVILEGE,
+      );
+
+      // The admin reopen, filtered on locked = true exactly as reopenWeek() is,
+      // so "that week is not locked" stays a real answer rather than a silent
+      // no-op.
+      const reopen = await boss.db
+        .from("targets")
+        .update({ locked: false })
+        .eq("member", subject.id)
+        .eq("period", "weekly")
+        .eq("period_start", w)
+        .eq("locked", true)
+        .select("id");
+      expect(reopen.error).toBeNull();
+      expect(reopen.data).toHaveLength(1);
+
+      // Reopening again matches nothing, which is what the action turns into
+      // "that week is not locked, so there is nothing to reopen".
+      const again = await boss.db
+        .from("targets")
+        .update({ locked: false })
+        .eq("member", subject.id)
+        .eq("period", "weekly")
+        .eq("period_start", w)
+        .eq("locked", true)
+        .select("id");
+      expect(again.error).toBeNull();
+      expect(again.data).toHaveLength(0);
+
+      // And the rep can revise again now that it is open.
+      const revised = await subject.db
+        .from("targets")
+        .upsert(row({ meetings: 12 }), { onConflict: "member,period,period_start" });
+      expect(revised.error, "revising after a reopen").toBeNull();
+    });
+
     it("counts achieved figures over each period's own range", async () => {
       // Two visits: one today, one 20 days back. The day sees one; the month
       // sees both whenever the older one fell in the same calendar month. That

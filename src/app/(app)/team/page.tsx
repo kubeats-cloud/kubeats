@@ -14,17 +14,18 @@ const first = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : undefined;
 
 /**
- * What each rep recorded this week.
+ * Who is on track, and who is behind.
  *
  * The week is navigable because "how did the team do" is a question about a
  * particular week far more often than about this one. Opening a member goes to
- * their own week, which shows all eight metrics rather than the three that fit
- * across a table.
+ * their own Targets screen, which is where a locked week is reopened — one
+ * place that does it, rather than a second button here that would have to stay
+ * in step with it, and which shows all eight metrics rather than the handful
+ * that fit across a table.
  *
- * It used to ask who was on track against their commitment. Stage 2 of the
- * redesign ended commitments (docs/flow-redesign-plan.md, changes 3 and 4), so
- * there is no longer a target to be on track against — and no locked week to
- * reopen from here either.
+ * Stage 2 of the redesign made this "what did they do", because commitments
+ * had gone and a percentage would have had nothing under it. The client's spec
+ * puts the weekly target back, so the question goes back to the stronger one.
  */
 export default async function TeamPage(props: PageProps<"/team">) {
   const gate = await requireAdmin();
@@ -49,7 +50,7 @@ export default async function TeamPage(props: PageProps<"/team">) {
     <>
       <PageHeader
         title="Team"
-        description="What each rep recorded this week."
+        description="Each rep's commitment for the week and what they have achieved against it."
       />
 
       <WeekNavigator weekStart={weekStart} basePath="/team" />

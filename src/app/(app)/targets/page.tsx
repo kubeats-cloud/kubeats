@@ -6,44 +6,46 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
 import { MetricList } from "@/components/weekly/metric-list";
+import { ReopenButton } from "@/components/weekly/reopen-button";
+import { TargetsForm } from "@/components/weekly/targets-form";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getWeekSummary, memberName } from "@/lib/week-summary";
+import { completionPercent } from "@/lib/validation/weekly";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
 
-export const metadata = { title: "This week" };
+export const metadata = { title: "Targets" };
 
 const first = (value: string | string[] | undefined) =>
   typeof value === "string" ? value : undefined;
 
 /**
- * The week, read only.
+ * The weekly target: the eight numbers a rep commits to, and what they have
+ * done against them.
  *
- * This screen used to be Targets: a rep committed to eight numbers for a day,
- * a week or a month, submitted them, and an admin could reopen a locked week.
- * Stage 2 of the redesign removed all of it (docs/flow-redesign-plan.md,
- * changes 3 and 4) — the daily target turned out to be the daily plan and was
- * merged into it, and the weekly commitment became this: what you actually did.
+ * Stage 2 of the redesign made this screen read-only — no numbers to set, no
+ * submit, no lock. The client's spec puts the commitment back, so the form is
+ * back and public.targets is written again. What did NOT come back is the
+ * daily target: that one was the daily plan wearing a second name, and it
+ * stays merged into the Dashboard where the meeting gate can see it.
  *
- * The route is still /targets. Renaming it would break the bookmarks and the
- * /weekly redirect that proxy.ts already serves, for no gain a rep would ever
- * see — the tab is labelled from lib/nav.ts, and that is what they read.
- *
- * ?period= and ?start= are gone with the period switcher; ?week= is the
- * parameter this screen has always shared with /team and the one the admin
- * drill-in passes. An old ?start= link simply lands on the current week, which
- * is the same graceful fallback the period switcher used to give.
+ * ONE PARAMETER, ?week=. The screen briefly took ?period= and ?start= while it
+ * offered a daily/weekly/monthly switcher; with only the week left, a switcher
+ * with one option is not a switcher. ?week= is the parameter this screen has
+ * shared with /team all along, and the one proxy.ts translates /weekly links
+ * into — so bookmarks from every era of this screen still land on the right
+ * week.
  */
-export default async function WeekPage(props: PageProps<"/targets">) {
+export default async function TargetsPage(props: PageProps<"/targets">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
   const searchParams = await props.searchParams;
   const weekStart = normaliseWeekParam(first(searchParams.week));
 
-  // An admin may look at one rep's week; everyone else only ever sees their
+  // An admin may look at one rep's targets; everyone else only ever sees their
   // own. Checked here as well as by RLS, so a rep hand-editing the URL simply
-  // lands back on their own figures rather than on an error.
+  // lands back on their own numbers rather than on an error.
   const requested = first(searchParams.member);
   const viewingOther = isAdmin(user) && !!requested && requested !== user.id;
   const memberId = viewingOther ? requested! : user.id;
@@ -58,27 +60,38 @@ export default async function WeekPage(props: PageProps<"/targets">) {
   if (!result.ok) {
     return (
       <PageColumn>
-        <PageHeader title="This week" description="What was recorded this week." />
+        <PageHeader title="Targets" description="Your commitment for the week." />
         <ErrorState message="We could not load this week. Please try again in a moment." />
       </PageColumn>
     );
   }
 
+  const { record, achieved } = result.summary;
+  const percent = completionPercent(achieved, record.targets);
+
   return (
     <PageColumn>
       <PageHeader
         eyebrow={viewingOther ? "Team member" : undefined}
-        title={viewingOther ? displayName : "This week"}
+        title={viewingOther ? displayName : "Targets"}
         description={
           viewingOther
-            ? "What they recorded this week."
-            : "What you have recorded this week. It fills in as you log visits."
+            ? "Their commitment for this week, and what they have achieved against it."
+            : "Set what you are aiming for this week, and watch it fill in as you work."
+        }
+        action={
+          percent !== null ? (
+            <div className="text-right">
+              <p className="text-2xl font-semibold tabular-nums">{percent}%</p>
+              <p className="text-muted-foreground text-xs">of commitment</p>
+            </div>
+          ) : undefined
         }
       />
 
-      {/* The screen about this week is the natural place to ask about the rest
-          of the history. /report is out of the nav bar on purpose — see
-          lib/nav.ts — so this is how a rep reaches their own. */}
+      {/* The screen about what you are aiming for is the natural place to ask
+          what you actually did. /report is out of the nav bar on purpose — see
+          lib/nav.ts — so this is how a rep reaches their own history. */}
       <Button asChild variant="outline" className="mb-4 h-11">
         <Link
           href={
@@ -107,11 +120,39 @@ export default async function WeekPage(props: PageProps<"/targets">) {
         member={viewingOther ? memberId : undefined}
       />
 
-      <MetricList
-        title="Recorded this week"
-        description={formatWeekRange(weekStart)}
-        achieved={result.summary.achieved}
-      />
+      {viewingOther ? (
+        <div className="space-y-4">
+          <MetricList
+            title={record.locked ? "Submitted commitment" : "Commitment in progress"}
+            description={formatWeekRange(weekStart)}
+            targets={record.targets}
+            achieved={achieved}
+          />
+
+          {record.locked ? (
+            <ReopenButton
+              member={memberId}
+              weekStart={weekStart}
+              memberName={displayName}
+            />
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              {record.id === null
+                ? `${displayName} has not committed to this week yet.`
+                : `${displayName} has not submitted this week yet, so there is nothing to reopen.`}
+            </p>
+          )}
+        </div>
+      ) : (
+        <TargetsForm
+          weekStart={weekStart}
+          targets={record.targets}
+          achieved={achieved}
+          locked={record.locked}
+          submittedAt={record.submitted_at}
+          reopenedAt={record.reopened_at}
+        />
+      )}
     </PageColumn>
   );
 }

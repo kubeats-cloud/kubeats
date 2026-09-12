@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { mondayOf } from "@/lib/weeks";
+
 /**
  * The eight metrics, and — the part that actually matters — where each one's
  * ACHIEVED figure is counted from.
@@ -5,8 +8,8 @@
  * Rule 7: Meetings are counted from the daily plan, not from the visits log.
  * A meeting only counts once the plan entry it belongs to is marked held, which
  * is what the meeting gate guarantees. The other seven are counted from visits.
- * Keeping the source in the same table as the label means the Weekly screen and
- * the Dashboard can never disagree about what a number means.
+ * Keeping the source in the same table as the label means the Targets screen
+ * and the Dashboard can never disagree about what a number means.
  *
  * There were briefly nine. Migration 0013 added `institutes_covered` — a count
  * of DISTINCT institutes rather than of rows — and the client has since asked
@@ -20,9 +23,7 @@
  *   { key: "institutes_covered", label: "Institutes Covered",
  *     source: "distinct-institutes" }
  *
- * plus the DISTINCT count in week-summary.ts. (It used to need a line in
- * `targetsSchema` too; there is no such schema any more — see the foot of this
- * file.)
+ * plus its line in `targetsSchema` and the DISTINCT count in week-summary.ts.
  */
 export const METRICS = [
   { key: "meetings", label: "Meetings", source: "plan" },
@@ -131,29 +132,212 @@ export function tallyVisitMetrics(visits: TallyableVisit[]): MetricCounts {
 }
 
 /* ------------------------------------------------------------------ */
-/* What used to live below this line                                   */
+/* Progress                                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * Everything about COMMITMENT has gone: toneFor, percentOf, remaining,
- * progressStatus, STATUS_LABELS, STATUS_BADGE, TONE_BAR, TONE_BADGE,
- * completionPercent, targetsSchema, reopenSchema, targetsFormDataToInput and
- * weeklyFieldErrors.
+ * EVERYTHING BELOW THIS LINE MEASURES ACHIEVED AGAINST A PROMISE.
  *
- * They all answered one question — "how does what happened compare with what
- * was promised" — and stage 2 of the redesign removed the promise. Nothing
- * sets a target now, so every one of them had exactly one possible answer:
- * a null percentage, a "none" tone, a "Not Started" badge.
- *
- * WHAT IS LEFT IS THE HALF THAT WAS NEVER ABOUT TARGETS. METRICS still names
- * the eight things worth counting and, crucially, still records WHERE each
- * one is counted from — Rule 7's `source: "plan"` for Meetings and
- * `source: "visits"` for the other seven. tallyVisitMetrics() is unchanged and
- * still refuses to count Meetings, so the caller has to go to daily_plans for
- * them. That is the rule the read-only week summary now rests on, and it is
- * the same rule the Targets screen rested on before it.
- *
- * public.targets is untouched in the database. Reviving commitment means
- * restoring this file's lower half and the two screens that read it — not a
- * migration. See docs/flow-redesign-plan.md, changes 3 and 4.
+ * It was deleted by stage 2 of the redesign, which ended commitment in this
+ * app, and restored when the client's spec put the weekly target back. The
+ * shapes are the originals from before stage 2, with one difference that runs
+ * through all of them: THE PERIOD IS GONE. A rep committed to a day, a week or
+ * a month once; they commit to a week and only a week now, so there is no
+ * `period` to validate, choose or print. `public.targets` is still keyed by
+ * (member, period, period_start) and still accepts all three — target-actions.ts
+ * writes the literal 'weekly' — so the daily and monthly rows reps committed
+ * before stage 2 stay readable, and offering a period again is a form control
+ * rather than a migration. Same trade 0013 made, one layer up.
  */
+
+export type ProgressTone = "met" | "progressing" | "behind" | "none";
+
+/**
+ * The semantic palette, decided in one place.
+ *
+ * Thresholds are the prototype's: at or past target is green, half way or more
+ * is amber, anything less is red. A target of zero is "none", not "met" —
+ * committing to nothing and achieving nothing is not an achievement, and
+ * painting the row green would be flattery.
+ */
+const PROGRESSING_AT = 50;
+
+export function toneFor(achieved: number, target: number): ProgressTone {
+  if (target <= 0) return achieved > 0 ? "met" : "none";
+  const pct = (achieved / target) * 100;
+  if (pct >= 100) return "met";
+  if (pct >= PROGRESSING_AT) return "progressing";
+  return "behind";
+}
+
+export function percentOf(achieved: number, target: number): number {
+  if (target <= 0) return achieved > 0 ? 100 : 0;
+  return Math.min(100, Math.round((achieved / target) * 100));
+}
+
+/** How much of a commitment is still outstanding. Never negative. */
+export function remaining(achieved: number, target: number): number {
+  return Math.max(0, target - achieved);
+}
+
+/**
+ * The plain-language state of one metric, which is a different question from
+ * toneFor().
+ *
+ * toneFor() answers "how is this going" on a four-point colour scale, where
+ * being halfway is meaningfully better than being nowhere. This answers "has
+ * it been started, and is it finished" — three states, no judgement about pace.
+ * They are kept apart because collapsing them would mean a row 60% of the way
+ * through either loses its amber or gains a "Completed" it has not earned.
+ *
+ * A target of zero with nothing achieved is "Not Started" rather than
+ * "Completed": committing to nothing is not an achievement.
+ */
+export type ProgressStatus = "not-started" | "in-progress" | "completed";
+
+export const STATUS_LABELS: Record<ProgressStatus, string> = {
+  "not-started": "Not Started",
+  "in-progress": "In Progress",
+  completed: "Completed",
+};
+
+export const STATUS_BADGE: Record<
+  ProgressStatus,
+  "success" | "warning" | "neutral"
+> = {
+  "not-started": "neutral",
+  "in-progress": "warning",
+  completed: "success",
+};
+
+export function progressStatus(achieved: number, target: number): ProgressStatus {
+  if (target > 0 && achieved >= target) return "completed";
+  if (achieved > 0) return "in-progress";
+  return "not-started";
+}
+
+export const TONE_BAR: Record<ProgressTone, string> = {
+  met: "bg-success",
+  progressing: "bg-warning",
+  behind: "bg-danger",
+  none: "bg-neutral",
+};
+
+export const TONE_BADGE: Record<
+  ProgressTone,
+  "success" | "warning" | "danger" | "neutral"
+> = {
+  met: "success",
+  progressing: "warning",
+  behind: "danger",
+  none: "neutral",
+};
+
+/**
+ * One number for a whole week, as the prototype computes it: the unweighted
+ * mean of each committed metric's ratio, every ratio capped at 1.
+ *
+ * Two deliberate consequences. Each metric counts equally, so committing to 30
+ * meetings and 2 admissions does not let the meetings drown out the admissions.
+ * And the cap means overshooting one metric cannot paper over another that was
+ * missed. A rep who committed to nothing gets null, shown as a dash — not 0%,
+ * which would read as failure.
+ */
+export function completionPercent(
+  achieved: MetricCounts,
+  targets: MetricCounts,
+): number | null {
+  const committed = METRIC_KEYS.filter((key) => targets[key] > 0);
+  if (committed.length === 0) return null;
+
+  const total = committed.reduce(
+    (sum, key) => sum + Math.min(1, achieved[key] / targets[key]),
+    0,
+  );
+  return Math.round((total / committed.length) * 100);
+}
+
+/* ------------------------------------------------------------------ */
+/* Input                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A commitment is a small whole number. Empty means zero — a rep who clears a
+ * box means "none", not "invalid" — but anything else must be digits, so a
+ * pasted "12a" is refused rather than silently becoming 12.
+ */
+const count = z
+  .union([z.string(), z.number()])
+  .transform((v) => (typeof v === "number" ? String(v) : v.trim()))
+  .transform((v) => (v === "" ? "0" : v))
+  .refine((v) => /^\d{1,3}$/.test(v), "Whole numbers from 0 to 999.")
+  .transform(Number);
+
+/**
+ * The week a commitment belongs to, which has to be a Monday.
+ *
+ * That is the weekly arm of targets_period_start_aligned (migration 0013),
+ * which the database enforces for the `period_start` this becomes. Both sides
+ * say it so a rep gets a sentence rather than a constraint rejection — and the
+ * Monday is asserted here rather than snapped, because a non-Monday arriving
+ * from the form means the hidden field was tampered with, not that a rep typed
+ * a Tuesday.
+ */
+const weekStart = z
+  .string()
+  .refine((v) => /^\d{4}-\d{2}-\d{2}$/.test(v), { message: "That is not a date." })
+  .refine((v) => mondayOf(v) === v, {
+    message: "That is not the start of a week.",
+  });
+
+/**
+ * The eight numbers, and the week they are promised for.
+ *
+ * There is no `period` field. A rep commits to a week and nothing else, so a
+ * period would be a control with one option and a value the server would have
+ * to re-check for no reason. target-actions.ts supplies the literal 'weekly'
+ * when it writes the row — see the note above the progress helpers.
+ */
+export const targetsSchema = z.object({
+  week_start: weekStart,
+  meetings: count,
+  sessions_set: count,
+  sessions_done: count,
+  campus_visits_set: count,
+  campus_visits_done: count,
+  olympiad: count,
+  application: count,
+  admission: count,
+});
+
+export type TargetsInput = z.infer<typeof targetsSchema>;
+
+export const reopenSchema = z.object({
+  member: z.uuid("That member could not be identified."),
+  week_start: weekStart,
+});
+
+/** Shared so the browser and the server action read the form identically. */
+export function targetsFormDataToInput(formData: FormData) {
+  const text = (key: string) => {
+    const value = formData.get(key);
+    return typeof value === "string" ? value : "";
+  };
+  return {
+    week_start: text("week_start"),
+    ...(Object.fromEntries(METRIC_KEYS.map((key) => [key, text(key)])) as Record<
+      MetricKey,
+      string
+    >),
+  };
+}
+
+/** Collapses zod issues into one message per field, for inline display. */
+export function weeklyFieldErrors(error: z.ZodError): Record<string, string> {
+  const fieldErrors: Record<string, string> = {};
+  for (const issue of error.issues) {
+    const key = issue.path.join(".");
+    if (key && !fieldErrors[key]) fieldErrors[key] = issue.message;
+  }
+  return fieldErrors;
+}

@@ -92,13 +92,23 @@ export default async function DashboardPage() {
           </SectionTitle>
           {week?.ok ? (
             <>
-              <MetricList title="Recorded this week" achieved={week.summary.achieved} />
+              <MetricList
+                title="Target vs achieved"
+                targets={week.summary.record.targets}
+                achieved={week.summary.achieved}
+                emptyDescription="Set the eight numbers on the Targets tab, and the bars fill in as you log visits."
+                emptyAction={
+                  <Button asChild className="h-11">
+                    <Link href="/targets">Set this week&rsquo;s targets</Link>
+                  </Button>
+                }
+              />
               <Button asChild variant="outline" className="mt-3 h-11 w-full">
-                <Link href="/targets">Open this week</Link>
+                <Link href="/targets">Open Targets</Link>
               </Button>
             </>
           ) : (
-            <ErrorState message="We could not load this week. Please try again in a moment." />
+            <ErrorState message="We could not load this week's targets. Please try again in a moment." />
           )}
         </>
       )}
