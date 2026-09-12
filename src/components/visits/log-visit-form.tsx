@@ -32,6 +32,7 @@ import {
 import {
   ACTIVITIES,
   activityForPurpose,
+  expectedDateLabel,
   expectedDateRequired,
   fieldLabel,
   followUpRequired,
@@ -160,7 +161,7 @@ export function LogVisitForm({
 
         {needsDate && (
           <div className="space-y-2">
-            <Label htmlFor="expected-date">When is it expected?</Label>
+            <Label htmlFor="expected-date">{expectedDateLabel(activity)}</Label>
             <Input
               id="expected-date"
               type="date"

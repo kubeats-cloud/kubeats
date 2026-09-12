@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { fieldLabel, visitSchema } from "@/lib/validation/visit";
+import {
+  expectedDateLabel,
+  expectedDateRequired,
+  fieldLabel,
+  visitSchema,
+} from "@/lib/validation/visit";
 import { newMemberSchema } from "@/lib/validation/admin";
 import { targetsSchema } from "@/lib/validation/weekly";
 
@@ -340,6 +345,40 @@ describe("newMemberSchema — the campus rule", () => {
     expect(
       newMemberSchema.safeParse({ ...rep, campus_id: "Bangalore" }).success,
     ).toBe(false);
+  });
+});
+
+describe("the tentative date a \"Set\" visit promises", () => {
+  it("is required for a Set session or campus visit, and only then", () => {
+    // Rule 3. Asserted beside the label because the two together are the
+    // client's ask: required ON the set status, and named for what was set.
+    //
+    // NOTE: this one is app-only. There is no CHECK behind it — log_visit()
+    // stores expected_date when the lifecycle is 'Set' and nulls it otherwise,
+    // but never refuses a missing one. That is survivable rather than a hole:
+    // Pending reads `expected_date ?? date`, so a null degrades to the day it
+    // was logged instead of vanishing. It does mean this test is the only
+    // thing holding the rule.
+    expect(expectedDateRequired("session", "Set")).toBe(true);
+    expect(expectedDateRequired("campus_visit", "Set")).toBe(true);
+    expect(expectedDateRequired("session", "Done")).toBe(false);
+    expect(expectedDateRequired("campus_visit", "Done")).toBe(false);
+    // The four one-shots have no lifecycle, so they never promise a date.
+    for (const a of ["meeting", "olympiad", "application", "admission"]) {
+      expect(expectedDateRequired(a, "Set"), a).toBe(false);
+    }
+  });
+
+  it("names the thing that was set, not just \"it\"", () => {
+    expect(expectedDateLabel("session")).toBe("Tentative session date");
+    expect(expectedDateLabel("campus_visit")).toBe("Tentative campus visit date");
+  });
+
+  it("falls back to the vague wording for an activity it does not know", () => {
+    // Unreachable through the form — expectedDateRequired() gates it to the two
+    // lifecycle activities — and kept so a third one gets a vague label rather
+    // than a blank one.
+    expect(expectedDateLabel("meeting")).toBe("When is it expected?");
   });
 });
 
