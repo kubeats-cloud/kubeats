@@ -374,6 +374,39 @@ describe("the tentative date a \"Set\" visit promises", () => {
     expect(expectedDateLabel("campus_visit")).toBe("Tentative campus visit date");
   });
 
+  it("says the same thing in the label, the message and the summary", () => {
+    // Three names for one box is how a rep hunts for a field already in front
+    // of them. The control said "Tentative session date", the error said "When
+    // is it expected?" and the summary called it "Expected date".
+    const result = visitSchema.safeParse({
+      ...baseVisit,
+      activity: "session",
+      lifecycle_status: "Set",
+      expected_date: "",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path[0] === "expected_date");
+      expect(issue?.message).toBe("Pick a tentative session date.");
+    }
+
+    const campus = visitSchema.safeParse({
+      ...baseVisit,
+      activity: "campus_visit",
+      lifecycle_status: "Set",
+      expected_date: "",
+    });
+    expect(campus.success).toBe(false);
+    if (!campus.success) {
+      const issue = campus.error.issues.find((i) => i.path[0] === "expected_date");
+      expect(issue?.message).toBe("Pick a tentative campus visit date.");
+    }
+
+    // Activity-neutral, because the map is keyed by field name - but the same
+    // "Tentative ... date" family, not a fourth name.
+    expect(fieldLabel("expected_date")).toBe("Tentative date");
+  });
+
   it("falls back to the vague wording for an activity it does not know", () => {
     // Unreachable through the form — expectedDateRequired() gates it to the two
     // lifecycle activities — and kept so a third one gets a vague label rather

@@ -95,7 +95,70 @@ export function LogVisitForm({
     fieldErrors[key] ? <p className="text-danger text-xs">{fieldErrors[key]}</p> : null;
 
   return (
-    <form action={formAction} className="space-y-4">
+    /*
+     * SUBMITTED BY HAND, AND THAT IS THE BUG FIX. It used to be
+     * `action={formAction}`, which is the idiomatic React 19 form and is what
+     * made the rep's Activity silently revert on a failed submit.
+     *
+     * THE CHAIN. React resets a form once its `action` has run - that is the
+     * documented behaviour, and the reason `requestFormReset` exists for the
+     * manual case. Resetting dispatches a `reset` EVENT. And every Radix
+     * Select registers one of these on its enclosing form
+     * (@radix-ui/react-select, which `radix-ui` re-exports):
+     *
+     *     const initialValueRef = React.useRef(value);   // captured at MOUNT
+     *     const reset = () => setValue(initialValueRef.current);
+     *     associatedForm.addEventListener("reset", reset);
+     *
+     * Because our Selects are CONTROLLED, `setValue` calls `onValueChange` -
+     * so `setActivity` is genuinely invoked with the value the Select had when
+     * it mounted. The rep's choice is not merely hidden; the state is
+     * overwritten. Then the form re-renders from the failed action showing the
+     * plan's prefill, and a rep who corrects "Session" to "Campus Visit",
+     * submits, fixes the flagged photo and submits again files the WRONG
+     * ACTIVITY without ever seeing it change back.
+     *
+     * WHY IT LOOKED SELECTIVE, which is what made it worth chasing. Only the
+     * Radix-backed controls reverted - Activity, Set/Done, Institute status and
+     * the three feedback Pickers. `interested`, `next_meeting_set` and the
+     * name/mobile boxes all survived, because those are plain buttons and
+     * plain inputs with no reset listener. Two useState values in the SAME
+     * component behaving differently is what ruled out a remount and pointed at
+     * the form-reset event.
+     *
+     * THE FIX REMOVES THE TRIGGER RATHER THAN RACING IT. Dispatching the action
+     * ourselves means React is not driving the submission, so it never resets
+     * the form, so no `reset` event fires and Radix never clobbers anything.
+     * The alternatives were worse: cancelling the event cannot work
+     * (preventDefault stops the browser's field reset, not Radix's listener,
+     * which has already run), out-listening it depends on React's delegated
+     * handler firing after Radix's element-level one, and re-`key`ing every
+     * Select to refresh its `initialValueRef` costs a remount and the trigger's
+     * focus on every change.
+     *
+     * WHAT THIS GIVES UP, AND WHY IT COSTS NOTHING HERE. A form without an
+     * `action` cannot be submitted before JavaScript arrives. This one never
+     * could: Rule 12 makes the photograph mandatory, and the photograph is
+     * produced client-side - stamped onto a canvas and uploaded by
+     * CaptureFields, which is what fills in `photo_path`. A no-JS submit had
+     * always failed on `photo_path` before it reached the database. So there
+     * was no progressive enhancement to lose.
+     *
+     * SEVEN OTHER FORMS PAIR `action={formAction}` WITH A RADIX SELECT and have
+     * the same latent bug - assign-visit, daily-plan, institute-form,
+     * material-upload-form, locations-panel, photo-flush-panel and team-panel.
+     * They are deliberately NOT changed here: for some of them (the daily-plan
+     * add row) clearing after a successful submit is the wanted behaviour, and
+     * each needs its own look. This one was fixed first because it is the one
+     * that writes the visit record.
+     */
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        formAction(new FormData(event.currentTarget));
+      }}
+      className="space-y-4"
+    >
       {/* Everything the plan already decided, carried rather than re-asked. */}
       <input type="hidden" name="institute_id" value={plan.institute_id} />
       <input type="hidden" name="daily_plan_id" value={plan.id} />
