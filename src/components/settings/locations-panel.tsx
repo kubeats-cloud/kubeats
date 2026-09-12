@@ -94,6 +94,15 @@ export function LocationsPanel({ tree }: { tree: StateNode[] }) {
         {/* Cities ------------------------------------------------------- */}
         {state && (
           <section className="border-border space-y-2 border-t pt-5">
+            {/*
+              NOT AFFECTED by the Radix form-reset bug the other panels were,
+              and worth saying so because it looks like it should be. Radix only
+              attaches its reset listener when the trigger has an ancestor
+              <form> - it reads `trigger.form`. These pickers are navigation,
+              sitting outside every form on the panel; the forms here are the
+              AddRow ones below, which contain a single text input and no Select
+              at all. Nothing to revert, so nothing to fix.
+            */}
             <Label htmlFor="city-picker">City in {state.name}</Label>
             <div className="flex gap-2">
               <Select value={cityId} onValueChange={setCityId}>

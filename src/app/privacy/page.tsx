@@ -199,8 +199,14 @@ export default function PrivacyPage() {
         </Section>
 
         <div className="mt-10">
+          {/*
+            Worded for both readers. This page is public AND readable while
+            signed in, so "Back to sign in" was wrong half the time. "/" sends a
+            signed-in person to their dashboard and a stranger to the login
+            screen through the usual gate, so one link serves both.
+          */}
           <Button asChild variant="outline" className="h-11">
-            <Link href="/login">Back to sign in</Link>
+            <Link href="/">Back to KUbeats</Link>
           </Button>
         </div>
       </PageColumn>

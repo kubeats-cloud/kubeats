@@ -66,7 +66,35 @@ export function PhotoFlushPanel({
           time, are never touched.
         </p>
 
-        <form action={formAction} className="space-y-4">
+        {/*
+          Submitted by hand so React never resets the form.
+
+          THE HARM HERE IS THAT THIS DELETES FILES, IRREVERSIBLY. `preset`
+          mounts as FLUSH_PRESETS[0] - "Older than a week" - and a Radix Select
+          restores its MOUNT value whenever a `reset` event reaches the form,
+          which React fires after any action completes. See log-visit-form.tsx
+          for the chain.
+
+          So an admin choosing "Older than a month" and counting would watch the
+          dropdown quietly slide back to "Older than a week" - the WIDEST of the
+          presets, and a superset of what they asked for. Count again without
+          noticing and the confirm deletes three more weeks of photographs than
+          intended, and they do not come back.
+
+          The `state.cutoff === cutoff` guard below already caught the worst of
+          it: a confirmation is only good for the cutoff it was counted against,
+          so the reverted preset invalidated the confirmation rather than
+          deleting the wrong range. That guard stays. It should not have been
+          carrying this on its own, and a control that changes its own mind is
+          not something to leave in front of a destructive action.
+        */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            formAction(new FormData(event.currentTarget));
+          }}
+          className="space-y-4"
+        >
           <input type="hidden" name="cutoff" value={cutoff} />
 
           <div className="space-y-2">

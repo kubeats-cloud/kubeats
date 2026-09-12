@@ -80,6 +80,15 @@ export function AssignVisit({
       return;
     }
     setClientState(EMPTY_STATE);
+    // LEFT ON `action={formAction}` DELIBERATELY. Same reasoning as the daily
+    // plan: `member` is the one Select not cleared here, and it mounts EMPTY,
+    // so the revert Radix performs on React's post-action reset leaves it
+    // empty and assignVisitSchema answers "Choose a rep." The admin loses a
+    // selection and is told so; nothing is assigned to the wrong person.
+    //
+    // The institute and purpose are cleared on purpose anyway - an admin
+    // assigning several visits in a row wants the next one blank - and `date`
+    // is a plain input React re-syncs from state rather than a Radix control.
     setInstituteId("");
     setPurpose("");
   }

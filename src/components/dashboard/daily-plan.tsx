@@ -133,6 +133,28 @@ export function DailyPlan({
     setClientState(EMPTY_STATE);
     // The row is upserted, so re-planning the same institute just corrects the
     // purpose. Clearing the picker afterwards keeps the next entry quick.
+    //
+    // LEFT ON `action={formAction}` DELIBERATELY, unlike the visit form and the
+    // four others that were moved to a manual dispatch. React resets a form
+    // after its action runs and Radix Selects revert to their mount value when
+    // it does (log-visit-form.tsx has the chain), but here that cannot produce
+    // wrong data:
+    //
+    //   * both pickers mount EMPTY, so a revert is a revert to nothing, and
+    //     dailyPlanSchema refuses an empty institute or purpose with a sentence.
+    //     It fails loudly. The visit form's danger was reverting to a VALID
+    //     value that submitted happily and said nothing.
+    //   * a client-side refusal calls preventDefault above, which skips the
+    //     action entirely, so no reset fires on the common failure at all.
+    //   * clearing after a successful add is the WANTED behaviour, and it is
+    //     done here in code rather than left to the reset.
+    //
+    // Being exact about "only on success", because it is not quite: this clears
+    // on any client-VALID attempt, so a server-side refusal (an expired
+    // session, an institute deleted underneath) also empties the pickers and
+    // the rep re-picks. That is a re-pick, not a wrong row, and separating the
+    // two would mean tracking the result in an effect for a case worth less
+    // than the machinery.
     setInstituteId("");
     setPurpose("");
   }

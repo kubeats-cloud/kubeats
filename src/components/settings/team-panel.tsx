@@ -59,14 +59,37 @@ export function TeamPanel({
     ? serverState.fieldErrors
     : clientState.fieldErrors;
 
+  /**
+   * Submitted by hand so React never resets the form.
+   *
+   * THE HARM HERE IS THE `role` SELECT, and it is the sharpest of the set. It
+   * mounts as "rep", and a Radix Select restores its MOUNT value whenever a
+   * `reset` event reaches the form - which React fires after any action
+   * completes, failed ones included. See log-visit-form.tsx for the chain.
+   *
+   * The failure that triggers it is the ordinary one: create an ADMIN, get
+   * "That already exists" back because the address is taken, correct the
+   * address, submit again - and an account that was meant to administer the
+   * team is created as a rep. Nothing says so, because "rep" is a valid role.
+   * A silently wrong ROLE is a privilege decision, which is why this one was
+   * worth fixing even though it is recoverable by an admin afterwards.
+   *
+   * `campusId` shares the mechanism but not the danger: it reverts to "", which
+   * FO021 and the schema both refuse for a rep, so it fails loudly.
+   *
+   * FormData is captured before the state updates, so the credentials sent are
+   * the ones typed rather than the cleared boxes.
+   */
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+
     const parsed = newMemberSchema.safeParse({
       ...values,
       role,
       campus_id: role === "rep" ? campusId : "",
     });
     if (!parsed.success) {
-      event.preventDefault();
       setClientState({
         error: "Please check the highlighted fields.",
         fieldErrors: fieldErrorsFrom(parsed.error),
@@ -75,6 +98,7 @@ export function TeamPanel({
     }
     setClientState(EMPTY_MEMBER_STATE);
     setValues({ name: "", email: "", password: "" });
+    formAction(formData);
   }
 
   const field = (key: string) =>
@@ -191,7 +215,7 @@ export function TeamPanel({
             Add a team member
           </Button>
         ) : (
-          <form action={formAction} onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <input type="hidden" name="role" value={role} />
 
             <div className="space-y-2">

@@ -71,12 +71,33 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
   }
 
   /** Same schema the action uses, so a typo is caught without a round trip. */
+  /**
+   * Submitted by hand so React never resets the form.
+   *
+   * THE HARM HERE IS THE `type` SELECT. It mounts as "school", and a Radix
+   * Select restores its MOUNT value whenever a `reset` event reaches the form -
+   * which React fires after any action completes, including a failed one. See
+   * log-visit-form.tsx for the full chain and the Radix source.
+   *
+   * So: register a COACHING centre, pass the client checks, have the server
+   * refuse it (a duplicate name is the likely one - 23505 comes back as "That
+   * already exists"), rename it, submit again, and it is created as a SCHOOL.
+   * The rep is never told, because "school" is a perfectly valid answer. That
+   * is the same silent-wrong-data shape as the visit form's activity.
+   *
+   * Only `type` is at risk. `boards`, `class11` and `class12` look like the
+   * same kind of choice but are plain toggle buttons writing hidden inputs, and
+   * nothing resets those.
+   *
+   * The FormData is taken before the state updates below, so what is sent is
+   * what the registrar typed rather than what the form holds a tick later.
+   */
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    const parsed = instituteSchema.safeParse(
-      instituteFormDataToInput(new FormData(event.currentTarget)),
-    );
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+
+    const parsed = instituteSchema.safeParse(instituteFormDataToInput(formData));
     if (!parsed.success) {
-      event.preventDefault();
       setClientState({
         error: "Please check the highlighted fields.",
         fieldErrors: fieldErrorsFrom(parsed.error),
@@ -84,6 +105,7 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
       return;
     }
     setClientState(EMPTY_FORM_STATE);
+    formAction(formData);
   }
 
   const fieldError = (key: string) =>
@@ -98,7 +120,7 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
   // others. `required` stays on the input — it still tells assistive technology
   // the field is mandatory, and only the browser's error UI is being dropped.
   return (
-    <form action={formAction} onSubmit={handleSubmit} noValidate className="space-y-4">
+    <form onSubmit={handleSubmit} noValidate className="space-y-4">
       <FormSection
         title="The basics"
         description="What it is called and what kind of place it is."
