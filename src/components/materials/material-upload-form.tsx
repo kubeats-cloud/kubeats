@@ -133,7 +133,34 @@ export function MaterialUploadForm({
   const ready = upload.status === "ready";
 
   return (
-    <form ref={formRef} action={formAction} className="space-y-4">
+    /*
+      Submitted by hand so React never resets the form.
+
+      THE HARM HERE IS `campusId`, and it is a scoping one. It mounts as
+      ALL_CAMPUSES, and a Radix Select restores its MOUNT value whenever a
+      `reset` event reaches the form - which React fires after any action
+      completes, including a failed one. See log-visit-form.tsx for the chain.
+
+      So an admin uploading a file FOR ONE CAMPUS, refused on the title, would
+      fix the title and publish it to EVERY campus instead. The file is already
+      in storage by then, so there is no second chance to notice.
+
+      startAnother()'s own formRef.current.reset() is untouched and still
+      wanted: that one is a button the admin presses to clear a SUCCESSFUL
+      upload, and resetting campusId to ALL_CAMPUSES is the right starting point
+      for the next file. The comment on that function had already worked out
+      that clearing on FAILURE would be wrong - "the file is already in storage
+      by then, so a rejected title must not take the upload down with it" - it
+      just could not know React was doing exactly that behind it.
+    */
+    <form
+      ref={formRef}
+      onSubmit={(event) => {
+        event.preventDefault();
+        formAction(new FormData(event.currentTarget));
+      }}
+      className="space-y-4"
+    >
       {ready && (
         <>
           <input type="hidden" name="file_path" value={upload.path} />
