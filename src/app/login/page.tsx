@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentUser } from "@/lib/auth";
@@ -50,6 +51,18 @@ export default async function LoginPage(props: PageProps<"/login">) {
         <p className="text-muted-foreground mt-6 text-center text-xs">
           Accounts are created by an administrator. If you cannot get in, ask
           them to check your access.
+        </p>
+
+        {/* The one place a person who has NOT signed in can find out what the
+            app records about them. /privacy is public in proxy.ts for exactly
+            this reason, and it is reachable while signed in too. */}
+        <p className="mt-3 text-center text-xs">
+          <Link
+            href="/privacy"
+            className="text-muted-foreground hover:text-foreground underline underline-offset-2"
+          >
+            Privacy
+          </Link>
         </p>
       </div>
     </main>

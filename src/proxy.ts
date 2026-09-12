@@ -1,10 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/proxy";
 import { publicEnv } from "@/lib/env";
-import { isAdminOnlyPath, isRepOnlyPath } from "@/lib/nav";
-
-/** Reachable without a session. Everything else requires one. */
-const PUBLIC_PATHS = ["/login"];
+import {
+  isAdminOnlyPath,
+  isAuthPath,
+  isPublicPath,
+  isRepOnlyPath,
+} from "@/lib/nav";
 
 /**
  * The role split, turned away here so each refusal is a real HTTP redirect.
@@ -12,13 +14,7 @@ const PUBLIC_PATHS = ["/login"];
  * a screen cannot appear in one role's bar and be reachable by the other.
  */
 
-function matches(pathname: string, paths: string[]): boolean {
-  return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
-}
 
-function isPublic(pathname: string): boolean {
-  return matches(pathname, PUBLIC_PATHS);
-}
 
 /**
  * Content-Security-Policy, built per request around a fresh nonce.
@@ -97,14 +93,14 @@ export async function proxy(request: NextRequest) {
   // the session is still refreshed above but the route decides the response.
   if (pathname.startsWith("/api/")) return withCsp(response);
 
-  if (!user && !isPublic(pathname)) {
+  if (!user && !isPublicPath(pathname)) {
     const intended = `${pathname}${search}`;
     const params =
       intended === "/" ? undefined : new URLSearchParams({ next: intended });
     return redirectTo("/login", params);
   }
 
-  if (user && isPublic(pathname)) {
+  if (user && isAuthPath(pathname)) {
     return redirectTo("/");
   }
 
@@ -178,12 +174,19 @@ export const config = {
      * "Manifest: Line 1, column 1, Syntax error", which says nothing at all
      * about the actual cause.
      *
+     * robots.txt is here for exactly that reason, one step further on. It is a
+     * Route Handler (src/app/robots.ts), so without this exclusion the
+     * signed-out redirect answers a crawler's request for our robots file with
+     * the login page's HTML - and the file might as well not exist. A crawler
+     * has no session to refresh either, so letting these requests reach our
+     * code would only spend a Supabase call per probe.
+     *
      * .well-known is excluded for the same reason plus one more: security.txt
      * has to be readable by a stranger, and it is fetched by scanners that
      * would otherwise make us refresh a session — and spend a Supabase call —
      * on every probe. Excluding it here means those requests never reach any
      * of our code.
      */
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|\.well-known/|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|robots.txt|\.well-known/|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
   ],
 };

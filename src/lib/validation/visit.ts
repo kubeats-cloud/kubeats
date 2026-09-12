@@ -416,6 +416,11 @@ const FIELD_LABELS: Record<string, string> = {
   longitude: "Location",
 
   // Closing report
+  // met_name / met_phone are the two the live short form actually posts. They
+  // were missing, so the error summary title-cased the column name and told a
+  // rep to check "Met name" - a field printed on screen as "Name".
+  met_name: "Name",
+  met_phone: "Mobile",
   activities_conducted: "What you did",
   session_topic: "Session topic",
   session_class: "Class",

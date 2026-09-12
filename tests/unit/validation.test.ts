@@ -383,6 +383,14 @@ describe("the tentative date a \"Set\" visit promises", () => {
 });
 
 describe("fieldLabel", () => {
+  it("names the person-met fields as the form prints them", () => {
+    // The error summary at the foot of Log Visit renders fieldLabel(key). These
+    // two were missing from the map, so a blank name told the rep to check
+    // "Met name" - a field labelled "Name" on screen.
+    expect(fieldLabel("met_name")).toBe("Name");
+    expect(fieldLabel("met_phone")).toBe("Mobile");
+  });
+
   it("names a person by their position, counting from one", () => {
     expect(fieldLabel("people.0.name")).toBe("Person 1: name");
     expect(fieldLabel("people.2.contact_number")).toBe("Person 3: mobile");
