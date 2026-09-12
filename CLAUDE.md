@@ -123,6 +123,39 @@ Dark mode: `@custom-variant dark` is defined but no `.dark` palette exists, so
 `dark:` utilities inside shadcn components never fire. Adding a `.dark { … }`
 block in `globals.css` is the extension point if v2 wants it.
 
+## The public surface is three things, and nothing else
+
+KUbeats is a private tool. Exactly three paths answer a stranger:
+**`/login`**, **`/privacy`**, and **`/.well-known/security.txt`**. Everything
+else redirects to `/login` for anyone without a session.
+
+- **`PUBLIC_PATHS` and `AUTH_PATHS` in `src/lib/nav.ts` are two lists on
+  purpose**, and collapsing them back into one is the mistake to avoid. Public
+  means "reachable with no session"; auth means "and a signed-in user is
+  bounced off it". `/login` is both. `/privacy` is only the first, because a rep
+  who wants to know what is recorded about them must be able to read it while
+  logged in. The `nav.test.ts` suite asserts the containment and the asymmetry.
+- **`robots.ts` is a Route Handler, so `proxy.ts`'s matcher must exclude
+  `robots.txt`** or the signed-out redirect hands a crawler the login page and
+  the file might as well not exist. Same trap `manifest.webmanifest` already
+  documents there.
+- **`X-Robots-Tag: noindex, nofollow`** rides on every response from
+  `next.config.ts`. robots.txt asks a crawler not to FETCH; the header tells it
+  not to INDEX. Both, deliberately — `src/app/robots.ts` explains the
+  interaction and why a private app takes belt and braces.
+- **Neither is a security control.** The boundary is `proxy.ts`, the `(app)`
+  layout's own server-side check, and RLS.
+- **There are TWO 404s and both are needed.** `src/app/not-found.tsx` answers an
+  unmatched URL, renders in the root layout, and assumes no session;
+  `src/app/(app)/not-found.tsx` answers `notFound()` thrown inside the app group
+  and keeps the nav bar, because that reader is signed in and mid-task. Before
+  the root one existed, an unmatched URL fell through to Next's own unbranded
+  default.
+- **A signed-OUT stranger never sees a 404**, and that is deliberate. Letting
+  them tell "no such page" from "page you may not see" would turn the 404 into a
+  route-enumeration oracle. One redirect for everything unknown-or-protected
+  leaks nothing. Reversing it is an exemption list in `proxy.ts`.
+
 ## Portability
 
 This app must stay movable: hosted Supabase today, a client's self-hosted
@@ -151,8 +184,10 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2898
-KiB** — about 174 KiB, 5.7% spare. The budget is real: measure before adding
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2949
+KiB** — about 123 KiB, 4.0% spare. That is the thinnest it has been: the
+noindex/404/privacy work cost 51 KiB for two static pages, which is mostly
+per-route overhead rather than their content. The budget is real: measure before adding
 anything sizable, and re-measure rather than trusting this line. It has been
 wrong before, in both directions — it read 2949 for a while after the figure it
 described had already moved, which is how a stale number becomes a wrong

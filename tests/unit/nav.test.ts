@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   ADMIN_NAV,
+  AUTH_PATHS,
+  PUBLIC_PATHS,
   REP_NAV,
   isActive,
   isAdminOnlyPath,
+  isAuthPath,
+  isPublicPath,
   isRepOnlyPath,
   navItemsFor,
 } from "@/lib/nav";
@@ -77,6 +81,48 @@ describe("path guards", () => {
       expect(isAdminOnlyPath(path), path).toBe(false);
       expect(isRepOnlyPath(path), path).toBe(false);
     }
+  });
+});
+
+describe("the signed-out surface", () => {
+  it("lets a stranger reach only the login and privacy screens", () => {
+    expect(isPublicPath("/login")).toBe(true);
+    expect(isPublicPath("/privacy")).toBe(true);
+    // Everything else is behind the gate. /targets is named explicitly because
+    // it is the screen that most recently changed shape.
+    for (const path of ["/", "/targets", "/log", "/team", "/institutes", "/settings"]) {
+      expect(isPublicPath(path), path).toBe(false);
+    }
+  });
+
+  it("bounces a signed-in user off login but NOT off privacy", () => {
+    // THE WHOLE REASON THESE ARE TWO LISTS. A rep who wants to know what is
+    // recorded about them must be able to read /privacy while signed in;
+    // sending them to the dashboard would answer a fair question with a shrug.
+    expect(isAuthPath("/login")).toBe(true);
+    expect(isAuthPath("/privacy")).toBe(false);
+  });
+
+  it("keeps every auth path inside the public set", () => {
+    // An AUTH_PATH that was not also public would be unreachable in both
+    // states: redirected to /login when signed out, redirected to / when in.
+    for (const path of AUTH_PATHS) {
+      expect(PUBLIC_PATHS as readonly string[], path).toContain(path);
+    }
+  });
+
+  it("never exposes a role-gated route as public", () => {
+    for (const path of PUBLIC_PATHS) {
+      expect(isAdminOnlyPath(path), path).toBe(false);
+      expect(isRepOnlyPath(path), path).toBe(false);
+    }
+  });
+
+  it("matches children of a public path, not merely look-alikes", () => {
+    expect(isPublicPath("/privacy/cookies")).toBe(true);
+    // The boundary check, same trap the role guards document.
+    expect(isPublicPath("/privacy-policy-elsewhere")).toBe(false);
+    expect(isPublicPath("/loginz")).toBe(false);
   });
 });
 

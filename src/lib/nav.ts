@@ -75,6 +75,30 @@ export const ADMIN_NAV: NavItem[] = [
 ];
 
 /**
+ * Reachable without a session. Everything else redirects to /login.
+ *
+ * It lives here rather than in proxy.ts for the reason the two lists below
+ * already do: this file is the single place every route-visibility question is
+ * answered, so a screen cannot be public in one place and gated in another.
+ */
+export const PUBLIC_PATHS = ["/login", "/privacy"] as const;
+
+/**
+ * The subset of PUBLIC_PATHS a SIGNED-IN user is bounced off.
+ *
+ * These were one list until /privacy arrived, and splitting them is the whole
+ * point. A privacy notice has to be readable by a stranger who has not signed
+ * in AND by a rep who wants to know what is recorded about them; bouncing the
+ * second to the dashboard answers a fair question with a shrug. /login is the
+ * only path where "you are already in" is a reason to send someone away.
+ *
+ * So: every AUTH_PATH must be a PUBLIC_PATH, but not the reverse. The nav test
+ * asserts that containment, because an AUTH_PATH that is not public would be a
+ * path nobody could reach in either state.
+ */
+export const AUTH_PATHS = ["/login"] as const;
+
+/**
  * The routes a rep may reach and an admin may not.
  *
  * Hiding a tab is a convenience, never a boundary — `proxy.ts` turns an admin
@@ -105,6 +129,14 @@ export function isRepOnlyPath(pathname: string): boolean {
 
 export function isAdminOnlyPath(pathname: string): boolean {
   return matches(pathname, ADMIN_ONLY_PATHS);
+}
+
+export function isPublicPath(pathname: string): boolean {
+  return matches(pathname, PUBLIC_PATHS);
+}
+
+export function isAuthPath(pathname: string): boolean {
+  return matches(pathname, AUTH_PATHS);
 }
 
 /**

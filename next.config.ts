@@ -13,6 +13,24 @@ import type { NextConfig } from "next";
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
+  {
+    /*
+     * Nothing here is for the public, /login included.
+     *
+     * robots.txt asks a crawler not to FETCH; this tells it not to INDEX what
+     * it fetched, and it is the half that gets an already-indexed page dropped
+     * again. Both are wanted: see the long note in src/app/robots.ts about how
+     * they interact, and why a private app takes belt and braces where a
+     * marketing site would take the braces alone.
+     *
+     * `nofollow` rides along because a crawler that ignores the first half
+     * should at least not walk onward from what it found. Neither directive is
+     * a security control - the boundary is proxy.ts, the (app) layout's own
+     * check, and RLS.
+     */
+    key: "X-Robots-Tag",
+    value: "noindex, nofollow",
+  },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // Belt and braces with the CSP's frame-ancestors, for older browsers.
   { key: "X-DNS-Prefetch-Control", value: "off" },

@@ -272,7 +272,12 @@ export const visitSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["expected_date"],
-        message: "When is it expected?",
+        // Same wording as the control, from the same function. The label said
+        // "Tentative session date" while this said "When is it expected?" and
+        // the error summary called the field "Expected date" - three names for
+        // one box, which is how a rep ends up hunting for a field that is
+        // already in front of them.
+        message: `Pick a ${expectedDateLabel(value.activity).toLowerCase()}.`,
       });
     }
 
@@ -408,7 +413,10 @@ const FIELD_LABELS: Record<string, string> = {
   institute_id: "Institute",
   daily_plan_id: "Today’s plan",
   lifecycle_status: "Set or Done",
-  expected_date: "Expected date",
+  // Activity-neutral, because this map is keyed by field name and cannot know
+  // which activity is selected. It still belongs to the same "Tentative ...
+  // date" family as the control and the message above.
+  expected_date: "Tentative date",
   photo_path: "Photo",
   notes: "Notes",
   status_set_to: "Institute status",
@@ -416,6 +424,11 @@ const FIELD_LABELS: Record<string, string> = {
   longitude: "Location",
 
   // Closing report
+  // met_name / met_phone are the two the live short form actually posts. They
+  // were missing, so the error summary title-cased the column name and told a
+  // rep to check "Met name" - a field printed on screen as "Name".
+  met_name: "Name",
+  met_phone: "Mobile",
   activities_conducted: "What you did",
   session_topic: "Session topic",
   session_class: "Class",
