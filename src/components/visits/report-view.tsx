@@ -40,7 +40,6 @@ export function ReportView({ report }: { report: VisitReport }) {
     report.session_topic,
     report.session_class && `class ${report.session_class}`,
     report.session_streams?.length ? report.session_streams.join(", ") : null,
-    report.students_reached !== null ? `${report.students_reached} reached` : null,
     report.session_duration_mins !== null ? `${report.session_duration_mins} min` : null,
     report.session_participation && `${report.session_participation} participation`,
   ]
@@ -55,10 +54,28 @@ export function ReportView({ report }: { report: VisitReport }) {
    * session in it.
    */
   const done = report.activities_conducted ?? [];
-  const countLabel =
-    hasCampusVisit(done) && !hasSession(done)
+
+  /**
+   * WHICH ERA FILED THIS, because the second count means opposite things in
+   * the two.
+   *
+   * `activities_conducted` was always required by the retired long report and
+   * is never written by the short one, so a non-empty list is the marker for a
+   * report filed before 0022. In that era `students_reached` was the WIDER
+   * number — "reached overall, often more than attended" (0009). Since 0022 it
+   * is the NARROWER one: how many of those present took part.
+   *
+   * So the labels are chosen per report rather than globally. Relabelling an
+   * old row "participated" would put a number under a word it does not mean,
+   * which is worse than the slightly dated wording it keeps instead.
+   */
+  const richEra = done.length > 0;
+  const presentLabel = richEra
+    ? hasCampusVisit(done) && !hasSession(done)
       ? "Students who visited"
-      : "Students attended";
+      : "Students attended"
+    : "Students present";
+  const secondCountLabel = richEra ? "Students reached" : "Students who participated";
 
   return (
     <div className="space-y-4">
@@ -124,7 +141,8 @@ export function ReportView({ report }: { report: VisitReport }) {
           <dl className="divide-border divide-y">
             {row("Activities", chips(report.activities_conducted))}
             {row("Session", session || null)}
-            {row(countLabel, report.students_attended)}
+            {row(presentLabel, report.students_attended)}
+            {row(secondCountLabel, report.students_reached)}
             {row("Questions asked", report.student_questions)}
             {row("Faculty present", report.other_faculty_present)}
             {row("Student response", report.student_response)}

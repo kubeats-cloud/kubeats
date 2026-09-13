@@ -433,13 +433,16 @@ const FIELD_LABELS: Record<string, string> = {
   session_topic: "Session topic",
   session_class: "Class",
   session_streams: "Streams",
-  students_attended: "Students attended",
+  // Two counts since 0022. The COLUMN names are 0009's; these are what a rep
+  // reads, and they must match the labels in feedback-fields.tsx exactly or an
+  // error summary points at a box that is captioned something else.
+  students_attended: "Students present",
   session_duration_mins: "Session length",
   other_faculty_present: "Other faculty",
   other_faculty_count: "Faculty count",
   session_participation: "Participation",
   student_questions: "Student questions",
-  students_reached: "Students reached",
+  students_reached: "Students who participated",
   student_response: "Student response",
   student_interest: "Interest level",
   most_interested_programs: "Most-interested programs",

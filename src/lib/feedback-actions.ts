@@ -100,7 +100,11 @@ export async function submitFeedback(
     p_student_response: input.student_response,
     p_met_name: input.met_name,
     p_met_phone: input.met_phone,
+    // Two counts since 0022: attended is PRESENT, reached is PARTICIPATED.
+    // The column names are 0009's and unchanged; what a rep reads is set in
+    // feedback-fields.tsx.
     p_students_attended: input.students_attended,
+    p_students_reached: input.students_reached,
     p_session_topic: input.session_topic,
     p_session_taken_by: input.session_taken_by,
     p_closes_visit_id: input.closes_visit_id,
@@ -222,6 +226,7 @@ export async function logAndFileVisit(
     p_met_name: feedback.met_name,
     p_met_phone: feedback.met_phone,
     p_students_attended: feedback.students_attended,
+    p_students_reached: feedback.students_reached,
     p_session_topic: feedback.session_topic,
     p_session_taken_by: feedback.session_taken_by,
     p_closes_visit_id: feedback.closes_visit_id,

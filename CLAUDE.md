@@ -309,11 +309,11 @@ already claimed the easy 0.9 MiB between them; see README for both.
   "abandon" — a visit nobody can finish is swept overnight by
   `sweep_open_checkins()` into the same "closed, time not recorded" state the
   old escape valve used.
-- **The closing report's field set is settled** (0019): a response note, is the
-  institute interested, the OUTCOME, the MANAGEMENT RESPONSE, the STUDENT
-  RESPONSE, next-session-set with its mandatory date and time, person met as
+- **The closing report's field set is settled** (0019, one count added in
+  0022): a response note, is the institute interested, the OUTCOME, the
+  MANAGEMENT RESPONSE, the STUDENT RESPONSE, next-session-set with its mandatory date and time, person met as
   **name (required) + phone (optional)**, and — only when the status says so —
-  the session or campus-visit head count with topic and who took it. The name
+  the session or campus-visit head counts with topic and who took it. The name
   and the phone were BOTH optional until the client's spec separated them, with
   a rule that a phone had to have a name beside it; so a report could name
   nobody at all, while a rep who never got a mobile had a field the form implied
@@ -321,6 +321,17 @@ already claimed the easy 0.9 MiB between them; see README for both.
   still means "may be absent", never "may be wrong" — a phone that is present is
   still ten digits, which `visits_met_phone_valid` would insist on regardless.
   Designation stays withdrawn.
+  **The head count is TWO numbers, not one** (0022): Students PRESENT
+  (`students_attended`, unchanged since 0001) and Students PARTICIPATED
+  (`students_reached`, the dormant 0009 column coming back rather than a third
+  being invented). Neither is compulsory — a rep who did not count heads must
+  still be able to file — and the only rule between them, participated ≤
+  present, is the form's alone. It is deliberately not a CHECK: 0009 built
+  "reached" as the WIDER number and the rows the retired long report filed
+  still carry that opposite sense, so a constraint would have refused to build.
+  `report-view.tsx` therefore labels the second count by era, switching on
+  `activities_conducted`, which only the long form ever wrote. 0022 restates the
+  redefinition on both columns, because 0009's comment now says the reverse.
   This one needed no migration either: both columns are "null, or valid", so
   requiring a name is a form rule. A NOT NULL would have refused to build
   against the reports already filed without one. Management interest LEVEL was collected
