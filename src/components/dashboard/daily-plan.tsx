@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import Link from "next/link";
-import { CheckCircle2Icon, MapPinOffIcon, PlusIcon, XIcon } from "lucide-react";
+import { CheckCircle2Icon, PlusIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,7 @@ import {
   visitMinutes,
   visitStatusOf,
 } from "@/lib/validation/checkin";
+import { FormNotice } from "@/components/form-notice";
 
 /**
  * Today's plan, which the Dashboard owns (see CLAUDE.md).
@@ -242,12 +243,7 @@ export function DailyPlan({
             </Button>
 
             {error && (
-              <p
-                role="alert"
-                className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
-              >
-                {error}
-              </p>
+              <FormNotice message={error} />
             )}
           </form>
         ) : (
@@ -310,12 +306,14 @@ export function DailyPlan({
                           <Link href={`/log?plan=${entry.id}`}>Continue</Link>
                         </Button>
                       </div>
-                      {entry.checkinLocationManual && (
-                        <Badge variant="warning">
-                          <MapPinOffIcon className="size-3" aria-hidden />
-                          No location
-                        </Badge>
-                      )}
+                      {/* The "No location" badge used to sit here, on the
+                          rep's own in-progress entry. It told them nothing they
+                          could act on — they had already typed the reason
+                          themselves a moment earlier — and a warning badge
+                          against your own visit for the rest of the morning
+                          reads as a mark against you. Admins still see it, on
+                          the Still checked in panel and in the activity report,
+                          where somebody can actually do something about it. */}
                     </div>
                   )}
                   {/* An assignment is not the rep's to dismiss — it came from

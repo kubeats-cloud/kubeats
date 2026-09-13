@@ -27,6 +27,7 @@ import {
   fileRejectionReason,
   formatFileSize,
 } from "@/lib/validation/material";
+import { FormNotice } from "@/components/form-notice";
 
 /**
  * Uploading a material.
@@ -275,12 +276,7 @@ export function MaterialUploadForm({
           </p>
         )}
         {upload.status === "failed" && (
-          <p
-            role="alert"
-            className="text-danger-subtle-foreground bg-danger-subtle rounded-md px-3 py-2 text-xs"
-          >
-            {upload.message}
-          </p>
+          <FormNotice message={upload.message} />
         )}
       </div>
 
@@ -293,14 +289,7 @@ export function MaterialUploadForm({
         {isPending ? "Saving…" : "Add to the library"}
       </Button>
 
-      {serverState.error && (
-        <p
-          role="alert"
-          className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
-        >
-          {serverState.error}
-        </p>
-      )}
+      {serverState.error && <FormNotice message={serverState.error} />}
       {saved && (
         <div className="bg-success-subtle text-success-subtle-foreground space-y-2 rounded-md px-3 py-2 text-sm">
           <p>Added to the library. Every rep can see it now.</p>

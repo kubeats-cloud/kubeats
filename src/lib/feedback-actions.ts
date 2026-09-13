@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logError, toFriendlyMessage } from "@/lib/errors";
+import { CHECK_FIELDS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
 import {
   feedbackFieldsSchema,
@@ -82,7 +83,7 @@ export async function submitFeedback(
   const parsed = feedbackSchema.safeParse(feedbackFormDataToInput(formData));
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted fields.",
+      error: CHECK_FIELDS,
       fieldErrors: visitFieldErrors(parsed.error),
     };
   }
@@ -172,7 +173,7 @@ export async function logAndFileVisit(
   // second problem after correcting the first.
   if (!visitParsed.success || !feedbackParsed.success) {
     return {
-      error: "Please check the highlighted fields.",
+      error: CHECK_FIELDS,
       fieldErrors: {
         ...(visitParsed.success ? {} : visitFieldErrors(visitParsed.error)),
         ...(feedbackParsed.success ? {} : visitFieldErrors(feedbackParsed.error)),
@@ -242,7 +243,7 @@ export async function logAndFileVisit(
       error:
         (known ??
           toFriendlyMessage(closeError, "We could not file this.")) +
-        " Your visit was saved — open it again from the Dashboard to finish.",
+        " Your visit was saved. Open it again from the Dashboard to finish.",
       fieldErrors: {},
     };
   }

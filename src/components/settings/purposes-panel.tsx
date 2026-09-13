@@ -12,6 +12,7 @@ import { addPurpose } from "@/lib/admin-actions";
 import { EMPTY_ADMIN_STATE, type AdminState } from "@/lib/admin-form-state";
 import { fieldErrorsFrom, purposeSchema } from "@/lib/validation/admin";
 import type { PurposeRow } from "@/lib/admin";
+import { CHECK_FIELD, FormNotice } from "@/components/form-notice";
 
 /**
  * The meeting purposes a rep picks from when planning today's visits.
@@ -37,7 +38,7 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
     if (!parsed.success) {
       event.preventDefault();
       setClientState({
-        error: "Please check the highlighted field.",
+        error: CHECK_FIELD,
         fieldErrors: fieldErrorsFrom(parsed.error),
       });
       return;
@@ -92,14 +93,7 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
             </Button>
           </div>
           {fieldError && <p className="text-danger text-xs">{fieldError}</p>}
-          {error && (
-            <p
-              role="alert"
-              className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
-            >
-              {error}
-            </p>
-          )}
+          {error && <FormNotice message={error} />}
           {serverState.ok && serverState.message && (
             <p
               role="status"

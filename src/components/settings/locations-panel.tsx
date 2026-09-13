@@ -18,6 +18,7 @@ import { addArea, addCity, addState } from "@/lib/admin-actions";
 import { EMPTY_ADMIN_STATE, type AdminState } from "@/lib/admin-form-state";
 import { nameLooksValid } from "@/lib/validation/admin";
 import type { StateNode } from "@/lib/locations";
+import { FormNotice } from "@/components/form-notice";
 
 /**
  * The State → City → Area tree, one level at a time.
@@ -251,14 +252,7 @@ function AddRow({
       {state.fieldErrors[inputName] && (
         <p className="text-danger text-xs">{state.fieldErrors[inputName]}</p>
       )}
-      {error && (
-        <p
-          role="alert"
-          className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
-        >
-          {error}
-        </p>
-      )}
+      {error && <FormNotice message={error} />}
       {state.ok && state.message && (
         <p
           role="status"

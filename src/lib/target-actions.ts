@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { logError, toFriendlyMessage } from "@/lib/errors";
+import { CHECK_NUMBERS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
 import {
   METRIC_KEYS,
@@ -83,7 +84,7 @@ async function writeTargets(
   const parsed = targetsSchema.safeParse(targetsFormDataToInput(formData));
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted numbers.",
+      error: CHECK_NUMBERS,
       fieldErrors: weeklyFieldErrors(parsed.error),
     };
   }

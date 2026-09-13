@@ -48,7 +48,7 @@ export default async function PendingPage() {
         description={
           admin
             ? "Sessions and campus visits the team has set but not yet completed."
-            : "What you still owe. Reports first, then the visits you have set."
+            : "What is still open. Reports first, then the visits you have set."
         }
       />
 
@@ -66,8 +66,8 @@ export default async function PendingPage() {
                     {activityLabelFor(visit.activity)} · {formatDate(visit.date)}
                   </p>
                   <p className="text-muted-foreground mt-3 text-sm">
-                    The visit is saved. Only the report is missing — you will be
-                    checked out when you finish it.
+                    The visit is saved. Only the report is missing, and
+                    finishing it checks you out.
                   </p>
 
                   {/*

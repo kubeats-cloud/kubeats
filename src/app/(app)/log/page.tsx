@@ -14,7 +14,7 @@ import {
   openLoopsAt,
 } from "@/lib/visits";
 import { visitStatusOf } from "@/lib/validation/checkin";
-import { formatTime, todayISO } from "@/lib/dates";
+import { todayISO } from "@/lib/dates";
 
 export const metadata = { title: "Log Visit" };
 
@@ -86,18 +86,13 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
       target.checkoutMissing === false;
 
     const openLoops = await openLoopsAt(user.id, target.institute_id);
-    const arrivedAt = target.checkinAt ? formatTime(target.checkinAt) : null;
 
     return (
       <PageColumn>
         <PageHeader
           eyebrow="Finish this visit"
           title="How did it go?"
-          description={
-            arrivedAt
-              ? `${target.instituteName} · arrived ${arrivedAt}`
-              : target.instituteName
-          }
+          description={target.instituteName}
         />
         <FeedbackOnlyForm
           visitId={existing.id}
@@ -134,19 +129,17 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
 
   const openLoops = await openLoopsAt(user.id, entry.institute_id);
 
-  // "Meeting time" is the arrival, server-stamped — never a field the rep types.
-  const arrived = entry.checkinAt ? formatTime(entry.checkinAt) : null;
-
+  /*
+    NO ARRIVAL TIME IN THE HEADER. Both of these headers used to read
+    "St Xavier's · arrived 10:42". The time is still stamped, server-side, at
+    the moment of check-in and it still appears on the finished report and in
+    the admin's activity report. It is simply not read back to the rep while
+    they are standing in the building: a clock against your name mid-task is
+    the sort of thing that makes a tool feel like it is timing you.
+  */
   return (
     <PageColumn>
-      <PageHeader
-        title="Log a visit"
-        description={
-          arrived
-            ? `${entry.instituteName} · arrived ${arrived}`
-            : entry.instituteName
-        }
-      />
+      <PageHeader title="Log a visit" description={entry.instituteName} />
       <LogVisitForm userId={user.id} plan={entry} openLoops={openLoops} />
     </PageColumn>
   );

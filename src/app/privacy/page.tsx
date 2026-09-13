@@ -63,7 +63,7 @@ export default function PrivacyPage() {
         <Section title="Who this is about">
           <p>
             Two groups of people appear in this app. The first is the team
-            itself — the sales representatives and administrators who use it.
+            itself: the sales representatives and administrators who use it.
             The second is the staff at the schools, coaching centres and
             consultancies the team visits, whose names and contact numbers reps
             record so that a conversation can be picked up again later.
@@ -73,33 +73,33 @@ export default function PrivacyPage() {
         <Section title="What is recorded about the team">
           <ul className="list-disc space-y-1.5 pl-5">
             <li>
-              <strong>Your account</strong> — your name, your work email
+              <strong>Your account</strong>: your name, your work email
               address, your role, and which campus you work from. Accounts are
               created by an administrator; you cannot register yourself, and you
               cannot change your own role or campus.
             </li>
             <li>
-              <strong>Where you were</strong> — when you check in at an
+              <strong>Where you were</strong>: when you check in at an
               institute and when you check out, the app records the
               coordinates your phone reports and how accurate that reading was.
               If your phone cannot get a location, you type a short reason
               instead and that reason is recorded and shown to administrators.
             </li>
             <li>
-              <strong>A photograph of each visit</strong> — taken at the time,
+              <strong>A photograph of each visit</strong>: taken at the time,
               not chosen from your gallery afterwards. The coordinates and the
               time are read at the moment you attach it and written into the
               image itself, along with an approximate area name.
             </li>
             <li>
-              <strong>What you did</strong> — the institute, the activity, the
+              <strong>What you did</strong>: the institute, the activity, the
               status you set, your notes, any head counts, the follow-up date
               and time you set, and the name and optional mobile number of the
               person you met. Plus the weekly targets you set for yourself and
               what you achieved against them.
             </li>
             <li>
-              <strong>Times</strong> — when each of the above was recorded.
+              <strong>Times</strong>: when each of the above was recorded.
             </li>
           </ul>
         </Section>
@@ -110,7 +110,7 @@ export default function PrivacyPage() {
             boards it follows, and the names and mobile numbers of the
             principal and the decision-maker. For each visit: the name of the
             person met, and their mobile number if the rep was given one. The
-            mobile number is optional — a visit can be recorded without it.
+            mobile number is optional, so a visit can be recorded without it.
           </p>
           <p>
             This is business contact information, collected so that a rep can
@@ -152,7 +152,7 @@ export default function PrivacyPage() {
               photo cannot be recovered.
             </li>
             <li>
-              <strong>Everything else is kept indefinitely</strong> — the visit
+              <strong>Everything else is kept indefinitely</strong>: the visit
               records, the coordinates, the timestamps, the notes and the
               contact details. The visit row survives its photograph, so an
               older visit will show that a photo existed but is no longer
@@ -177,7 +177,7 @@ export default function PrivacyPage() {
             public PIN code service is sent a PIN code when a rep is filling in
             an institute&rsquo;s address. Neither is sent a name, an email
             address or anything else identifying a person, and the area name is
-            decoration — if the lookup fails, the visit still saves.
+            decoration: if the lookup fails, the visit still saves.
           </p>
         </Section>
 

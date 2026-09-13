@@ -90,6 +90,9 @@ type PhotoState =
  * answers at all cannot hold a photo hostage.
  */
 
+/** What the rep reads while the photo is being made ready. */
+const PREPARING = "Preparing your photo…";
+
 const GEO_MESSAGES: Record<number, string> = {
   1: "Location permission was denied. You can still save the visit.",
   2: "Your location is not available right now. You can still save the visit.",
@@ -137,7 +140,7 @@ export function CaptureFields({ userId }: { userId: string }) {
       setGeo({
         status: "failed",
         message:
-          "This device cannot share a location — it may have no GPS. You can still save the visit.",
+          "This device cannot share a location. You can still save the visit.",
       });
       return;
     }
@@ -205,13 +208,18 @@ export function CaptureFields({ userId }: { userId: string }) {
   const processAndUpload = useCallback(
     async (image: Blob) => {
       try {
-        setPhoto({ status: "working", step: "Reading your location…" });
+        // ONE WORDING FOR THE THREE PREPARATION STEPS, deliberately. They used
+        // to read "Reading your location…", "Naming the area…", "Stamping…",
+        // which narrated the location capture to the rep a step at a time. The
+        // steps themselves are unchanged and still run in this order; only what
+        // is printed while they run has changed.
+        setPhoto({ status: "working", step: PREPARING });
         const fix = await freshFix();
 
-        setPhoto({ status: "working", step: "Naming the area…" });
+        setPhoto({ status: "working", step: PREPARING });
         const place = await namePlace(fix);
 
-        setPhoto({ status: "working", step: "Stamping…" });
+        setPhoto({ status: "working", step: PREPARING });
         const prepared = await preparePhoto(image, {
           latitude: fix?.latitude ?? null,
           longitude: fix?.longitude ?? null,
@@ -369,9 +377,8 @@ export function CaptureFields({ userId }: { userId: string }) {
               </Button>
             </div>
             <p className="text-muted-foreground text-xs">
-              Required. Your location and the time are stamped onto the picture
-              before it is uploaded — read from this device now, whichever way
-              you add it.
+              Required. The date, time and place are added to the picture
+              automatically when you attach it.
             </p>
           </>
         )}
@@ -428,8 +435,7 @@ export function CaptureFields({ userId }: { userId: string }) {
                 <DialogHeader>
                   <DialogTitle className="text-base">Your photo</DialogTitle>
                   <DialogDescription>
-                    Check the stamp along the bottom edge reads correctly before
-                    you save.
+                    Have a look before you save.
                   </DialogDescription>
                 </DialogHeader>
                 {/* eslint-disable-next-line @next/next/no-img-element */}

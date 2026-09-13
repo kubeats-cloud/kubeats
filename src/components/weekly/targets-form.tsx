@@ -26,6 +26,7 @@ import {
   toneFor,
   weeklyFieldErrors,
 } from "@/lib/validation/weekly";
+import { CHECK_NUMBERS, FormNotice } from "@/components/form-notice";
 
 /**
  * The rep's commitment for one week.
@@ -79,7 +80,7 @@ export function TargetsForm({
     if (!parsed.success) {
       event.preventDefault();
       setClientState({
-        error: "Please check the highlighted numbers.",
+        error: CHECK_NUMBERS,
         fieldErrors: weeklyFieldErrors(parsed.error),
       });
       setConfirming(false);
@@ -173,14 +174,7 @@ export function TargetsForm({
         </CardContent>
       </Card>
 
-      {error && (
-        <p
-          role="alert"
-          className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
-        >
-          {error}
-        </p>
-      )}
+      {error && <FormNotice message={error} />}
 
       {!locked && (
         <div className="space-y-3">

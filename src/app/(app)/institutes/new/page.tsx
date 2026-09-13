@@ -14,7 +14,7 @@ export default async function NewInstitutePage() {
     <PageColumn>
       <PageHeader
         title="Register institute"
-        description="Rule 1: an institute has to exist here before anything can be logged against it."
+        description="An institute has to be registered here before anything can be logged against it."
         action={
           <Button asChild variant="ghost" className="h-11">
             <Link href="/institutes">Cancel</Link>

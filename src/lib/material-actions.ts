@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
 import { logError, toFriendlyMessage } from "@/lib/errors";
+import { CHECK_FIELDS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
 import {
   fileRejectionReason,
@@ -43,7 +44,7 @@ export async function createMaterial(
   if (!parsed.success) {
     const fieldErrors = materialFieldErrors(parsed.error);
     return {
-      error: "Please check the highlighted fields.",
+      error: CHECK_FIELDS,
       fieldErrors,
     };
   }

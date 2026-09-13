@@ -72,7 +72,7 @@ export default async function ReportPage(props: PageProps<"/report">) {
         description={
           viewingOther
             ? "Their complete field activity for the period."
-            : "Everywhere you have been and everything you have logged, by day, month or year."
+            : "Your visits and what came of them, by day, month or year."
         }
       />
 

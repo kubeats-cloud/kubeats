@@ -6,6 +6,7 @@ import { logError, toFriendlyMessage } from "@/lib/errors";
 import { todayISO } from "@/lib/visits";
 import { requireAdmin } from "@/lib/admin";
 import { assignVisitSchema } from "@/lib/validation/closing-report";
+import { CHECK_FIELDS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
 import {
   dailyPlanFormDataToInput,
@@ -101,7 +102,7 @@ export async function assignVisit(
   });
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted fields.",
+      error: CHECK_FIELDS,
       fieldErrors: visitFieldErrors(parsed.error),
     };
   }

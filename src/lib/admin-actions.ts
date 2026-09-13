@@ -21,6 +21,7 @@ import {
   stateSchema,
   textOf,
 } from "@/lib/validation/admin";
+import { CHECK_FIELD, CHECK_FIELDS } from "@/lib/visit-form-state";
 
 /**
  * Everything an admin can change, and nothing a rep can.
@@ -54,7 +55,7 @@ export async function addPurpose(
   const parsed = purposeSchema.safeParse({ label: textOf(formData, "label") });
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted field.",
+      error: CHECK_FIELD,
       fieldErrors: fieldErrorsFrom(parsed.error),
     };
   }
@@ -100,7 +101,7 @@ export async function addState(
   const parsed = stateSchema.safeParse({ name: textOf(formData, "name") });
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted field.",
+      error: CHECK_FIELD,
       fieldErrors: fieldErrorsFrom(parsed.error),
     };
   }
@@ -134,7 +135,7 @@ export async function addCity(
   });
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted fields.",
+      error: CHECK_FIELDS,
       fieldErrors: fieldErrorsFrom(parsed.error),
     };
   }
@@ -168,7 +169,7 @@ export async function addArea(
   });
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted fields.",
+      error: CHECK_FIELDS,
       fieldErrors: fieldErrorsFrom(parsed.error),
     };
   }
@@ -274,7 +275,7 @@ export async function createMember(
   });
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted fields.",
+      error: CHECK_FIELDS,
       fieldErrors: fieldErrorsFrom(parsed.error),
     };
   }

@@ -82,7 +82,7 @@ describe("describeAccuracy", () => {
     expect(describeAccuracy(12)).toBe("±12 m (good)");
     expect(describeAccuracy(400)).toBe("±400 m (approximate)");
     expect(describeAccuracy(3200)).toBe(
-      "±3.2 km (network location — likely not your real spot)",
+      "±3.2 km (network location, so it may be well off)",
     );
     expect(describeAccuracy(null)).toBe("Accuracy unknown");
   });

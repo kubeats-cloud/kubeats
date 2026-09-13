@@ -303,8 +303,8 @@ export function FeedbackFields({
               onChange={(e) => set("studentsReached", e.target.value)}
             />
             <p className="text-muted-foreground text-xs">
-              How many of them actually took part — asked something, joined in.
-              Never more than the number present.
+              How many of them actually took part: asked something, joined
+              in. Never more than the number present.
             </p>
             {err("students_reached")}
           </div>
