@@ -213,6 +213,78 @@ describe("every way the lookup can go wrong ends in a clean fallback", () => {
   });
 });
 
+describe("a rejected token is dropped, so the next lookup re-mints one", () => {
+  beforeEach(() => {
+    process.env.MAPPLS_CLIENT_ID = "an-id";
+    process.env.MAPPLS_CLIENT_SECRET = "a-secret";
+  });
+
+  it("recognises Mappls's 400 + invalid_token, which is NOT a 401", async () => {
+    // THE BUG THIS GUARDS, found by probing the live endpoint rather than by
+    // reading the docs. A dead Mappls token comes back as
+    //   {"responsecode":"400","error_code":"invalid_token", ...}
+    // so the obvious `status === 401` check never fired. A token revoked or
+    // rotated early would have stayed cached until its nominal expiry, every
+    // lookup would have been refused, and every one would have fallen back to
+    // OpenStreetMap — silently, with the client still paying for Mappls.
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "stale", expires_in: 86400 }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { responsecode: "400", error_code: "invalid_token", error: "invalid_token" },
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ access_token: "fresh", expires_in: 86400 }))
+      .mockResolvedValueOnce(jsonResponse({ results: [{ city: "Ahmedabad", state: "Gujarat" }] }));
+
+    expect(await reverseGeocode(23.0225, 72.5714)).toEqual({ ok: false });
+    // The second lookup must mint a NEW token rather than reuse the dead one.
+    expect(await reverseGeocode(23.0325, 72.5814)).toEqual({
+      ok: true,
+      label: "Ahmedabad, Gujarat",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+    expect(String(fetchSpy.mock.calls[2][0]), "a fresh token was minted").toContain(
+      "oauth/token",
+    );
+  });
+
+  it("still honours a plain 401", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "stale", expires_in: 86400 }))
+      .mockResolvedValueOnce(jsonResponse({ error: "unauthorized" }, 401))
+      .mockResolvedValueOnce(jsonResponse({ access_token: "fresh", expires_in: 86400 }))
+      .mockResolvedValueOnce(jsonResponse({ results: [{ city: "Ahmedabad", state: "Gujarat" }] }));
+
+    await reverseGeocode(23.0225, 72.5714);
+    await reverseGeocode(23.0325, 72.5814);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps the token when the failure is nothing to do with it", async () => {
+    // A 429 or a 500 says nothing about the credential. Throwing the token away
+    // on every hiccup would mean a token round trip per rate-limited lookup.
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse({ access_token: "good", expires_in: 86400 }))
+      .mockResolvedValueOnce(jsonResponse({ message: "rate limited" }, 429))
+      .mockResolvedValueOnce(jsonResponse({ results: [{ city: "Ahmedabad", state: "Gujarat" }] }));
+
+    expect(await reverseGeocode(23.0225, 72.5714)).toEqual({ ok: false });
+    expect(await reverseGeocode(23.0325, 72.5814)).toEqual({
+      ok: true,
+      label: "Ahmedabad, Gujarat",
+    });
+
+    // Three calls, not four: one token, two lookups.
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("the timeout budget", () => {
   it("leaves room for OpenStreetMap inside the browser's own deadline", () => {
     // THE REGRESSION THIS GUARDS. Giving Mappls its own full 3.5s would make

@@ -122,6 +122,43 @@ async function fetchWithin(
 }
 
 /**
+ * Throw away the cached token when Mappls says it is no good.
+ *
+ * ⚠ MAPPLS ANSWERS A DEAD TOKEN WITH 400, NOT 401. Verified against the live
+ * endpoint, which returns
+ *
+ *   {"responsecode":"400","error_code":"invalid_token",
+ *    "error_description":"Token was not recognised : ..."}
+ *
+ * This function exists because the obvious version of it was wrong. It checked
+ * `status === 401`, which is what a reader expects an expired bearer token to
+ * produce and is not what this service does. The consequence was quiet and
+ * long-lived rather than loud: a token revoked or rotated before its nominal
+ * expiry would stay in the cache, every lookup from that isolate would be
+ * refused, and every one of them would fall back to OpenStreetMap. Nothing
+ * would break, nobody would see an error, and the client would simply have paid
+ * for a service that had silently stopped being used.
+ *
+ * So the status is not trusted on its own: a 401 counts, and so does any body
+ * that names the token as the problem.
+ */
+async function dropTokenIfRejected(response: Response): Promise<void> {
+  if (response.status === 401) {
+    forgetMapplsToken();
+    return;
+  }
+
+  // These error bodies are a couple of hundred bytes. Reading one on a failure
+  // path costs nothing, and a body we cannot read simply teaches us nothing.
+  try {
+    const body = await response.text();
+    if (body.includes("invalid_token")) forgetMapplsToken();
+  } catch {
+    // Nothing to learn; the lookup has already failed and falls back either way.
+  }
+}
+
+/**
  * A bearer token, from the cache or freshly minted.
  *
  * Null on any failure, which the caller reads as "use the other service". A
@@ -241,15 +278,13 @@ export async function reverseGeocode(
 
   if (!response) return { ok: false };
 
-  // A 401 means the token went stale early; drop it so the next request mints a
-  // fresh one rather than reusing a dead one until its nominal expiry.
-  if (response.status === 401) {
-    forgetMapplsToken();
+  // Any non-2xx is "no answer": fall through to OpenStreetMap, and never cache
+  // it as though it were one. 429 in particular is Mappls asking us to back
+  // off, exactly as Nominatim's is.
+  if (!response.ok) {
+    await dropTokenIfRejected(response);
     return { ok: false };
   }
-  // 429 is Mappls asking us to back off, and like Nominatim's it must not be
-  // cached as though it were an answer.
-  if (!response.ok) return { ok: false };
 
   let body: ReverseResponse | null = null;
   try {
