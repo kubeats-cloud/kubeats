@@ -96,7 +96,7 @@ Editor → New query → paste the whole file → Run). They are idempotent.
 | `0004_photo_retention_schedule.sql` | Enables pg_cron and pg_net, stores credentials in Vault, schedules the nightly purge. | Optional — without it photos are never deleted automatically |
 | `0005_closing_report_and_assignment.sql` | The closing report's columns, `visit_people`, and admin-assigned plan entries. | Yes |
 | `0006_photo_required.sql` | Rule 12 — makes the visit photo mandatory and final: `log_visit()` raises `FO007`, the `visits_photo_required` CHECK refuses a direct insert, and the `visits_photo_final` trigger raises `FO008` on any later change to `photo_url`. | Yes |
-| `0007_place_cache.sql` | Caches reverse-geocoded area names for the photo stamp, so OpenStreetMap is asked once per neighbourhood. | Optional — without it the stamp still works, it just re-asks every time |
+| `0007_place_cache.sql` | Caches reverse-geocoded area names for the photo stamp, so the geocoder is asked once per neighbourhood. Shared by both providers. | Optional — without it the stamp still works, it just re-asks every time |
 | `0008_ist_calendar_day.sql` | Adds `public.app_today()` and makes "today" the Asia/Kolkata calendar day everywhere the database decides one — the `visits.date` and `daily_plans.date` defaults, and `log_visit()`. | Yes — without it the database and the app disagree about the day between 00:00 and 05:30 IST, and the meeting gate rejects meetings that were properly planned |
 
 > **0004 has two placeholders you must fill in — in the SQL editor only.**
@@ -264,6 +264,7 @@ produces a Worker that deploys cleanly and then 500s on every request.
 | `NEXT_PUBLIC_SUPABASE_URL` | **Build** variable | Baked into the browser bundle at compile time |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Build** variable | Same |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Secret** (runtime) | Never inlined; read per request |
+| `MAPPLS_CLIENT_ID` / `MAPPLS_CLIENT_SECRET`, or `MAPPLS_REST_KEY` | **Secret** (runtime), optional | Better Indian area names on the photo stamp. Unset means free OpenStreetMap, which is the supported default. `docs/MAPMYINDIA-SETUP.md` |
 
 **The `NEXT_PUBLIC_*` pair must exist at build time, and changing them requires
 a rebuild — not a restart.** They are public by design (the anon key is

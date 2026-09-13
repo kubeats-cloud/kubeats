@@ -4,17 +4,40 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { placeLookupContact } from "@/lib/env";
 import { cellFor, formatPlace, type NominatimAddress } from "@/lib/places";
+import {
+  MAPPLS_TIMEOUT_MS,
+  mapplsConfigured,
+  reverseGeocode as mapplsReverseGeocode,
+} from "@/lib/mappls";
 import { logError } from "@/lib/errors";
 
 /**
- * Reverse geocoding for the photo stamp — cache first, then OpenStreetMap.
+ * Reverse geocoding for the photo stamp: cache, then Mappls, then OpenStreetMap.
  *
- * Server-side on purpose, for three reasons. Nominatim's usage policy asks for
- * an identifying User-Agent, which a browser will not let us set. It asks that
- * you not hammer it, which we can only promise if the requests come from one
- * place we control. And doing it here means the answer lands in a shared cache,
- * so twenty reps working the same neighbourhoods ask the service once between
- * them rather than once each.
+ * THE CHAIN, and every step of it is allowed to fail:
+ *
+ *   1. place_cache   a hit answers without touching anybody's API, including a
+ *                    remembered "nothing there".
+ *   2. Mappls        better names in India, and only when credentials are set.
+ *   3. Nominatim     free, no account, and exactly what ran here before.
+ *   4. nothing       the photo stamps with coordinates and time alone.
+ *
+ * WITH NO MAPPLS CREDENTIALS SET THIS IS THE OLD ROUTE, step for step. Step 2
+ * is skipped without a fetch, Nominatim keeps its full timeout, and the answer
+ * is identical. That is the supported default, not a degraded one.
+ *
+ * Server-side on purpose, for four reasons now. Nominatim's usage policy asks
+ * for an identifying User-Agent, which a browser will not let us set. It asks
+ * that you not hammer it, which we can only promise if the requests come from
+ * one place we control. Doing it here means the answer lands in a shared cache,
+ * so twenty reps working the same neighbourhoods ask once between them rather
+ * than once each. And the Mappls credentials are a server-only secret that must
+ * never be inlined into the browser bundle, which is also why there is no
+ * Mappls SDK anywhere in this repository.
+ *
+ * NONE OF THIS TOUCHES THE POSITION. The coordinates and the accuracy come from
+ * the device and are already decided by the time anything here runs; all this
+ * decides is what the place is CALLED.
  *
  * POST rather than GET with the coordinates in the path: this is somebody's
  * live location, and a URL ends up in access logs and browser history. The body
@@ -29,10 +52,24 @@ import { logError } from "@/lib/errors";
 const NOMINATIM = "https://nominatim.openstreetmap.org/reverse";
 
 /**
+ * The WHOLE route, both providers included, gets this long.
+ *
  * Short on purpose. The stamp waits for this, so it is a delay a rep feels;
  * better a photo with no area name than a photo they waited ten seconds for.
+ * The browser gives up at PLACE_TIMEOUT_MS (4s, geolocate.ts), so this has to
+ * stay under it.
+ *
+ * ADDING A SECOND PROVIDER DID NOT ADD A SECOND TIMEOUT. That would have been
+ * the easy mistake: 3.5s for Mappls plus 3.5s for Nominatim is a 7s worst case,
+ * the browser aborts at 4s, and every photo taken somewhere Mappls is slow
+ * would wait longer and then get nothing at all. Instead the existing budget is
+ * SPLIT — 1.5s for Mappls, the remainder for Nominatim — so the worst case is
+ * exactly what it was before.
  */
 const TIMEOUT_MS = 3500;
+
+/** What is left for Nominatim after a full-length Mappls attempt. */
+const NOMINATIM_TIMEOUT_MS = TIMEOUT_MS - MAPPLS_TIMEOUT_MS;
 
 const coordsSchema = z.object({
   latitude: z.number().finite().min(-90).max(90),
@@ -58,9 +95,10 @@ function userAgent(): string {
 async function lookup(
   latitude: number,
   longitude: number,
+  budgetMs: number,
 ): Promise<{ ok: true; label: string | null } | { ok: false }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), budgetMs);
 
   try {
     const url =
@@ -144,12 +182,42 @@ export async function POST(request: Request) {
     });
   }
 
-  // 2. Ask OpenStreetMap.
-  const result = await lookup(latitude, longitude);
+  // 2. Ask Mappls, if the client has given us credentials. Skipped entirely
+  //    otherwise, so an unconfigured deployment spends no time here at all and
+  //    Nominatim below keeps the whole budget.
+  const configured = mapplsConfigured();
+  const startedAt = Date.now();
+  let result: { ok: true; label: string | null } | { ok: false } = { ok: false };
+  let source: "mappls" | "openstreetmap" = "mappls";
+
+  if (configured) {
+    result = await mapplsReverseGeocode(latitude, longitude, MAPPLS_TIMEOUT_MS);
+  }
+
+  // 3. Fall back to OpenStreetMap. This runs whenever Mappls had nothing to
+  //    say, for ANY reason: no credentials, a refused token, a timeout, a rate
+  //    limit, an unrecognised response. It gets whatever is left of the budget,
+  //    and never less than its own share.
+  if (!result.ok) {
+    source = "openstreetmap";
+    const spent = configured ? Date.now() - startedAt : 0;
+    result = await lookup(
+      latitude,
+      longitude,
+      Math.max(NOMINATIM_TIMEOUT_MS, TIMEOUT_MS - spent),
+    );
+  }
+
+  // 4. Nobody could name it. Not an error: the caller omits the line, the photo
+  //    still carries its coordinates and time, and the visit still saves.
   if (!result.ok) return miss("We could not name that area just now.");
 
-  // 3. Remember the answer, including a definite "nothing here". A failure
+  // 5. Remember the answer, including a definite "nothing here". A failure
   //    never reaches this line, so a timeout is not cached as an absence.
+  //    The label is stored WITHOUT recording which service produced it: both
+  //    write the same format, and a cache keyed on the answer rather than on
+  //    its source is what lets credentials be added or removed later without
+  //    invalidating a single row.
   const written = await db
     .from("place_cache")
     .upsert(
@@ -158,9 +226,5 @@ export async function POST(request: Request) {
     );
   if (written.error) logError("place:cache-write", written.error);
 
-  return NextResponse.json({
-    ok: true as const,
-    label: result.label,
-    source: "openstreetmap" as const,
-  });
+  return NextResponse.json({ ok: true as const, label: result.label, source });
 }

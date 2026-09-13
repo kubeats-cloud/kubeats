@@ -23,6 +23,17 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      /**
+       * `server-only` is a marker package whose whole job is to THROW when it
+       * is imported outside a server component, which is exactly what it does
+       * under Vitest. Aliasing it to the empty module it already ships for the
+       * react-server condition lets a server module be unit tested without
+       * weakening the guard: Next still resolves the real package at build
+       * time, so a client component importing one is still a build error.
+       */
+      "server-only": fileURLToPath(
+        new URL("./node_modules/server-only/empty.js", import.meta.url),
+      ),
     },
   },
 });

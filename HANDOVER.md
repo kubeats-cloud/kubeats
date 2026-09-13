@@ -12,6 +12,7 @@ document that has the full detail; this page is the index, not a copy of them.
 | **Weekly backup + one restore rehearsal** | No automatic backup exists on the free tier; a mistaken delete is otherwise unrecoverable | `docs/BACKUP-RESTORE.md`, "For the client" |
 | **Uptime monitoring** | Nothing polls `/api/health` today, so an outage goes unnoticed. Point a monitor at it for liveness; set `HEALTH_CHECK_TOKEN` if you also want it to check the database | `docs/PHASE-10-Production-Readiness-Audit.md` (M2), and "Security findings & posture" below for F2 |
 | **Deploy size ceiling** | ~123 KiB headroom under the 3072 KiB free-plan limit (measured, noindex/privacy branch); a big feature could still need the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
+| **Mappls (MapmyIndia) key** *(optional)* | Better area names on the photo stamp in India. Entirely optional: unset, the app uses free OpenStreetMap exactly as it does today, and nothing degrades. Obtain from the Mappls console and set as a Cloudflare **Secret** | `docs/MAPMYINDIA-SETUP.md` |
 | **Set the `security.txt` contact** | The file is live but has **no** contact yet, so finding F5 is not closed. Needs the role address the custom domain unlocks | This document, "Security findings & posture" |
 
 None of these is an application code change. They are operational decisions for whoever owns the
