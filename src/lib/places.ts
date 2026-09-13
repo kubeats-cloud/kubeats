@@ -41,6 +41,24 @@ export interface NominatimAddress {
 export const MAX_LABEL_LENGTH = 80;
 
 /**
+ * Is this actually a name, or just punctuation a geocoder handed us?
+ *
+ * ⚠ NOT HYPOTHETICAL. Ola returns `sublocality: ":"` for the Karnavati
+ * University campus at 23.2039,72.5843 — its parser choked on the postal line
+ * "At.&Po.: Uvarsad" and kept the colon. Without this guard that goes straight
+ * onto a rep's photograph as ":, Uvarsad, Gujarat", which is burnt into the
+ * image and cached for every later visit to the same square.
+ *
+ * The test is "contains at least one letter or digit, in any script", so
+ * Devanagari and Gujarati names pass exactly as Latin ones do. It lives here,
+ * on the shared join, rather than in one provider's parser: Nominatim is just
+ * as capable of handing back a stray character, and a label is a label.
+ */
+function isName(value: string): boolean {
+  return /[\p{L}\p{N}]/u.test(value);
+}
+
+/**
  * Locality, settlement, region → one label. THE ONLY PLACE A LABEL IS BUILT.
  *
  * Both providers end here, and that is the whole point of it being its own
@@ -61,7 +79,7 @@ export function joinPlaceParts(
   const kept: string[] = [];
   for (const part of parts) {
     const trimmed = part?.trim();
-    if (!trimmed) continue;
+    if (!trimmed || !isName(trimmed)) continue;
     if (kept.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) continue;
     kept.push(trimmed);
   }
@@ -119,9 +137,14 @@ function componentFor(
   types: readonly string[],
 ): string | null {
   for (const type of types) {
-    const match = components.find((component) => component.types?.includes(type));
-    const name = match?.long_name?.trim() ?? match?.short_name?.trim();
-    if (name) return name;
+    for (const component of components) {
+      if (!component.types?.includes(type)) continue;
+      const name = component.long_name?.trim() || component.short_name?.trim();
+      // A junk value must not CONSUME the slot. The colon Ola returns as a
+      // sublocality has to fall through to the next type, or the best answer
+      // available (there, "Karnavati University") is lost to a stray character.
+      if (name && isName(name)) return name;
+    }
   }
   return null;
 }
@@ -142,12 +165,25 @@ function componentFor(
  * not fit. What the stamp wants is where this is, in three words.
  *
  * The type names are Google's vocabulary, which Ola mirrors:
- *   neighborhood / sublocality        the closest named thing
+ *   sublocality*, neighborhood        the closest named thing
  *   locality                          the settlement
  *   administrative_area_level_2       the district, when there is no locality
  *   administrative_area_level_1       the state
  * `postal_code` and `country` are deliberately ignored: a PIN code is not a
  * place name, and every visit is in the same country.
+ *
+ * SUBLOCALITY BEATS NEIGHBORHOOD, and that order was settled by running real
+ * coordinates through the live API rather than by reading the docs. Ola's
+ * `neighborhood` is often a block-level name that means nothing on its own:
+ *
+ *   Gandhinagar   sublocality "Sector 17"     neighborhood "Harshithanagar"
+ *   Ahmedabad     sublocality "Ellis Bridge"  neighborhood "Madalpur Gam"
+ *   Bengaluru     sublocality "Banashankari"  neighborhood "Block 5 Phase 3"
+ *
+ * In every case the sublocality is the name a rep would recognise and the
+ * neighbourhood is the one that needs its parent to make sense. Taking
+ * `neighborhood` first, which is what the documented ordering suggested, would
+ * have stamped the right-hand column onto every photo.
  */
 export function formatOlaPlace(result: OlaResult | null | undefined): string | null {
   const components = result?.address_components;
@@ -155,9 +191,12 @@ export function formatOlaPlace(result: OlaResult | null | undefined): string | n
 
   return joinPlaceParts([
     componentFor(components, [
-      "neighborhood",
-      "sublocality_level_1",
       "sublocality",
+      "sublocality_level_1",
+      "sublocality_level_2",
+      "sublocality_level_3",
+      "neighborhood",
+      "street_address",
       "route",
     ]),
     componentFor(components, ["locality", "administrative_area_level_2"]),

@@ -102,18 +102,35 @@ export async function reverseGeocode(
   const timer = setTimeout(() => controller.abort(), budgetMs);
 
   try {
-    // `latlng` is one comma-joined pair, and the key rides in the query string
-    // because that is what Ola's Places API takes. Both are encoded rather than
-    // interpolated raw: the coordinates are numbers here, but a key is an
-    // opaque string from an environment variable and must not be able to add a
-    // parameter of its own.
+    // Built to match Ola's own sample request character for character.
+    //
+    // THE COMMA IS LITERAL. This used to encode the whole pair, sending
+    // `latlng=23.0225%2C72.5714`. Both forms are accepted — that was checked
+    // against the live API, not assumed — but a server that split the parameter
+    // naively would see one string instead of two numbers, and there is no
+    // reason to differ from the documented request for the sake of encoding a
+    // character that needs no encoding. The coordinates reach here already
+    // validated as finite numbers in range by the route's zod schema, so they
+    // cannot carry anything needing escaping.
+    //
+    // THE KEY IS STILL ENCODED, because it is an opaque string from an
+    // environment variable: an unescaped "&" in it would silently become a
+    // second query parameter.
     const url =
-      `${REVERSE_URL}?latlng=${encodeURIComponent(`${latitude},${longitude}`)}` +
+      `${REVERSE_URL}?latlng=${latitude},${longitude}` +
       `&api_key=${encodeURIComponent(key)}`;
 
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: "application/json" },
+      headers: {
+        Accept: "application/json",
+        // Ola's documented sample sends one, and a correlation id costs
+        // nothing. A lookup WITHOUT it does currently succeed — that was
+        // verified against the live API rather than assumed — so this is
+        // insurance against a service that starts insisting later, plus the
+        // means to point at one specific request when Ola support asks.
+        "X-Request-Id": crypto.randomUUID(),
+      },
       cache: "no-store",
     });
 

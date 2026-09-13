@@ -227,3 +227,96 @@ describe("the two providers produce the SAME label", () => {
     expect(joinPlaceParts([null, undefined])).toBeNull();
   });
 });
+
+/**
+ * Fixtures captured from the LIVE Ola API, not invented.
+ *
+ * Every one of these is a verbatim `address_components` list from a real
+ * reverse-geocode response, kept because two of the decisions in
+ * formatOlaPlace() were made by looking at exactly these and would have gone
+ * the other way on the documentation alone.
+ */
+describe("formatOlaPlace against real captured responses", () => {
+  it("prefers the sublocality over the neighbourhood, which is what a rep recognises", () => {
+    // Gandhinagar, 23.2295,72.6500. "Sector 17" is the address anybody there
+    // would give; "Harshithanagar" is a block name that needs its parent. The
+    // documented ordering suggested neighborhood first, which would have
+    // stamped the wrong column onto every photo.
+    expect(
+      formatOlaPlace({
+        address_components: [
+          component("India", "country"),
+          component("Gujarat", "administrative_area_level_1"),
+          component("Gandhinagar", "administrative_area_level_2"),
+          component("Gandhinagar", "locality"),
+          component("Sector 17", "sublocality"),
+          component("Harshithanagar", "neighborhood"),
+          component("382016", "postal_code"),
+        ],
+      }),
+    ).toBe("Sector 17, Gandhinagar, Gujarat");
+
+    // Bengaluru, from Ola's own documented sample coordinate.
+    expect(
+      formatOlaPlace({
+        address_components: [
+          component("India", "country"),
+          component("Karnataka", "administrative_area_level_1"),
+          component("Bengaluru Urban", "administrative_area_level_2"),
+          component("Bengaluru", "locality"),
+          component("Banashankari", "sublocality"),
+          component("Block 5 Phase 3", "neighborhood"),
+        ],
+      }),
+    ).toBe("Banashankari, Bengaluru, Karnataka");
+  });
+
+  it("refuses a punctuation-only component, and keeps looking", () => {
+    // ⚠ REAL DATA, 23.2039,72.5843. Ola's parser choked on the postal line
+    // "At.&Po.: Uvarsad" and returned sublocality ":" — which was stamped onto
+    // the photo as ":, Uvarsad, Gujarat" until this guard existed. The colon
+    // must not merely be dropped, it must not CONSUME the slot: the useful
+    // name sits one level deeper.
+    expect(
+      formatOlaPlace({
+        address_components: [
+          component("India", "country"),
+          component("Gujarat", "administrative_area_level_1"),
+          component("Gandhinagar", "administrative_area_level_2"),
+          component("Uvarsad", "locality"),
+          component(":", "sublocality"),
+          component("Karnavati University", "sublocality_level_3"),
+          component("382422", "postal_code"),
+          component("Amba Township Main Road", "street_address"),
+        ],
+      }),
+    ).toBe("Karnavati University, Uvarsad, Gujarat");
+  });
+
+  it("keeps names in other scripts, which the punctuation guard must not eat", () => {
+    // The guard asks for a letter or digit in ANY script, so Gujarati and
+    // Devanagari names pass exactly as Latin ones do.
+    expect(
+      formatOlaPlace({
+        address_components: [
+          component("ગાંધીનગર", "sublocality"),
+          component("अहमदाबाद", "locality"),
+          component("Gujarat", "administrative_area_level_1"),
+        ],
+      }),
+    ).toBe("ગાંધીનગર, अहमदाबाद, Gujarat");
+  });
+});
+
+describe("joinPlaceParts refuses junk, whichever provider produced it", () => {
+  it("drops a part with no letter or digit in it", () => {
+    expect(joinPlaceParts([":", "Uvarsad", "Gujarat"])).toBe("Uvarsad, Gujarat");
+    expect(joinPlaceParts(["-", "--", "..."])).toBeNull();
+    expect(joinPlaceParts(["&", "Ahmedabad"])).toBe("Ahmedabad");
+  });
+
+  it("keeps a name that merely CONTAINS punctuation", () => {
+    expect(joinPlaceParts(["St. Xavier's", "Ahmedabad"])).toBe("St. Xavier's, Ahmedabad");
+    expect(joinPlaceParts(["Sector-21", "Gandhinagar"])).toBe("Sector-21, Gandhinagar");
+  });
+});
