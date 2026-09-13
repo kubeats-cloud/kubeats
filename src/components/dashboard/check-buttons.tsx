@@ -3,21 +3,13 @@
 import { useActionState, useState } from "react";
 import { LogInIcon, MapPinOffIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { checkIn } from "@/lib/checkin-actions";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { bestFix } from "@/lib/geolocate";
-import { formatCoordinates } from "@/lib/location-display";
 import { NO_LOCATION_GUIDANCE } from "@/lib/validation/checkin";
-import {
-  ACCURACY_BADGE,
-  accuracyBand,
-  describeAccuracy,
-  shouldRetryLocation,
-  type LocationFix,
-} from "@/lib/validation/location";
+import { shouldRetryLocation, type LocationFix } from "@/lib/validation/location";
 
 /**
  * Arriving at a planned visit.
@@ -92,13 +84,13 @@ export function CheckInButton({
     return (
       <Button type="button" className="h-11" disabled>
         <LogInIcon className="size-4" aria-hidden />
-        Finding you…
+        Just a moment…
       </Button>
     );
   }
 
   // ------------------------------------------------------------------
-  // Located: confirm, with the fix shown so a bad one can be retried.
+  // Located: confirm. The fix itself is not shown; only a poor one speaks up.
   // ------------------------------------------------------------------
   if (phase.step === "located") {
     const { fix } = phase;
@@ -124,31 +116,29 @@ export function CheckInButton({
           {isPending ? "Checking in…" : "Confirm check in"}
         </Button>
 
-        <div className="flex max-w-56 flex-col items-end gap-1">
-          <span className="text-muted-foreground text-right text-xs tabular-nums">
-            {formatCoordinates(fix.latitude, fix.longitude)}
-          </span>
-          <Badge variant={ACCURACY_BADGE[accuracyBand(fix.accuracy)]}>
-            {describeAccuracy(fix.accuracy)}
-          </Badge>
-          {/* A poor fix warns and offers another go; it does NOT block. Blocking
-              on accuracy would strand a rep in a staff room indefinitely, and
-              with one-visit-at-a-time that would end their day. */}
-          {shouldRetryLocation(fix.accuracy) && (
-            <p className="text-muted-foreground text-right text-xs">
-              {accuracyBand(fix.accuracy) === "network"
-                ? "Looks like a network location rather than GPS."
-                : "Only approximate."}{" "}
-              <button
-                type="button"
-                className="underline underline-offset-2"
-                onClick={locate}
-              >
-                Try again
-              </button>
-            </p>
-          )}
-        </div>
+        {/* NO READOUT. The coordinates and the accuracy badge used to sit here,
+            and the client asked for them to go: a rep on their way into a
+            school does not need to be shown the position that was just taken of
+            them, and a badge reading "±12 m (good)" beside a Confirm button
+            reads like being measured rather than like arriving. The reading
+            itself is unchanged and still travels in the hidden fields above.
+
+            What stays is the OFFER, because it is the one thing here a rep can
+            act on: a poor fix still says so in one line and still lets them try
+            again, exactly as before. It warns and never blocks, which is what
+            keeps a rep in a basement staff room from being stranded. */}
+        {shouldRetryLocation(fix.accuracy) && (
+          <p className="text-muted-foreground max-w-56 text-right text-xs">
+            That reading looks approximate.{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              onClick={locate}
+            >
+              Try again
+            </button>
+          </p>
+        )}
         {state.error && (
           <p role="alert" className="text-danger-subtle-foreground text-xs">
             {state.error}
@@ -206,10 +196,12 @@ export function CheckInButton({
               value={reason}
               onChange={(event) => setReason(event.target.value)}
             />
-            {/* Said plainly. A rep who knows this is recorded is far less
-                likely to use it as the quick way past the location. */}
+            {/* Said plainly, and said once. The fact is unchanged: this is
+                kept with the visit. The old wording ("your admin can see it")
+                put a watcher in the sentence, which is not what a rep typing
+                "no signal indoors" needs to read. */}
             <p className="text-muted-foreground text-xs">
-              This is saved with the visit and your admin can see it.
+              Saved with the visit, so nobody has to wonder why.
             </p>
           </div>
 

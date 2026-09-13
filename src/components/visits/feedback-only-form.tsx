@@ -12,6 +12,7 @@ import { submitFeedback } from "@/lib/feedback-actions";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { fieldLabel } from "@/lib/validation/visit";
 import type { OpenLoop } from "@/lib/visits";
+import { FormNotice } from "@/components/form-notice";
 
 /**
  * The feedback form on its own — the recovery path, not a normal step.
@@ -53,7 +54,7 @@ export function FeedbackOnlyForm({
 
       <p className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-sm">
         {alreadyClosed
-          ? "This visit was saved but never reported, and the check-in has since been closed. Finish the report here — the time on site stays “not recorded”, which is the honest answer."
+          ? "This visit was saved but never reported, and the check-in has since been closed. Finish the report here. The time on site stays “not recorded”, which is the honest answer."
           : "Your visit was saved but the report did not go through. Finish it here and you will be checked out."}
       </p>
 
@@ -69,21 +70,11 @@ export function FeedbackOnlyForm({
       />
 
       {state.error && (
-        <div
-          role="alert"
-          className="bg-danger-subtle text-danger-subtle-foreground space-y-1 rounded-md px-3 py-2 text-sm"
-        >
-          <p>{state.error}</p>
-          {Object.keys(state.fieldErrors).length > 0 && (
-            <ul className="list-inside list-disc">
-              {Object.entries(state.fieldErrors).map(([field, message]) => (
-                <li key={field}>
-                  <span className="font-medium">{fieldLabel(field)}</span>: {message}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <FormNotice
+          message={state.error}
+          fieldErrors={state.fieldErrors}
+          labelFor={fieldLabel}
+        />
       )}
 
       <Button type="submit" className="h-11 w-full" disabled={isPending}>

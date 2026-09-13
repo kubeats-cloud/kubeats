@@ -38,6 +38,7 @@ import {
   followUpRequired,
   hasLifecycle,
 } from "@/lib/validation/visit";
+import { FormNotice } from "@/components/form-notice";
 
 const NO_CHANGE = "__no_change__";
 
@@ -240,14 +241,14 @@ export function LogVisitForm({
 
       <FormSection
         title="Photo"
-        description="A photograph, taken now rather than remembered later."
+        description="One photo from the visit itself."
       >
         <CaptureFields userId={userId} />
       </FormSection>
 
       <FormSection
         title="Where does this leave the institute?"
-        description="Rule 4 — chosen by hand, never guessed from the activity."
+        description="Your call, not ours. Nothing here is guessed from the activity."
       >
         <div className="space-y-2">
           <Label>Status</Label>
@@ -294,21 +295,7 @@ export function LogVisitForm({
       />
 
       {error && (
-        <div
-          role="alert"
-          className="bg-danger-subtle text-danger-subtle-foreground space-y-1 rounded-md px-3 py-2 text-sm"
-        >
-          <p>{error}</p>
-          {Object.keys(fieldErrors).length > 0 && (
-            <ul className="list-inside list-disc">
-              {Object.entries(fieldErrors).map(([field, message]) => (
-                <li key={field}>
-                  <span className="font-medium">{fieldLabel(field)}</span>: {message}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <FormNotice message={error} fieldErrors={fieldErrors} labelFor={fieldLabel} />
       )}
 
       {/* One tap ends the visit: the report is filed and the check-out is

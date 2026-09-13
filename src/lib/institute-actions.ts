@@ -14,6 +14,7 @@ import {
   instituteFormDataToInput,
   instituteSchema,
 } from "@/lib/validation/institute";
+import { CHECK_FIELDS } from "@/lib/visit-form-state";
 
 export async function createInstitute(
   _prev: InstituteFormState,
@@ -34,7 +35,7 @@ export async function createInstitute(
 
   if (!parsed.success) {
     return {
-      error: "Please check the highlighted fields.",
+      error: CHECK_FIELDS,
       fieldErrors: fieldErrorsFrom(parsed.error),
     };
   }

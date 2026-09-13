@@ -257,6 +257,20 @@ already claimed the easy 0.9 MiB between them; see README for both.
   stay nullable because one row predates the rule and because the escape is
   real. A POOR fix still warns and never blocks — blocking on accuracy would
   strand a rep in a staff room, and with one-visit-at-a-time that ends their day.
+- **Captured, not displayed: the location readout is off during a visit.** What
+  is captured has not changed by a field. What a rep SEES while they are mid-visit
+  has: no coordinates, no accuracy badge, no area name, no arrival time in the
+  page header, and no "Reading your location…" narration on the photo steps.
+  It all comes back on the FINISHED record — `report-view.tsx`, the admin's
+  activity report, the duration on a completed plan entry — where it is a record
+  rather than a readout, and admins keep every mid-visit view they had.
+  **The one exception is the GATE, and it has to stay visible**:
+  `NO_LOCATION_GUIDANCE` and the reason-override are the rep's only explanation
+  of why check-in is refused, so silencing them would turn a blocked check-in
+  into a broken button. The rule is the distinction between the two: hide the
+  READOUT, keep the GATE. A poor fix still gets its one line and its Try again,
+  because that is something the rep can act on; `describeAccuracy()` is simply
+  not called on that path any more.
 - **The presence guarantee covers every activity**, not just meetings. 0014
   exempted sessions, campus visits and the one-shots because "they do not run
   off the daily plan"; every visit runs off it now. `enforce_checkin_before_visit()`

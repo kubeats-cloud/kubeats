@@ -23,6 +23,7 @@ import {
 } from "@/lib/validation/admin";
 import type { TeamMember } from "@/lib/admin";
 import { campusLabel, type Campus } from "@/lib/campus-display";
+import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
 
 /**
  * The team, and the only way an account gets created.
@@ -91,7 +92,7 @@ export function TeamPanel({
     });
     if (!parsed.success) {
       setClientState({
-        error: "Please check the highlighted fields.",
+        error: CHECK_FIELDS,
         fieldErrors: fieldErrorsFrom(parsed.error),
       });
       return;
@@ -313,12 +314,7 @@ export function TeamPanel({
             )}
 
             {error && (
-              <p
-                role="alert"
-                className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
-              >
-                {error}
-              </p>
+              <FormNotice message={error} />
             )}
 
             <div className="flex gap-2">

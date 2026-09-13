@@ -16,11 +16,19 @@
  * at the ISP's address — you get a confidently wrong fix, and until now nothing
  * recorded or showed it.
  *
- * So accuracy is now stored beside every latitude and longitude, shown wherever
- * one is displayed, and warned about when it is poor. It is NEVER a reason to
- * refuse a save: Rule 12 makes the photo mandatory and deliberately leaves the
- * location best-effort, because a rep in a basement staff room with no signal
- * must still be able to finish their work. Honest and imperfect beats blocked.
+ * So accuracy is now stored beside every latitude and longitude, and warned
+ * about when it is poor. It is NEVER a reason to refuse a save: Rule 12 makes
+ * the photo mandatory and deliberately leaves the location best-effort, because
+ * a rep in a basement staff room with no signal must still be able to finish
+ * their work. Honest and imperfect beats blocked.
+ *
+ * WHERE IT IS SHOWN, which is narrower than it was. The band and the figure
+ * appear on the FINISHED record - the closing report and the admin's activity
+ * report - and nowhere in the flow a rep is in the middle of. While a visit is
+ * running they get one sentence, and only when the fix is poor enough to be
+ * worth another go; describeAccuracy() is not called at all on that path. The
+ * reading, the storing and the warning are all unchanged. What went is the
+ * readout.
  */
 
 /**
@@ -85,7 +93,7 @@ export function describeAccuracy(accuracy: number | null): string {
     case "approximate":
       return `${value} (approximate)`;
     case "network":
-      return `${value} (network location — likely not your real spot)`;
+      return `${value} (network location, so it may be well off)`;
     case "unknown":
       return "Accuracy unknown";
   }

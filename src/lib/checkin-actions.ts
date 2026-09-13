@@ -49,7 +49,7 @@ async function requireUser() {
 const CHECKIN_MESSAGES: Record<string, string> = {
   FO012: `A location is needed to check in. ${NO_LOCATION_GUIDANCE}`,
   FO013:
-    "You are still checked in somewhere else. Finish that visit first — it is on your Dashboard.",
+    "You are still checked in somewhere else. Finish that visit first; it is on your Dashboard.",
   FO014: "This visit has already started, so it cannot be removed from the plan.",
 };
 

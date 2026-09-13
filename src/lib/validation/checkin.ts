@@ -110,7 +110,7 @@ const optionalCoord = (limit: number) =>
 const manualReason = z
   .string()
   .trim()
-  .max(300, "Keep it short — a line is plenty.")
+  .max(300, "Keep it short. A line is plenty.")
   .transform((v) => (v === "" ? null : v))
   .nullable();
 

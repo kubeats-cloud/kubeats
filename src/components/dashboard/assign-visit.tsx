@@ -18,6 +18,7 @@ import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import { assignVisitSchema } from "@/lib/validation/closing-report";
 import { visitFieldErrors } from "@/lib/validation/visit";
 import type { PickerInstitute } from "@/lib/visits";
+import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
 
 /**
  * An admin putting a visit on a rep's plan.
@@ -74,7 +75,7 @@ export function AssignVisit({
     if (!parsed.success) {
       event.preventDefault();
       setClientState({
-        error: "Please check the highlighted fields.",
+        error: CHECK_FIELDS,
         fieldErrors: visitFieldErrors(parsed.error),
       });
       return;
@@ -194,12 +195,7 @@ export function AssignVisit({
             </div>
 
             {error && (
-              <p
-                role="alert"
-                className="bg-danger-subtle text-danger-subtle-foreground rounded-md px-3 py-2 text-sm"
-              >
-                {error}
-              </p>
+              <FormNotice message={error} />
             )}
             {serverState.ok && (
               <p

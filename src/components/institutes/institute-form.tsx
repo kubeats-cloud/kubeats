@@ -32,6 +32,7 @@ import {
   type Stream,
 } from "@/lib/validation/institute";
 import { cn } from "@/lib/utils";
+import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
 
 /** Digits only, capped — mirrors the *_mobile_valid CHECK in the database. */
 function digits(value: string, max: number) {
@@ -99,7 +100,7 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
     const parsed = instituteSchema.safeParse(instituteFormDataToInput(formData));
     if (!parsed.success) {
       setClientState({
-        error: "Please check the highlighted fields.",
+        error: CHECK_FIELDS,
         fieldErrors: fieldErrorsFrom(parsed.error),
       });
       return;
@@ -356,7 +357,7 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
                           name={`class12_${stream}`}
                           className="h-11"
                           inputMode="numeric"
-                          placeholder="Approx students"
+                          placeholder="Approx. students"
                           aria-label={`Approximate class 12 ${stream} students`}
                           onChange={(e) => {
                             e.target.value = digits(e.target.value, 6);
@@ -372,30 +373,13 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
           </fieldset>
       </FormSection>
 
-      {error && (
-        <div
-          role="alert"
-          className="bg-danger-subtle text-danger-subtle-foreground space-y-1 rounded-md px-3 py-2 text-sm"
-        >
-          <p>{error}</p>
-          {/*
-            Every field error is listed here, not only the ones with an inline
-            slot. A validation failure on a field the form does not render an
-            error for is otherwise completely invisible — the submit button just
-            stops working, which is exactly the bug this replaced.
-          */}
-          {Object.keys(fieldErrors).length > 0 && (
-            <ul className="list-inside list-disc">
-              {Object.entries(fieldErrors).map(([field, message]) => (
-                <li key={field}>
-                  <span className="font-medium">{field.replace(/_/g, " ")}</span>
-                  : {message}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+      {/*
+        Every field error is listed, not only the ones with an inline slot. A
+        validation failure on a field the form does not render an error for is
+        otherwise completely invisible: the submit button just stops working,
+        which is exactly the bug this replaced.
+      */}
+      {error && <FormNotice message={error} fieldErrors={fieldErrors} />}
 
       <Button type="submit" className="h-11 w-full" disabled={isPending}>
         {isPending ? "Registering…" : "Register institute"}
