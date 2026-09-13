@@ -265,10 +265,17 @@ export function FeedbackFields({
               : "Asked because you marked the campus visit done."
           }
         >
+          {/* TWO COUNTS, and the labels are the whole job.
+              A single "how many students?" box was one number for two
+              questions the client asks separately. Split, they are one word
+              apart — present vs. participated — so each carries the sentence
+              that tells a rep which is which, and they sit one above the other
+              rather than side by side so the pair is read rather than skimmed.
+              Neither is required; the schema only objects if participated
+              exceeds present, which is what two numbers typed the wrong way
+              round looks like. */}
           <div className="space-y-2">
-            <Label htmlFor="students-attended">
-              {wantsSession ? "How many students attended?" : "How many students visited?"}
-            </Label>
+            <Label htmlFor="students-attended">Students present</Label>
             <Input
               id="students-attended"
               name="students_attended"
@@ -277,7 +284,29 @@ export function FeedbackFields({
               value={value.studentsAttended}
               onChange={(e) => set("studentsAttended", e.target.value)}
             />
+            <p className="text-muted-foreground text-xs">
+              {wantsSession
+                ? "Everyone who was in the room."
+                : "Everyone who came to see the campus."}
+            </p>
             {err("students_attended")}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="students-reached">Students who participated</Label>
+            <Input
+              id="students-reached"
+              name="students_reached"
+              inputMode="numeric"
+              className="h-11"
+              value={value.studentsReached}
+              onChange={(e) => set("studentsReached", e.target.value)}
+            />
+            <p className="text-muted-foreground text-xs">
+              How many of them actually took part — asked something, joined in.
+              Never more than the number present.
+            </p>
+            {err("students_reached")}
           </div>
 
           {wantsSession && (

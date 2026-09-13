@@ -226,7 +226,39 @@ const shape = {
      * ten-box multi-select the rep filled in themselves. This reads the status
      * they have already chosen, so the same fact is stated once.
      */
+
+    /**
+     * TWO COUNTS, NOT ONE — the client's spec, and the reason 0022 exists.
+     *
+     * `students_attended` is **PRESENT**: everybody who was in the room, or who
+     * came to see the campus. It is the number this form has always asked for
+     * and the one every filed report already carries, so its meaning does not
+     * move — only its label gets sharper.
+     *
+     * `students_reached` is **PARTICIPATED**: how many of those actually took
+     * part. It is the dormant column 0009 built and the long report briefly
+     * collected, and it is the second count the spec wants, so it comes back
+     * rather than a third column being invented. The COLUMN NAME is unchanged
+     * on purpose — renaming it would touch `visits_students_reached_valid`,
+     * every backup manifest and every saved query for a label nobody reads.
+     * The form field and the RPC parameter keep the column's name for the same
+     * reason every other field here does; what a rep sees is set in
+     * `feedback-fields.tsx`.
+     *
+     * ⚠ THE MEANING IS REDEFINED, and 0009 says the opposite: it built
+     * "reached" as the WIDER number ("often more than attended"). Under the new
+     * spec participated is a SUBSET of present. A report filed by the retired
+     * long form therefore carries the old sense, which is why `report-view.tsx`
+     * labels those rows "Students reached" and only a post-0022 report reads
+     * "Students who participated". Migration 0022 restates this on the column.
+     *
+     * NEITHER IS REQUIRED. `students_attended` never was in this form, and a
+     * rep standing at a school gate who did not count heads should not be
+     * unable to file at all. The rule below is the only thing asked of them,
+     * and it only fires when both numbers are present.
+     */
     students_attended: count,
+    students_reached: count,
     session_topic: text(300),
     session_taken_by: text(120),
 };
@@ -249,6 +281,27 @@ const refine = (value: Shape, ctx: z.RefinementCtx) => {
     // The "a phone with no name is a number nobody can place" rule stood here.
     // It is gone because it cannot fire any more: met_name is required
     // outright, so there is no report left that carries a number and no name.
+
+    // The one rule the two student counts owe each other. Participated is a
+    // SUBSET of present — you cannot have twelve of ten students join in — so a
+    // pair that says otherwise is almost always the two numbers typed the wrong
+    // way round, which is the exact confusion two similar boxes invite.
+    //
+    // It fires only when BOTH are filled, so neither becomes required by the
+    // back door. It is a FORM rule and not a CHECK: rows filed by the retired
+    // long form carry the old "reached" sense, where the second number was
+    // deliberately the larger of the two, and a constraint would have refused
+    // to build against them.
+    if (
+      value.students_attended !== null &&
+      value.students_reached !== null &&
+      value.students_reached > value.students_attended
+    ) {
+      fail(
+        "students_reached",
+        "More took part than were there. Check which number is which.",
+      );
+    }
 };
 
 /** Used by Log Visit, which files before a visit id exists. */
@@ -307,6 +360,7 @@ export function feedbackFormDataToInput(formData: FormData) {
     met_name: str("met_name"),
     met_phone: str("met_phone"),
     students_attended: str("students_attended"),
+    students_reached: str("students_reached"),
     session_topic: str("session_topic"),
     session_taken_by: str("session_taken_by"),
   };
@@ -334,6 +388,7 @@ export interface FeedbackState {
   metName: string;
   metPhone: string;
   studentsAttended: string;
+  studentsReached: string;
   sessionTopic: string;
   sessionTakenBy: string;
   closesVisitId: string;
@@ -350,6 +405,7 @@ export const EMPTY_FEEDBACK: FeedbackState = {
   metName: "",
   metPhone: "",
   studentsAttended: "",
+  studentsReached: "",
   sessionTopic: "",
   sessionTakenBy: "",
   closesVisitId: "",

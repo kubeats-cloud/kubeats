@@ -31,6 +31,7 @@ const filled = (over: Partial<Record<string, string>> = {}) => ({
   met_name: "A Person",
   met_phone: "9876543210",
   students_attended: "",
+  students_reached: "",
   session_topic: "",
   session_taken_by: "",
   ...over,
@@ -196,6 +197,60 @@ describe("the short form's rules", () => {
     expect(
       feedbackFieldsSchema.safeParse(filled({ student_response: "Invented" })).success,
     ).toBe(false);
+  });
+
+  it("takes two student counts, and insists on neither", () => {
+    // The client's spec wants PRESENT and PARTICIPATED separately. Neither is
+    // required: a rep who did not count heads must still be able to file, which
+    // is how students_attended has always behaved in this form.
+    expect(
+      feedbackFieldsSchema.safeParse(filled({ students_attended: "", students_reached: "" }))
+        .success,
+      "both blank is a filable report",
+    ).toBe(true);
+
+    const result = feedbackFieldsSchema.safeParse(
+      filled({ students_attended: "40", students_reached: "12" }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // PRESENT lands in students_attended, PARTICIPATED in students_reached —
+      // the mapping migration 0022 writes onto the columns. Swap these two and
+      // every filed report means the opposite of what it says.
+      expect(result.data.students_attended, "present").toBe(40);
+      expect(result.data.students_reached, "participated").toBe(12);
+    }
+  });
+
+  it("refuses more participants than people in the room", () => {
+    // Two similar boxes invite the two numbers the wrong way round, and that is
+    // the one thing the pair can say that cannot be true.
+    expect(
+      feedbackFieldsSchema.safeParse(
+        filled({ students_attended: "12", students_reached: "40" }),
+      ).success,
+    ).toBe(false);
+
+    // Equal is fine — everybody who was there joined in.
+    expect(
+      feedbackFieldsSchema.safeParse(
+        filled({ students_attended: "40", students_reached: "40" }),
+      ).success,
+    ).toBe(true);
+
+    // ...and the rule only fires when BOTH are filled, or it would make one
+    // required through the back door.
+    expect(
+      feedbackFieldsSchema.safeParse(
+        filled({ students_attended: "", students_reached: "40" }),
+      ).success,
+      "participated alone is still a valid report",
+    ).toBe(true);
+    expect(
+      feedbackFieldsSchema.safeParse(
+        filled({ students_attended: "40", students_reached: "" }),
+      ).success,
+    ).toBe(true);
   });
 
   it("asks the session questions for a session, and the count alone for a campus visit", () => {
