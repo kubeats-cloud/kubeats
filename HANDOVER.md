@@ -12,7 +12,7 @@ document that has the full detail; this page is the index, not a copy of them.
 | **Weekly backup + one restore rehearsal** | No automatic backup exists on the free tier; a mistaken delete is otherwise unrecoverable | `docs/BACKUP-RESTORE.md`, "For the client" |
 | **Uptime monitoring** | Nothing polls `/api/health` today, so an outage goes unnoticed. Point a monitor at it for liveness; set `HEALTH_CHECK_TOKEN` if you also want it to check the database | `docs/PHASE-10-Production-Readiness-Audit.md` (M2), and "Security findings & posture" below for F2 |
 | **Deploy size ceiling** | ~123 KiB headroom under the 3072 KiB free-plan limit (measured, noindex/privacy branch); a big feature could still need the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
-| **Mappls (MapmyIndia) key** *(optional, nothing outstanding)* | Purely an upgrade available if wanted: better area names on the photo stamp in India. Unset — which is how it ships — the app uses free OpenStreetMap exactly as it always has, and nothing degrades | "Place names" below, and `docs/MAPMYINDIA-SETUP.md` |
+| **Ola Maps key** *(optional, nothing outstanding)* | Purely an upgrade available if wanted: better area names on the photo stamp in India. Unset — which is how it ships — the app uses free OpenStreetMap exactly as it always has, and nothing degrades | "Place names" below, and `docs/OLA-MAPS-SETUP.md` |
 | **Set the `security.txt` contact** | The file is live but has **no** contact yet, so finding F5 is not closed. Needs the role address the custom domain unlocks | This document, "Security findings & posture" |
 
 None of these is an application code change. They are operational decisions for whoever owns the
@@ -91,7 +91,7 @@ interim mitigation recorded above and in the pen-test report.*
 
 ---
 
-## Place names: Mappls (MapmyIndia) is OPTIONAL
+## Place names: the Ola Maps key is OPTIONAL
 
 **Nothing needs doing here.** This section exists so that the next person to read it knows the
 choice is available, not because anything is outstanding.
@@ -102,34 +102,39 @@ The photo stamp carries an approximate area name under the coordinates, like
 | | Service | When it is used |
 | --- | --- | --- |
 | 1 | `place_cache` | A coordinate cell the team has already been to. No API call at all. |
-| 2 | **Mappls** (MapmyIndia) | **Only if a key is set.** Better names in India. |
+| 2 | **Ola Maps** | **Only if a key is set.** Better names in India. |
 | 3 | **OpenStreetMap** (Nominatim) | Free, no account. **This is what runs today.** |
 | 4 | — | Nobody could name it: the photo stamps with coordinates and time alone. |
 
 ### What is true right now
 
-**No Mappls key is set, and that is a supported, finished state — not a missing step.** With the
-key unset the app skips Mappls *without even making a request* and uses free OpenStreetMap, which
-is exactly what it has always done. There is no degraded mode, no warning banner, no feature that
-is switched off, and nothing in the interface mentions it.
+**No Ola key is set, and that is a supported, finished state — not a missing step.** With the key
+unset the app skips Ola *without even making a request* and uses free OpenStreetMap, which is what
+it has always done. There is no degraded mode, no warning banner, no feature that is switched off,
+and nothing in the interface mentions it.
 
 ### If the client wants better India place names later
 
-They obtain their own Mappls key and set it as a **Cloudflare Secret**. That is the whole change:
+They obtain their own Ola Maps key and set it as a **Cloudflare Secret** named `OLA_MAPS_API_KEY`.
+That is the whole change:
 
-- **No code change, no rebuild, no migration, no redeploy.** These are read at request time, unlike
-  the `NEXT_PUBLIC_*` pair, so the next request picks the key up.
-- **No new cost to us** — it is the client's own Mappls account and their own free tier. The
-  `place_cache` table is what keeps usage inside it: one row per ~11 m cell, shared by the whole
-  team, so Mappls is only ever reached when a rep is somewhere the team has not been before.
+- **One API key.** No client ID, no secret, no OAuth token step.
+- **No code change, no rebuild, no migration, no redeploy.** It is read at request time, unlike the
+  `NEXT_PUBLIC_*` pair, so the next request picks it up.
+- **No new cost to us** — the client's own Ola account and their own free tier, which is measured
+  in hundreds of thousands of calls a month. `place_cache` keeps realistic usage to a few hundred:
+  one row per ~11 m cell, shared by the whole team, so Ola is only reached when a rep is somewhere
+  the team has not been before.
 - **Reversible.** Remove the secret and it goes straight back to OpenStreetMap. Names already
   cached stay valid either way, because the cache stores the label and not which service produced
   it.
 
-**Which credentials to obtain, from where, and how to verify them: `docs/MAPMYINDIA-SETUP.md`.**
-In short, from <https://apis.mappls.com/console/>, either a **Client ID + Client Secret** or an
-older **REST API key** — the app accepts both shapes. The Map SDK / JavaScript key is *not* needed
-and must not be used: the lookup runs server-side precisely so no key reaches a browser.
+> ⚠ **It must be a Secret, not a plaintext Variable.** `wrangler.jsonc` declares no `vars` block,
+> and `wrangler deploy` reconciles plaintext variables against the config file — so a key added as
+> a Variable is **wiped by the next deploy**. A Secret survives.
+
+**Which key to obtain, from where, and how to verify it: `docs/OLA-MAPS-SETUP.md`.** In short, from
+<https://maps.olakrutrim.com/>, with the **Places API** enabled on the project.
 
 ### How to tell which service answered
 
@@ -138,8 +143,8 @@ and must not be used: the lookup runs server-side precisely so no key reaches a 
 | `source` | Meaning |
 | --- | --- |
 | `"cache"` | Answered from `place_cache`; neither service was asked. |
-| `"mappls"` | The Mappls key is set and working. |
-| `"openstreetmap"` | Either no key is set, or Mappls did not answer and it fell back. |
+| `"ola"` | The Ola key is set and working. |
+| `"openstreetmap"` | Either no key is set, or Ola did not answer and it fell back. |
 
 That one field is the quickest confirmation that a newly added key is actually live rather than
 silently falling back. Note that a repeat lookup of the same spot returns `"cache"`, so check a
@@ -149,12 +154,18 @@ coordinate the team has not visited before.
 
 **A place name can never block a visit or a check-in.** Every step above is allowed to fail, and
 failure simply omits the line: the coordinates and the time are the record and are never replaced
-by the name. This predates the Mappls work and is unchanged by it.
+by the name.
 
 And to head off the likeliest misreading: **none of this affects GPS accuracy.** The position comes
 from the rep's device. A geocoding service turns coordinates into words; it cannot move a pin.
 
----
+### Why not Mappls (MapmyIndia)
+
+Mappls was wired in first and then removed. Its Indian data was comparable to Ola's; its free tier
+was about **fifty lookups**, which is a day's work for one rep. Ola's free tier is measured in
+hundreds of thousands of calls a month for the same quality of data, so the provider was swapped
+before any key was bought. Nothing was lost: the chain was built so that step 2 is a *slot*, and
+changing what fills it touched four lines of the route.
 
 ## Security findings & posture
 

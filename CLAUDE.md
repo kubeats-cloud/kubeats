@@ -292,24 +292,36 @@ already claimed the easy 0.9 MiB between them; see README for both.
   The coordinates and the time are never replaced by it, and no visit has ever
   failed to save because a place could not be named.
 - **Two geocoders, chained, and the second one is the default.** `place_cache`
-  first, then **Mappls** (MapmyIndia) when credentials are set, then
-  **Nominatim**, then nothing. Mappls is optional in the strong sense: with
-  `MAPPLS_*` unset the route skips it WITHOUT a fetch and behaves exactly as it
-  did before it existed, which is the supported configuration, not a degraded
-  one. `docs/MAPMYINDIA-SETUP.md` is what the client follows to switch it on.
-  Three things hold this together:
-  - **The 3.5s budget is SPLIT, not doubled** — 1.5s for Mappls, the rest for
+  first, then **Ola Maps** when a key is set, then **Nominatim**, then nothing.
+  Ola is optional in the strong sense: with `OLA_MAPS_API_KEY` unset the route
+  skips it WITHOUT a fetch and behaves exactly as it did before it existed,
+  which is the supported configuration, not a degraded one.
+  `docs/OLA-MAPS-SETUP.md` is what the client follows to switch it on.
+  Four things hold this together:
+  - **Step 2 is a SLOT, not a provider.** It held Mappls first, whose free tier
+    turned out to be about fifty lookups a month; swapping in Ola changed the
+    route by four lines and the rest of the chain not at all. Whatever fills it
+    next has the same contract: return a label in the app's own format, or say
+    nothing and get out of the way. Mappls was DELETED rather than left dormant
+    — git history is a better archive than an unwired provider confusing the
+    next reader, and dead code costs bundle bytes in a budget with ~106 KiB
+    spare. That is the opposite call from the dormant *columns* elsewhere in
+    this file, and deliberately: restoring a column needs a migration,
+    restoring a module needs `git revert`.
+  - **The 3.5s budget is SPLIT, not doubled** — 1.5s for Ola, the rest for
     Nominatim. Giving each its own full timeout would make the worst case 7s
     against a browser that aborts at 4s, so every photo in a slow spot would
-    wait longer and still get nothing. `tests/unit/mappls.test.ts` asserts the
-    arithmetic.
+    wait longer and still get nothing. `tests/unit/ola.test.ts` asserts the
+    arithmetic against `PLACE_TIMEOUT_MS` rather than restating the numbers.
   - **Both providers produce the SAME label.** `joinPlaceParts()` in `places.ts`
-    is the only place a label is built; `formatPlace()` and
-    `formatMapplsPlace()` only decide which of their own field names feed it.
-    Mappls's `formatted_address` is deliberately ignored — a courier's address
-    does not fit under the coordinates.
-  - **The cache stores the label, not its source.** That is what lets
-    credentials be added or removed later without invalidating a row.
+    is the only place a label is built; `formatPlace()` and `formatOlaPlace()`
+    only decide which of their own fields feed it. They do not even agree on the
+    SHAPE: Nominatim returns flat named keys, Ola returns a Google-style list of
+    components tagged with `types`, so Ola's is found by asking what a component
+    IS rather than reading a key. Ola's `formatted_address` is deliberately
+    ignored — a courier's address does not fit under the coordinates.
+  - **The cache stores the label, not its source.** That is what lets a key be
+    added or removed, or the whole provider swapped, without invalidating a row.
   This changes the NAME only. GPS accuracy comes from the device and nothing
   here can move a pin, which is also why none of it touched the capture path or
   the location-hidden-during-a-visit rule above.

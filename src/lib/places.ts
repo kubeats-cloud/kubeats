@@ -44,11 +44,13 @@ export const MAX_LABEL_LENGTH = 80;
  * Locality, settlement, region → one label. THE ONLY PLACE A LABEL IS BUILT.
  *
  * Both providers end here, and that is the whole point of it being its own
- * function. `formatPlace` reads Nominatim's keys and `formatMapplsPlace` reads
- * Mappls's; they disagree about what the fields are called and agree about
- * nothing else, so the shape of the answer has to be decided in one place or
- * the stamp starts looking different depending on which service happened to
- * reply. Whatever a caller downstream already copes with, it keeps coping with.
+ * function. `formatPlace` reads Nominatim's keys and `formatOlaPlace` walks
+ * Ola's tagged component list; they disagree about what the fields are even
+ * SHAPED like, let alone called, so the shape of the answer has to be decided
+ * in one place or the stamp starts looking different depending on which service
+ * happened to reply. Whatever a caller downstream already copes with, it keeps
+ * coping with — including a row cached under a provider that has since been
+ * swapped out, which is why the cache stores the label and not its source.
  *
  * Duplicates are dropped — in a city district the suburb and the city are often
  * the same word, and "Bopal, Bopal, Gujarat" reads like a bug.
@@ -85,54 +87,80 @@ export function formatPlace(address: NominatimAddress | null | undefined): strin
 }
 
 /**
- * What Mappls gives back, as much of it as we use.
+ * One component of an Ola Maps address.
  *
- * EVERY FIELD IS OPTIONAL AND IS TREATED AS SUCH, more carefully than the
- * Nominatim shape above. That one has been exercised against the live service
- * for months; this one is written from Mappls's documented response and cannot
- * be verified here without a paid account, so it reads defensively and any
- * field it does not recognise simply does not contribute. The worst case is a
- * label that is shorter than it could have been, never a throw — and never a
- * visit that cannot be saved, which is the rule everything in this file serves.
+ * Ola's Places API is deliberately Google-Maps-shaped: instead of a flat object
+ * with named keys, an address arrives as a LIST of components, each tagged with
+ * one or more `types`. So the part we want is found by asking what a component
+ * IS, not by reading a key we hope exists.
  */
-export interface MapplsAddress {
-  /** The closest named thing: a colony, a block, a named street. */
-  street?: string;
-  subSubLocality?: string;
-  subLocality?: string;
-  locality?: string;
-  poi?: string;
-  /** The settlement. `village` appears on rural answers, `city` on urban. */
-  village?: string;
-  city?: string;
-  subDistrict?: string;
-  district?: string;
-  /** The region. */
-  state?: string;
-  pincode?: string;
+export interface OlaAddressComponent {
+  long_name?: string;
+  short_name?: string;
+  types?: string[];
+}
+
+/** As much of one Ola reverse-geocode result as we use. */
+export interface OlaResult {
+  address_components?: OlaAddressComponent[];
+  /** The full postal address. Deliberately unused; see formatOlaPlace. */
   formatted_address?: string;
 }
 
 /**
- * The same three parts, from Mappls's names for them.
+ * The first component carrying any of `types`, in the order asked for.
  *
- * WHY THIS AND NOT `formatted_address`. Mappls returns a full postal address,
- * which is genuinely better data and the wrong thing for this job: the stamp
- * has room for roughly eighty characters under the coordinates, and "123,
- * Shivalik Plaza, Nr. IIM, Bopal Road, Bopal, Ahmedabad, Gujarat 380058" is a
- * courier's answer to a question nobody asked. What the stamp wants is where
- * this is, in three words. So the parts are picked and joined exactly as the
- * Nominatim ones are, and a reader cannot tell which service answered — which
- * is the point, because the same visit may be named by either one.
+ * Order matters and is the caller's: "neighbourhood, else sub-locality" is a
+ * different answer from "sub-locality, else neighbourhood", and the preference
+ * belongs with the part being built rather than in here.
  */
-export function formatMapplsPlace(
-  address: MapplsAddress | null | undefined,
+function componentFor(
+  components: readonly OlaAddressComponent[],
+  types: readonly string[],
 ): string | null {
-  if (!address) return null;
+  for (const type of types) {
+    const match = components.find((component) => component.types?.includes(type));
+    const name = match?.long_name?.trim() ?? match?.short_name?.trim();
+    if (name) return name;
+  }
+  return null;
+}
+
+/**
+ * The same three parts, from Ola's component list.
+ *
+ * THE ONLY PLACE OLA'S FIELD NAMES ARE READ. If the live response differs from
+ * the documented shape, this function is the entire fix; the chain, the cache,
+ * the timeout split and every screen downstream stay exactly as they are. That
+ * isolation is the point, and it is the lesson from the provider before this
+ * one — where the thing that actually differed from the docs was found in
+ * production, not in review.
+ *
+ * WHY NOT `formatted_address`. Same reason as ever: Ola returns a full postal
+ * address, which is better data and the wrong shape for this job. The stamp has
+ * about eighty characters under the coordinates, and a courier's answer does
+ * not fit. What the stamp wants is where this is, in three words.
+ *
+ * The type names are Google's vocabulary, which Ola mirrors:
+ *   neighborhood / sublocality        the closest named thing
+ *   locality                          the settlement
+ *   administrative_area_level_2       the district, when there is no locality
+ *   administrative_area_level_1       the state
+ * `postal_code` and `country` are deliberately ignored: a PIN code is not a
+ * place name, and every visit is in the same country.
+ */
+export function formatOlaPlace(result: OlaResult | null | undefined): string | null {
+  const components = result?.address_components;
+  if (!Array.isArray(components) || components.length === 0) return null;
 
   return joinPlaceParts([
-    address.subLocality ?? address.subSubLocality ?? address.locality ?? address.street,
-    address.city ?? address.village ?? address.district ?? address.subDistrict,
-    address.state,
+    componentFor(components, [
+      "neighborhood",
+      "sublocality_level_1",
+      "sublocality",
+      "route",
+    ]),
+    componentFor(components, ["locality", "administrative_area_level_2"]),
+    componentFor(components, ["administrative_area_level_1"]),
   ]);
 }
