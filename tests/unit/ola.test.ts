@@ -101,7 +101,7 @@ describe("with a key", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("sends the coordinates as one latlng pair, and the key in the query", async () => {
+  it("matches Ola's documented sample request", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse(olaResult([])));
@@ -109,8 +109,31 @@ describe("with a key", () => {
     await reverseGeocode(23.0225, 72.5714);
 
     const url = String(fetchSpy.mock.calls[0][0]);
-    expect(url).toContain("latlng=23.0225%2C72.5714");
+    expect(url).toContain("https://api.olamaps.io/places/v1/reverse-geocode");
+    // A LITERAL comma, as the sample sends. This asserted %2C until the sample
+    // was compared line by line; both are accepted by the live API, and there
+    // is no reason to differ from the documented request.
+    expect(url).toContain("latlng=23.0225,72.5714");
+    expect(url).not.toContain("%2C");
+    // The key travels in the query, not a header. That is Ola's design and it
+    // is exactly why this lookup may never happen in a browser.
     expect(url).toContain("api_key=a-test-key");
+
+    const headers = (fetchSpy.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers["X-Request-Id"], "the sample sends one").toBeTruthy();
+  });
+
+  it("gives every request its own X-Request-Id", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse(olaResult([])));
+
+    await reverseGeocode(23.0225, 72.5714);
+    await reverseGeocode(23.0325, 72.5814);
+
+    const id = (n: number) =>
+      ((fetchSpy.mock.calls[n][1] as RequestInit).headers as Record<string, string>)["X-Request-Id"];
+    expect(id(0)).not.toBe(id(1));
   });
 
   it("escapes a key rather than letting it add a parameter of its own", async () => {
