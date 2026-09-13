@@ -104,60 +104,36 @@ function trimmed(value: string | undefined): string | null {
 }
 
 /**
- * Optional: Mappls (formerly MapmyIndia) credentials for the area-name lookup.
+ * Optional: an Ola Maps API key for the area-name lookup.
  *
  * WHAT THIS BUYS. Nothing about the position itself — the coordinates and the
  * accuracy come from the device and are untouched by any of this. What it buys
- * is a better NAME for those coordinates in India, where Mappls's data is
+ * is a better NAME for those coordinates in India, where Ola's data is
  * considerably richer than OpenStreetMap's: a named colony or sector where
  * Nominatim often has only the city.
  *
  * ENTIRELY OPTIONAL, AND OPTIONAL IN THE STRONG SENSE. Return null here and the
- * app behaves exactly as it did before Mappls existed: /api/place goes straight
- * to Nominatim, which is free and needs no account at all. There is no degraded
- * mode, no warning banner and no feature that stops working. That is why this
- * is a function returning null rather than an entry in `serverSchema`, which
- * would refuse to boot without it.
+ * app behaves exactly as it did before any of this existed: /api/place goes
+ * straight to Nominatim, which is free and needs no account at all. There is no
+ * degraded mode, no warning banner and no feature that stops working. That is
+ * why this is a function returning null rather than an entry in `serverSchema`,
+ * which would refuse to boot without it.
  *
- * TWO CREDENTIAL SHAPES, because Mappls issues two and which one a given
- * account gets depends on when and how it was created:
+ * ONE CREDENTIAL, NOT TWO. Ola authenticates a Places request with a single API
+ * key passed as a query parameter. That is the whole of it: no client id, no
+ * secret, no token exchange, and therefore none of the token-staleness
+ * machinery the previous provider needed. Ola does also offer OAuth project
+ * credentials for other products; the Places API does not require them, and
+ * adding that path would be a second way for this to fail silently.
  *
- *   client_credentials  MAPPLS_CLIENT_ID + MAPPLS_CLIENT_SECRET, exchanged for
- *                       a short-lived bearer token. This is what the current
- *                       console issues and the path to prefer.
- *   a REST key          MAPPLS_REST_KEY, dropped straight into the request
- *                       path with no token step. Older accounts have this.
- *
- * If both are present the REST key wins, because it is the shorter path and
- * cannot fail at a token step. Setting neither is the supported default.
- *
- * SERVER-ONLY, and it must stay that way: none of these names carries a
- * NEXT_PUBLIC_ prefix, so Next will not inline them into the browser bundle,
- * and nothing in src/components may read them. The lookup happens in the route
- * handler for exactly this reason.
+ * SERVER-ONLY, and it must stay that way: the name carries no NEXT_PUBLIC_
+ * prefix, so Next will not inline it into the browser bundle, and nothing in
+ * src/components may read it. A key in a query string is a key anyone watching
+ * the browser's network tab can copy, which is the whole reason the lookup
+ * happens in the route handler.
  */
-export interface MapplsCredentials {
-  kind: "rest-key" | "oauth";
-  restKey: string | null;
-  clientId: string | null;
-  clientSecret: string | null;
-}
-
-export function mapplsCredentials(): MapplsCredentials | null {
-  const restKey = trimmed(process.env.MAPPLS_REST_KEY);
-  if (restKey) {
-    return { kind: "rest-key", restKey, clientId: null, clientSecret: null };
-  }
-
-  const clientId = trimmed(process.env.MAPPLS_CLIENT_ID);
-  const clientSecret = trimmed(process.env.MAPPLS_CLIENT_SECRET);
-  // Half a credential is not a credential. Say nothing and fall back, rather
-  // than spending a request that is certain to be rejected.
-  if (clientId && clientSecret) {
-    return { kind: "oauth", restKey: null, clientId, clientSecret };
-  }
-
-  return null;
+export function olaMapsKey(): string | null {
+  return trimmed(process.env.OLA_MAPS_API_KEY);
 }
 
 /**

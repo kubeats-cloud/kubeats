@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cellFor, formatMapplsPlace, formatPlace, joinPlaceParts } from "@/lib/places";
+import { cellFor, formatOlaPlace, formatPlace, joinPlaceParts } from "@/lib/places";
 
 /**
  * The reverse-geocoding helpers. The cache key matters more than it looks: the
@@ -97,30 +97,58 @@ describe("formatPlace", () => {
   });
 });
 
-describe("formatMapplsPlace", () => {
-  it("builds the same three parts from Mappls's names for them", () => {
+/** One Ola address component, in the tagged form its API returns. */
+const component = (long_name: string, ...types: string[]) => ({ long_name, types });
+
+describe("formatOlaPlace", () => {
+  it("builds the same three parts from Ola's tagged component list", () => {
     expect(
-      formatMapplsPlace({ subLocality: "Bopal", city: "Ahmedabad", state: "Gujarat" }),
+      formatOlaPlace({
+        address_components: [
+          component("Bopal", "sublocality_level_1", "sublocality"),
+          component("Ahmedabad", "locality"),
+          component("Gujarat", "administrative_area_level_1"),
+        ],
+      }),
+    ).toBe("Bopal, Ahmedabad, Gujarat");
+  });
+
+  it("finds a part by what it IS, not by position in the list", () => {
+    // The whole difference from a flat-keyed provider: order is not meaningful,
+    // so the state being listed first must not make it the locality.
+    expect(
+      formatOlaPlace({
+        address_components: [
+          component("Gujarat", "administrative_area_level_1"),
+          component("India", "country"),
+          component("Ahmedabad", "locality"),
+          component("Bopal", "neighborhood"),
+        ],
+      }),
     ).toBe("Bopal, Ahmedabad, Gujarat");
   });
 
   it("falls back through the alternatives for each part", () => {
+    // A rural answer: no locality, so the district stands in for the settlement.
     expect(
-      formatMapplsPlace({ locality: "Sanand", village: "Sanand Town", state: "Gujarat" }),
-    ).toBe("Sanand, Sanand Town, Gujarat");
-    expect(formatMapplsPlace({ street: "MG Road", district: "Ahmedabad", state: "Gujarat" })).toBe(
-      "MG Road, Ahmedabad, Gujarat",
-    );
+      formatOlaPlace({
+        address_components: [
+          component("Sanand", "sublocality"),
+          component("Ahmedabad", "administrative_area_level_2"),
+          component("Gujarat", "administrative_area_level_1"),
+        ],
+      }),
+    ).toBe("Sanand, Ahmedabad, Gujarat");
   });
 
   it("ignores the postal address, which is the wrong answer for a stamp", () => {
-    // Mappls returns a full courier-grade address. It is better data and it
-    // does not fit under the coordinates, so it must not leak into the label.
-    const label = formatMapplsPlace({
+    const label = formatOlaPlace({
       formatted_address: "123, Shivalik Plaza, Nr. IIM, Bopal Road, Ahmedabad, Gujarat 380058",
-      subLocality: "Bopal",
-      city: "Ahmedabad",
-      state: "Gujarat",
+      address_components: [
+        component("Bopal", "sublocality_level_1"),
+        component("Ahmedabad", "locality"),
+        component("Gujarat", "administrative_area_level_1"),
+      ],
     });
     expect(label).toBe("Bopal, Ahmedabad, Gujarat");
     expect(label).not.toContain("Shivalik");
@@ -128,23 +156,48 @@ describe("formatMapplsPlace", () => {
 
   it("drops a repeated name, exactly as the OpenStreetMap side does", () => {
     expect(
-      formatMapplsPlace({ subLocality: "Bopal", city: "Bopal", state: "Gujarat" }),
+      formatOlaPlace({
+        address_components: [
+          component("Bopal", "sublocality_level_1"),
+          component("Bopal", "locality"),
+          component("Gujarat", "administrative_area_level_1"),
+        ],
+      }),
     ).toBe("Bopal, Gujarat");
   });
 
   it("returns null when there is nothing worth stamping", () => {
-    expect(formatMapplsPlace({})).toBeNull();
-    expect(formatMapplsPlace(null)).toBeNull();
-    expect(formatMapplsPlace(undefined)).toBeNull();
-    // A pincode alone is not a place name.
-    expect(formatMapplsPlace({ pincode: "380058" })).toBeNull();
+    expect(formatOlaPlace({})).toBeNull();
+    expect(formatOlaPlace(null)).toBeNull();
+    expect(formatOlaPlace(undefined)).toBeNull();
+    expect(formatOlaPlace({ address_components: [] })).toBeNull();
+    // A PIN code and a country are not a place name.
+    expect(
+      formatOlaPlace({
+        address_components: [component("380058", "postal_code"), component("India", "country")],
+      }),
+    ).toBeNull();
+  });
+
+  it("copes with a component that has no types, or no name", () => {
+    expect(
+      formatOlaPlace({
+        address_components: [
+          { long_name: "Nameless" },
+          { types: ["locality"] },
+          component("Gujarat", "administrative_area_level_1"),
+        ],
+      }),
+    ).toBe("Gujarat");
   });
 
   it("stays short enough for the stamp", () => {
-    const long = formatMapplsPlace({
-      subLocality: "A".repeat(60),
-      city: "B".repeat(60),
-      state: "C".repeat(60),
+    const long = formatOlaPlace({
+      address_components: [
+        component("A".repeat(60), "sublocality_level_1"),
+        component("B".repeat(60), "locality"),
+        component("C".repeat(60), "administrative_area_level_1"),
+      ],
     });
     expect(long).not.toBeNull();
     expect(long!.length).toBeLessThanOrEqual(80);
@@ -153,23 +206,22 @@ describe("formatMapplsPlace", () => {
 
 describe("the two providers produce the SAME label", () => {
   it("so nothing downstream can tell which service answered", () => {
-    // THE PROPERTY THAT MATTERS. A visit named by Mappls and a visit named by
+    // THE PROPERTY THAT MATTERS. A visit named by Ola and a visit named by
     // OpenStreetMap are rendered by the same components and cached in the same
-    // column; if the two formatted differently, the stamp would change shape
-    // depending on which service happened to be up.
+    // column — including rows cached under a provider since swapped out.
     const osm = formatPlace({ suburb: "Bopal", city: "Ahmedabad", state: "Gujarat" });
-    const mappls = formatMapplsPlace({
-      subLocality: "Bopal",
-      city: "Ahmedabad",
-      state: "Gujarat",
+    const ola = formatOlaPlace({
+      address_components: [
+        component("Bopal", "sublocality_level_1"),
+        component("Ahmedabad", "locality"),
+        component("Gujarat", "administrative_area_level_1"),
+      ],
     });
-    expect(mappls).toBe(osm);
+    expect(ola).toBe(osm);
   });
 
   it("because both go through one join", () => {
-    expect(joinPlaceParts(["Bopal", "Ahmedabad", "Gujarat"])).toBe(
-      "Bopal, Ahmedabad, Gujarat",
-    );
+    expect(joinPlaceParts(["Bopal", "Ahmedabad", "Gujarat"])).toBe("Bopal, Ahmedabad, Gujarat");
     expect(joinPlaceParts([null, undefined, "  ", "Gujarat"])).toBe("Gujarat");
     expect(joinPlaceParts([])).toBeNull();
     expect(joinPlaceParts([null, undefined])).toBeNull();

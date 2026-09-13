@@ -264,7 +264,7 @@ produces a Worker that deploys cleanly and then 500s on every request.
 | `NEXT_PUBLIC_SUPABASE_URL` | **Build** variable | Baked into the browser bundle at compile time |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Build** variable | Same |
 | `SUPABASE_SERVICE_ROLE_KEY` | **Secret** (runtime) | Never inlined; read per request |
-| `MAPPLS_CLIENT_ID` / `MAPPLS_CLIENT_SECRET`, or `MAPPLS_REST_KEY` | **Secret** (runtime), optional | Better Indian area names on the photo stamp. Unset means free OpenStreetMap, which is the supported default. `docs/MAPMYINDIA-SETUP.md` |
+| `OLA_MAPS_API_KEY` | **Secret** (runtime), optional | Better Indian area names on the photo stamp. Unset means free OpenStreetMap, which is the supported default. `docs/OLA-MAPS-SETUP.md` |
 
 **The `NEXT_PUBLIC_*` pair must exist at build time, and changing them requires
 a rebuild — not a restart.** They are public by design (the anon key is

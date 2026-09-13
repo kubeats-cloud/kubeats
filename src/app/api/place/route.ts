@@ -5,35 +5,42 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { placeLookupContact } from "@/lib/env";
 import { cellFor, formatPlace, type NominatimAddress } from "@/lib/places";
 import {
-  MAPPLS_TIMEOUT_MS,
-  mapplsConfigured,
-  reverseGeocode as mapplsReverseGeocode,
-} from "@/lib/mappls";
+  OLA_TIMEOUT_MS,
+  olaConfigured,
+  reverseGeocode as olaReverseGeocode,
+} from "@/lib/ola";
 import { logError } from "@/lib/errors";
 
 /**
- * Reverse geocoding for the photo stamp: cache, then Mappls, then OpenStreetMap.
+ * Reverse geocoding for the photo stamp: cache, then Ola Maps, then OpenStreetMap.
  *
  * THE CHAIN, and every step of it is allowed to fail:
  *
  *   1. place_cache   a hit answers without touching anybody's API, including a
  *                    remembered "nothing there".
- *   2. Mappls        better names in India, and only when credentials are set.
+ *   2. Ola Maps      better names in India, and only when a key is set.
  *   3. Nominatim     free, no account, and exactly what ran here before.
  *   4. nothing       the photo stamps with coordinates and time alone.
  *
- * WITH NO MAPPLS CREDENTIALS SET THIS IS THE OLD ROUTE, step for step. Step 2
- * is skipped without a fetch, Nominatim keeps its full timeout, and the answer
- * is identical. That is the supported default, not a degraded one.
+ * WITH NO OLA KEY SET THIS IS THE OLD ROUTE, step for step. Step 2 is skipped
+ * without a fetch, Nominatim keeps its full timeout, and the answer is
+ * identical. That is the supported default, not a degraded one.
+ *
+ * STEP 2 IS A SLOT, NOT A PROVIDER. It held Mappls first, whose free tier
+ * turned out to be about fifty lookups a month; swapping in Ola changed this
+ * file by four lines and the rest of the chain not at all, which is what the
+ * shape was for. Whatever occupies the slot next has the same contract: return
+ * a label in the app's own format, or say nothing and get out of the way.
  *
  * Server-side on purpose, for four reasons now. Nominatim's usage policy asks
  * for an identifying User-Agent, which a browser will not let us set. It asks
  * that you not hammer it, which we can only promise if the requests come from
  * one place we control. Doing it here means the answer lands in a shared cache,
  * so twenty reps working the same neighbourhoods ask once between them rather
- * than once each. And the Mappls credentials are a server-only secret that must
- * never be inlined into the browser bundle, which is also why there is no
- * Mappls SDK anywhere in this repository.
+ * than once each. And the Ola key is a server-only secret that must never be
+ * inlined into the browser bundle — it travels in a QUERY STRING, so a lookup
+ * made from the browser would hand it to anyone with the network tab open,
+ * which is also why there is no Ola SDK anywhere in this repository.
  *
  * NONE OF THIS TOUCHES THE POSITION. The coordinates and the accuracy come from
  * the device and are already decided by the time anything here runs; all this
@@ -60,16 +67,16 @@ const NOMINATIM = "https://nominatim.openstreetmap.org/reverse";
  * stay under it.
  *
  * ADDING A SECOND PROVIDER DID NOT ADD A SECOND TIMEOUT. That would have been
- * the easy mistake: 3.5s for Mappls plus 3.5s for Nominatim is a 7s worst case,
- * the browser aborts at 4s, and every photo taken somewhere Mappls is slow
- * would wait longer and then get nothing at all. Instead the existing budget is
- * SPLIT — 1.5s for Mappls, the remainder for Nominatim — so the worst case is
+ * the easy mistake: 3.5s for Ola plus 3.5s for Nominatim is a 7s worst case,
+ * the browser aborts at 4s, and every photo taken somewhere Ola is slow would
+ * wait longer and then get nothing at all. Instead the existing budget is
+ * SPLIT — 1.5s for Ola, the remainder for Nominatim — so the worst case is
  * exactly what it was before.
  */
 const TIMEOUT_MS = 3500;
 
-/** What is left for Nominatim after a full-length Mappls attempt. */
-const NOMINATIM_TIMEOUT_MS = TIMEOUT_MS - MAPPLS_TIMEOUT_MS;
+/** What is left for Nominatim after a full-length Ola attempt. */
+const NOMINATIM_TIMEOUT_MS = TIMEOUT_MS - OLA_TIMEOUT_MS;
 
 const coordsSchema = z.object({
   latitude: z.number().finite().min(-90).max(90),
@@ -182,22 +189,22 @@ export async function POST(request: Request) {
     });
   }
 
-  // 2. Ask Mappls, if the client has given us credentials. Skipped entirely
+  // 2. Ask Ola Maps, if the client has given us a key. Skipped entirely
   //    otherwise, so an unconfigured deployment spends no time here at all and
   //    Nominatim below keeps the whole budget.
-  const configured = mapplsConfigured();
+  const configured = olaConfigured();
   const startedAt = Date.now();
   let result: { ok: true; label: string | null } | { ok: false } = { ok: false };
-  let source: "mappls" | "openstreetmap" = "mappls";
+  let source: "ola" | "openstreetmap" = "ola";
 
   if (configured) {
-    result = await mapplsReverseGeocode(latitude, longitude, MAPPLS_TIMEOUT_MS);
+    result = await olaReverseGeocode(latitude, longitude, OLA_TIMEOUT_MS);
   }
 
-  // 3. Fall back to OpenStreetMap. This runs whenever Mappls had nothing to
-  //    say, for ANY reason: no credentials, a refused token, a timeout, a rate
-  //    limit, an unrecognised response. It gets whatever is left of the budget,
-  //    and never less than its own share.
+  // 3. Fall back to OpenStreetMap. This runs whenever Ola had nothing to say,
+  //    for ANY reason: no key, a refused key, a timeout, a rate limit, an
+  //    unrecognised response. It gets whatever is left of the budget, and never
+  //    less than its own share.
   if (!result.ok) {
     source = "openstreetmap";
     const spent = configured ? Date.now() - startedAt : 0;
