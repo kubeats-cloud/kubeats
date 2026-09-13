@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cellFor, formatPlace } from "@/lib/places";
+import { cellFor, formatMapplsPlace, formatPlace, joinPlaceParts } from "@/lib/places";
 
 /**
  * The reverse-geocoding helpers. The cache key matters more than it looks: the
@@ -94,5 +94,84 @@ describe("formatPlace", () => {
     });
     expect(long).not.toBeNull();
     expect(long!.length).toBeLessThanOrEqual(80);
+  });
+});
+
+describe("formatMapplsPlace", () => {
+  it("builds the same three parts from Mappls's names for them", () => {
+    expect(
+      formatMapplsPlace({ subLocality: "Bopal", city: "Ahmedabad", state: "Gujarat" }),
+    ).toBe("Bopal, Ahmedabad, Gujarat");
+  });
+
+  it("falls back through the alternatives for each part", () => {
+    expect(
+      formatMapplsPlace({ locality: "Sanand", village: "Sanand Town", state: "Gujarat" }),
+    ).toBe("Sanand, Sanand Town, Gujarat");
+    expect(formatMapplsPlace({ street: "MG Road", district: "Ahmedabad", state: "Gujarat" })).toBe(
+      "MG Road, Ahmedabad, Gujarat",
+    );
+  });
+
+  it("ignores the postal address, which is the wrong answer for a stamp", () => {
+    // Mappls returns a full courier-grade address. It is better data and it
+    // does not fit under the coordinates, so it must not leak into the label.
+    const label = formatMapplsPlace({
+      formatted_address: "123, Shivalik Plaza, Nr. IIM, Bopal Road, Ahmedabad, Gujarat 380058",
+      subLocality: "Bopal",
+      city: "Ahmedabad",
+      state: "Gujarat",
+    });
+    expect(label).toBe("Bopal, Ahmedabad, Gujarat");
+    expect(label).not.toContain("Shivalik");
+  });
+
+  it("drops a repeated name, exactly as the OpenStreetMap side does", () => {
+    expect(
+      formatMapplsPlace({ subLocality: "Bopal", city: "Bopal", state: "Gujarat" }),
+    ).toBe("Bopal, Gujarat");
+  });
+
+  it("returns null when there is nothing worth stamping", () => {
+    expect(formatMapplsPlace({})).toBeNull();
+    expect(formatMapplsPlace(null)).toBeNull();
+    expect(formatMapplsPlace(undefined)).toBeNull();
+    // A pincode alone is not a place name.
+    expect(formatMapplsPlace({ pincode: "380058" })).toBeNull();
+  });
+
+  it("stays short enough for the stamp", () => {
+    const long = formatMapplsPlace({
+      subLocality: "A".repeat(60),
+      city: "B".repeat(60),
+      state: "C".repeat(60),
+    });
+    expect(long).not.toBeNull();
+    expect(long!.length).toBeLessThanOrEqual(80);
+  });
+});
+
+describe("the two providers produce the SAME label", () => {
+  it("so nothing downstream can tell which service answered", () => {
+    // THE PROPERTY THAT MATTERS. A visit named by Mappls and a visit named by
+    // OpenStreetMap are rendered by the same components and cached in the same
+    // column; if the two formatted differently, the stamp would change shape
+    // depending on which service happened to be up.
+    const osm = formatPlace({ suburb: "Bopal", city: "Ahmedabad", state: "Gujarat" });
+    const mappls = formatMapplsPlace({
+      subLocality: "Bopal",
+      city: "Ahmedabad",
+      state: "Gujarat",
+    });
+    expect(mappls).toBe(osm);
+  });
+
+  it("because both go through one join", () => {
+    expect(joinPlaceParts(["Bopal", "Ahmedabad", "Gujarat"])).toBe(
+      "Bopal, Ahmedabad, Gujarat",
+    );
+    expect(joinPlaceParts([null, undefined, "  ", "Gujarat"])).toBe("Gujarat");
+    expect(joinPlaceParts([])).toBeNull();
+    expect(joinPlaceParts([null, undefined])).toBeNull();
   });
 });

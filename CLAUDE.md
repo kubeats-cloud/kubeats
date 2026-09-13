@@ -284,13 +284,35 @@ already claimed the easy 0.9 MiB between them; see README for both.
   geotags, so a live reading is both the only option and the harder one to fake.
   If `getUserMedia` is unavailable or refused, it falls back to the native
   `capture="environment"` input; there is no desktop webcam path beyond that.
-- The stamp carries an approximate area name under the coordinates, from
-  OpenStreetMap's Nominatim via `/api/place` (server-side, so the User-Agent
-  their policy asks for can be set and the answer cached in `place_cache`,
+- The stamp carries an approximate area name under the coordinates, via
+  `/api/place` (server-side, so the User-Agent Nominatim's policy asks for can
+  be set, no key reaches a browser, and the answer is cached in `place_cache`,
   migration 0007). It is decoration and is treated as such: a 3.5s timeout on
   the route, a 4s abort in the browser, and any failure simply omits the line.
   The coordinates and the time are never replaced by it, and no visit has ever
   failed to save because a place could not be named.
+- **Two geocoders, chained, and the second one is the default.** `place_cache`
+  first, then **Mappls** (MapmyIndia) when credentials are set, then
+  **Nominatim**, then nothing. Mappls is optional in the strong sense: with
+  `MAPPLS_*` unset the route skips it WITHOUT a fetch and behaves exactly as it
+  did before it existed, which is the supported configuration, not a degraded
+  one. `docs/MAPMYINDIA-SETUP.md` is what the client follows to switch it on.
+  Three things hold this together:
+  - **The 3.5s budget is SPLIT, not doubled** — 1.5s for Mappls, the rest for
+    Nominatim. Giving each its own full timeout would make the worst case 7s
+    against a browser that aborts at 4s, so every photo in a slow spot would
+    wait longer and still get nothing. `tests/unit/mappls.test.ts` asserts the
+    arithmetic.
+  - **Both providers produce the SAME label.** `joinPlaceParts()` in `places.ts`
+    is the only place a label is built; `formatPlace()` and
+    `formatMapplsPlace()` only decide which of their own field names feed it.
+    Mappls's `formatted_address` is deliberately ignored — a courier's address
+    does not fit under the coordinates.
+  - **The cache stores the label, not its source.** That is what lets
+    credentials be added or removed later without invalidating a row.
+  This changes the NAME only. GPS accuracy comes from the device and nothing
+  here can move a pin, which is also why none of it touched the capture path or
+  the location-hidden-during-a-visit rule above.
 - The area name is deliberately NOT stored on `visits`. It is already burned
   into that visit's photograph, and `place_cache` can be joined on the rounded
   coordinates to recover it — see the query at the foot of 0007. A column would

@@ -95,8 +95,69 @@ export function publicEnv(): PublicEnv {
  * header. Read here because this file is the only place that reads env.
  */
 export function placeLookupContact(): string | null {
-  const value = process.env.PLACE_LOOKUP_CONTACT;
+  return trimmed(process.env.PLACE_LOOKUP_CONTACT);
+}
+
+/** An optional variable that is set, or null. Blank counts as unset. */
+function trimmed(value: string | undefined): string | null {
   return value && value.trim() !== "" ? value.trim() : null;
+}
+
+/**
+ * Optional: Mappls (formerly MapmyIndia) credentials for the area-name lookup.
+ *
+ * WHAT THIS BUYS. Nothing about the position itself — the coordinates and the
+ * accuracy come from the device and are untouched by any of this. What it buys
+ * is a better NAME for those coordinates in India, where Mappls's data is
+ * considerably richer than OpenStreetMap's: a named colony or sector where
+ * Nominatim often has only the city.
+ *
+ * ENTIRELY OPTIONAL, AND OPTIONAL IN THE STRONG SENSE. Return null here and the
+ * app behaves exactly as it did before Mappls existed: /api/place goes straight
+ * to Nominatim, which is free and needs no account at all. There is no degraded
+ * mode, no warning banner and no feature that stops working. That is why this
+ * is a function returning null rather than an entry in `serverSchema`, which
+ * would refuse to boot without it.
+ *
+ * TWO CREDENTIAL SHAPES, because Mappls issues two and which one a given
+ * account gets depends on when and how it was created:
+ *
+ *   client_credentials  MAPPLS_CLIENT_ID + MAPPLS_CLIENT_SECRET, exchanged for
+ *                       a short-lived bearer token. This is what the current
+ *                       console issues and the path to prefer.
+ *   a REST key          MAPPLS_REST_KEY, dropped straight into the request
+ *                       path with no token step. Older accounts have this.
+ *
+ * If both are present the REST key wins, because it is the shorter path and
+ * cannot fail at a token step. Setting neither is the supported default.
+ *
+ * SERVER-ONLY, and it must stay that way: none of these names carries a
+ * NEXT_PUBLIC_ prefix, so Next will not inline them into the browser bundle,
+ * and nothing in src/components may read them. The lookup happens in the route
+ * handler for exactly this reason.
+ */
+export interface MapplsCredentials {
+  kind: "rest-key" | "oauth";
+  restKey: string | null;
+  clientId: string | null;
+  clientSecret: string | null;
+}
+
+export function mapplsCredentials(): MapplsCredentials | null {
+  const restKey = trimmed(process.env.MAPPLS_REST_KEY);
+  if (restKey) {
+    return { kind: "rest-key", restKey, clientId: null, clientSecret: null };
+  }
+
+  const clientId = trimmed(process.env.MAPPLS_CLIENT_ID);
+  const clientSecret = trimmed(process.env.MAPPLS_CLIENT_SECRET);
+  // Half a credential is not a credential. Say nothing and fall back, rather
+  // than spending a request that is certain to be rejected.
+  if (clientId && clientSecret) {
+    return { kind: "oauth", restKey: null, clientId, clientSecret };
+  }
+
+  return null;
 }
 
 /**
@@ -113,8 +174,7 @@ export function placeLookupContact(): string | null {
  * deployment should not fail to boot over a monitoring convenience.
  */
 export function healthCheckToken(): string | null {
-  const value = process.env.HEALTH_CHECK_TOKEN;
-  return value && value.trim() !== "" ? value.trim() : null;
+  return trimmed(process.env.HEALTH_CHECK_TOKEN);
 }
 
 let cachedServer: ServerEnv | undefined;
