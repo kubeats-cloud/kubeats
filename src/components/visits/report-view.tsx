@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import { activityLabelFor } from "@/lib/validation/visit";
 import { hasCampusVisit, hasSession } from "@/lib/validation/closing-report";
+import { discussionOf, metPersonOf } from "@/lib/report-display";
 import type { VisitReport } from "@/lib/closing-report";
 
 /**
@@ -70,6 +71,17 @@ export function ReportView({ report }: { report: VisitReport }) {
    * which is worse than the slightly dated wording it keeps instead.
    */
   const richEra = done.length > 0;
+
+  /**
+   * Both of these are two-era reads — see report-display.ts for which column
+   * each form writes. The short form records ONE person on the visit row;
+   * `visit_people` holds the long report's list. A report has one or the other,
+   * never both, but rendering both costs nothing and means neither era comes
+   * out blank.
+   */
+  const discussion = discussionOf(report);
+  const metPerson = metPersonOf(report);
+  const peopleMet = report.people.length + (metPerson ? 1 : 0);
   const presentLabel = richEra
     ? hasCampusVisit(done) && !hasSession(done)
       ? "Students who visited"
@@ -182,9 +194,7 @@ export function ReportView({ report }: { report: VisitReport }) {
         <CardContent className="space-y-4">
           <div>
             <p className="text-muted-foreground text-xs">Discussion</p>
-            <p className="mt-1 text-sm whitespace-pre-wrap">
-              {report.discussion_summary ?? "—"}
-            </p>
+            <p className="mt-1 text-sm whitespace-pre-wrap">{discussion ?? "—"}</p>
           </div>
           {report.employee_remarks && (
             <div>
@@ -202,15 +212,30 @@ export function ReportView({ report }: { report: VisitReport }) {
           <CardTitle className="text-base">
             People met
             <span className="text-muted-foreground ml-2 text-sm font-normal">
-              {report.people.length}
+              {peopleMet}
             </span>
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {report.people.length === 0 ? (
+          {peopleMet === 0 ? (
             <p className="text-muted-foreground text-sm">Nobody was recorded.</p>
           ) : (
             <ul className="space-y-2">
+              {metPerson && (
+                <li className="border-border flex items-start justify-between gap-3 rounded-md border px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{metPerson.name}</p>
+                    {/* Optional means "may be absent", never "may be wrong":
+                        a number that IS here has passed visits_met_phone_valid,
+                        and one that is not simply leaves the line off. */}
+                    {metPerson.phone && (
+                      <p className="text-muted-foreground truncate text-xs tabular-nums">
+                        {metPerson.phone}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              )}
               {report.people.map((person) => (
                 <li
                   key={person.id}

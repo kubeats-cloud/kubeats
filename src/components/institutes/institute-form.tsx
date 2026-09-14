@@ -23,6 +23,7 @@ import {
 import type { StateNode } from "@/lib/locations";
 import {
   BOARD_OPTIONS,
+  CAMPUS_REQUIRED,
   INSTITUTE_TYPES,
   STREAMS,
   TYPE_LABELS,
@@ -31,6 +32,7 @@ import {
   instituteSchema,
   type Stream,
 } from "@/lib/validation/institute";
+import { campusLabel, type Campus } from "@/lib/campus-display";
 import { cn } from "@/lib/utils";
 import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
 
@@ -39,7 +41,20 @@ function digits(value: string, max: number) {
   return value.replace(/\D/g, "").slice(0, max);
 }
 
-export function InstituteForm({ tree }: { tree: StateNode[] }) {
+export function InstituteForm({
+  tree,
+  campuses = [],
+}: {
+  tree: StateNode[];
+  /**
+   * Non-empty only for an admin. Its length is what decides whether a campus
+   * is asked for and required, so the role is expressed once — by the page
+   * that knows it — rather than being passed around as a second flag that
+   * could disagree with this list.
+   */
+  campuses?: Campus[];
+}) {
+  const asksForCampus = campuses.length > 0;
   const [state, formAction, isPending] = useActionState(
     createInstitute,
     EMPTY_FORM_STATE,
@@ -51,6 +66,7 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
   const [class11, setClass11] = useState<Stream[]>([]);
   const [class12, setClass12] = useState<Stream[]>([]);
   const [type, setType] = useState<string>("school");
+  const [campusId, setCampusId] = useState("");
 
   // Server errors win once a submission has come back.
   const error = state.error ?? clientState.error;
@@ -98,11 +114,16 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
     const formData = new FormData(event.currentTarget);
 
     const parsed = instituteSchema.safeParse(instituteFormDataToInput(formData));
-    if (!parsed.success) {
-      setClientState({
-        error: CHECK_FIELDS,
-        fieldErrors: fieldErrorsFrom(parsed.error),
-      });
+
+    // Folded into the same pass as the schema so one notice lists everything
+    // still outstanding, rather than an admin fixing the fields, submitting,
+    // and only then being told about the campus.
+    const campusMissing = asksForCampus && !campusId;
+
+    if (!parsed.success || campusMissing) {
+      const fieldErrors = parsed.success ? {} : fieldErrorsFrom(parsed.error);
+      if (campusMissing) fieldErrors.campus_id = CAMPUS_REQUIRED;
+      setClientState({ error: CHECK_FIELDS, fieldErrors });
       return;
     }
     setClientState(EMPTY_FORM_STATE);
@@ -157,6 +178,39 @@ export function InstituteForm({ tree }: { tree: StateNode[] }) {
             </Select>
             {fieldError("type")}
           </div>
+
+          {/* Admin only. Unlike `type` above, this Select mounts EMPTY, so a
+              React reset restores a placeholder the registrar can see rather
+              than a plausible-looking wrong answer — the hazard that comment
+              describes does not apply here, and the hidden input keeps the
+              value where FormData can reach it either way. */}
+          {asksForCampus && (
+            <div className="space-y-2">
+              <Label>Campus</Label>
+              <input type="hidden" name="campus_id" value={campusId} />
+              <Select value={campusId} onValueChange={setCampusId}>
+                <SelectTrigger
+                  className="h-11 w-full"
+                  aria-label="Campus"
+                  aria-invalid={fieldErrors.campus_id ? true : undefined}
+                >
+                  <SelectValue placeholder="Which campus is this prospect for?" />
+                </SelectTrigger>
+                <SelectContent>
+                  {campuses.map((campus) => (
+                    <SelectItem key={campus.id} value={campus.id}>
+                      {campusLabel(campus)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-muted-foreground text-xs">
+                Only reps from this campus will see it. A rep registering an
+                institute gets their own campus automatically.
+              </p>
+              {fieldError("campus_id")}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="address">Address</Label>
