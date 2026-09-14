@@ -86,6 +86,19 @@ export interface VisitReport {
   follow_up_action: string | null;
   follow_up_date: string | null;
   employee_remarks: string | null;
+
+  /**
+   * The one person the SHORT form records: a name (mandatory since 0022) and a
+   * number if the rep got one.
+   *
+   * Deliberately not `visit_people`. That table belongs to the retired long
+   * report and nothing has written a row to it since; reading only it is why
+   * every report filed by the current form said "Nobody was recorded" while
+   * the name sat in this column. Both are rendered now, so a report filed
+   * under either version still shows who was met.
+   */
+  met_name: string | null;
+  met_phone: string | null;
 }
 
 const REPORT_COLUMNS = `
@@ -98,7 +111,8 @@ const REPORT_COLUMNS = `
   management_response, management_feedback, management_interest,
   discussion_summary, visit_outcome, primary_outcome,
   applications_collected, admissions_generated,
-  follow_up_action, follow_up_date, employee_remarks
+  follow_up_action, follow_up_date, employee_remarks,
+  met_name, met_phone
 `;
 
 /** One visit, with its institute, its people and its photo. RLS-scoped. */
@@ -190,6 +204,8 @@ export async function getVisitReport(visitId: string): Promise<VisitReport | nul
     follow_up_action: value("follow_up_action"),
     follow_up_date: value("follow_up_date"),
     employee_remarks: value("employee_remarks"),
+    met_name: value("met_name"),
+    met_phone: value("met_phone"),
   };
 }
 

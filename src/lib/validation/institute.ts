@@ -178,9 +178,37 @@ const optionalPincode = z
     message: "A PIN code is 6 digits.",
   });
 
+/**
+ * The campus an ADMIN must name, and the one a REP never sees.
+ *
+ * `enforce_institute_campus()` (FO022, migration 0020b) defaults a new
+ * institute to `my_campus()`, which is the registering rep's. An admin has no
+ * campus — that is the whole shape of the role — so the default lands on null
+ * and the trigger refuses the insert. Its own comment says what was always
+ * meant to happen: "an admin must name one". The form simply never asked, so
+ * every admin registration failed with a generic "please try again".
+ *
+ * Hence optional here rather than required: the schema is shared, and for a rep
+ * the field is genuinely absent and the database fills it in. Who must supply
+ * one is decided where the role is known — in the form and in the action.
+ */
+export const CAMPUS_REQUIRED = "Choose the campus this institute belongs to.";
+
 export const instituteSchema = z.object({
   name: z.string().trim().min(1, "Enter the institute's name.").max(200),
   type: z.enum(INSTITUTE_TYPES),
+
+  campus_id: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : v))
+    .nullable()
+    .refine(
+      (v) =>
+        v === null ||
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+      "Choose one of the listed campuses.",
+    ),
 
   address: optionalText(500),
   pincode: optionalPincode,
@@ -259,6 +287,7 @@ export function instituteFormDataToInput(formData: FormData) {
   return {
     name: text("name"),
     type: text("type"),
+    campus_id: text("campus_id"),
     address: text("address"),
     pincode: text("pincode"),
     state: text("state"),

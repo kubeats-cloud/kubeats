@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import { ensureAreas } from "@/lib/locations";
 import { canonicalAreaName, findExisting } from "@/lib/location-names";
@@ -10,6 +11,7 @@ import { areaSchema } from "@/lib/validation/admin";
 import type { AreaNode } from "@/lib/locations";
 import type { InstituteFormState } from "@/lib/institute-form-state";
 import {
+  CAMPUS_REQUIRED,
   fieldErrorsFrom,
   instituteFormDataToInput,
   instituteSchema,
@@ -21,9 +23,7 @@ export async function createInstitute(
   formData: FormData,
 ): Promise<InstituteFormState> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) {
     return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
@@ -40,16 +40,45 @@ export async function createInstitute(
     };
   }
 
+  /**
+   * Who decides the campus, and why the rep's path is left exactly as it was.
+   *
+   * An admin names one; `institutes_insert` already permits `is_admin()` to
+   * write any campus, so nothing in the database had to change for this.
+   * A rep's choice is IGNORED rather than trusted — their campus comes from
+   * `my_campus()` inside the trigger, which is the same answer RLS would
+   * enforce anyway, so honouring a submitted value could only ever let a
+   * tampered form try for a campus that is not theirs and be refused later.
+   */
+  const { campus_id: submittedCampus, ...institute } = parsed.data;
+  const admin = isAdmin(user);
+  const campusId = admin ? submittedCampus : null;
+
+  if (admin && !campusId) {
+    return { error: CHECK_FIELDS, fieldErrors: { campus_id: CAMPUS_REQUIRED } };
+  }
+
   const { data, error } = await supabase
     .from("institutes")
     // registered_by must equal auth.uid() — the RLS insert policy requires it,
     // so this is not merely bookkeeping.
-    .insert({ ...parsed.data, registered_by: user.id })
+    .insert({
+      ...institute,
+      registered_by: user.id,
+      ...(campusId ? { campus_id: campusId } : {}),
+    })
     .select("id")
     .single();
 
   if (error) {
     logError("institutes:create", error);
+    // FO022 — enforce_institute_campus() refusing an institute with no campus.
+    // The check above is what an admin normally meets; this is the backstop for
+    // a submission that got past it, and it names the field rather than telling
+    // somebody to "try again" at something that cannot succeed.
+    if (error.code === "FO022") {
+      return { error: CHECK_FIELDS, fieldErrors: { campus_id: CAMPUS_REQUIRED } };
+    }
     return {
       error: toFriendlyMessage(error, "We could not save this institute. Please try again."),
       fieldErrors: {},

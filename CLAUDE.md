@@ -184,14 +184,14 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2949
-KiB** — about 123 KiB, 4.0% spare. That is the thinnest it has been: the
-noindex/404/privacy work cost 51 KiB for two static pages, which is mostly
-per-route overhead rather than their content. The budget is real: measure before adding
-anything sizable, and re-measure rather than trusting this line. It has been
-wrong before, in both directions — it read 2949 for a while after the figure it
-described had already moved, which is how a stale number becomes a wrong
-decision about a dependency.
+Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2966
+KiB** — about 106 KiB, 3.4% spare. That is the thinnest it has been: the
+admin's campus picker on the register-institute form cost 17 KiB, most of it
+pulling the campus list into a route that had not needed it. The budget is
+real: measure before adding anything sizable, and re-measure rather than
+trusting this line. It has been wrong before, in both directions — it read 2949
+for a while after the figure it described had already moved, which is how a
+stale number becomes a wrong decision about a dependency.
 
 ```bash
 npm run build && npx wrangler deploy --dry-run --outdir /tmp/out   # "Total Upload:"
