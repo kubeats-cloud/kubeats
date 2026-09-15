@@ -368,7 +368,7 @@ export function LogVisitForm({
         description={
           needsFollowUp
             ? "That status leaves the institute open, so put the next visit in the diary now."
-            : "Optional — only if you already know when you are going back."
+            : "Optional. Only if you already know when you are going back."
         }
       >
         <div className="space-y-2 sm:max-w-xs">

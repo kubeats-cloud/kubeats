@@ -211,7 +211,7 @@ export default async function InstituteDetailPage(
         A rep never sees it — they own everything they can open.
       */}
       {admin && (
-        <div className="mb-6">
+        <div className="mb-4">
           <ReassignOwner
             instituteId={institute.id}
             ownerName={institute.ownerName}

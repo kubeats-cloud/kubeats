@@ -68,14 +68,14 @@ export function ActivityGridTable({
   return (
     <div
       className={cn(
-        "border-border overflow-x-auto rounded-lg border",
+        "border-border bg-card overflow-x-auto rounded-lg border",
         compact && "max-h-[22rem] overflow-y-auto",
       )}
     >
       <table className="w-full border-collapse text-left">
         <caption className="sr-only">{caption}</caption>
         <thead>
-          <tr className="bg-secondary/60 text-muted-foreground border-border border-b">
+          <tr className="bg-secondary text-muted-foreground border-border border-b">
             {groupRow.map((value, index) => {
               // A cell covered by a merge to its left renders no <th> at all.
               if (value === null && !spans.has(index)) return null;
@@ -98,13 +98,13 @@ export function ActivityGridTable({
               );
             })}
           </tr>
-          <tr className="bg-secondary/40 text-muted-foreground border-border border-b">
+          <tr className="bg-secondary text-muted-foreground border-border border-b">
             {/* Column A is covered by the rowSpan above, so it is skipped. */}
             {labelRow.slice(1).map((value, index) => (
               <th
                 key={index}
                 scope="col"
-                className={cn(headCell, "font-medium whitespace-nowrap")}
+                className={cn(headCell, "font-medium whitespace-nowrap text-right")}
               >
                 {String(value ?? "")}
               </th>
@@ -115,7 +115,7 @@ export function ActivityGridTable({
           {bodyRows.map((row, r) => (
             <tr
               key={r}
-              className="border-border hover:bg-accent/40 border-b transition-colors last:border-0"
+              className="group border-border hover:bg-accent/40 border-b transition-colors last:border-0"
             >
               {row.map((value, c) => (
                 <td
@@ -123,7 +123,10 @@ export function ActivityGridTable({
                   className={cn(
                     cell,
                     c === 0
-                      ? cn(sticky, "bg-card font-medium whitespace-nowrap")
+                      ? cn(
+                          sticky,
+                          "bg-card group-hover:bg-accent/40 font-medium whitespace-nowrap",
+                        )
                       : "text-right tabular-nums",
                     // A zero is real data, but it is not what the eye is for.
                     c > 0 && value === 0 && "text-muted-foreground/60",

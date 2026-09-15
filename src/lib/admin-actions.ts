@@ -94,7 +94,7 @@ export async function reassignInstitute(
     // the wording lives here and no database text reaches a screen.
     if (error.code === "FO025") {
       return denied(
-        "That cannot be moved right now — either the rep is not on this " +
+        "That cannot be moved right now. Either the rep is not on this " +
           "institute's campus, or its current owner is part-way through a " +
           "visit there. Try again once they have finished.",
       );

@@ -169,7 +169,7 @@ export function FollowUpList({
                         : "This status was set directly rather than by a visit."}
                     </p>
                     {item.owner ? (
-                      <div className="mt-3">
+                      <div className="mt-4">
                         <Button
                           type="button"
                           variant="outline"
@@ -184,7 +184,7 @@ export function FollowUpList({
                          the plan row anyway. Says so rather than offering a
                          button that cannot work. */
                       <p className="text-danger mt-3 text-xs">
-                        Unassigned — give this institute to a rep before
+                        Unassigned. Give this institute to a rep before
                         assigning a follow-up.
                       </p>
                     )}

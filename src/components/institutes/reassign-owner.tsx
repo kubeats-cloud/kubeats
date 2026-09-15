@@ -70,7 +70,7 @@ export function ReassignOwner({
             nothing else on any screen to say so. This badge is the only place
             that state surfaces, which is why it is loud.
           */
-          <Badge variant="danger">Unassigned — no rep can see this</Badge>
+          <Badge variant="danger">Unassigned: no rep can see this</Badge>
         )}
       </div>
 

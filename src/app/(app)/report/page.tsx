@@ -117,7 +117,7 @@ export default async function ReportPage(props: PageProps<"/report">) {
           page itself defaults to the current month, so the default range is
           still the current month — it simply stays in step when they navigate. */}
       {admin && (
-        <div className="mt-4">
+        <div className="my-4">
           <ExportExcel
             {...periodRange(period, periodStart)}
             member={memberId}

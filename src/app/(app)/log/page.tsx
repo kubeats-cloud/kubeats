@@ -164,7 +164,7 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
         <PageHeader title="Log a visit" description={entry.instituteName} />
         <EmptyState
           title="This visit needs its purpose set again"
-          description={`"${entry.purpose}" no longer says what kind of visit it is, so this cannot be logged yet. Add the institute to today's plan again with a current purpose — your check-in is safe.`}
+          description={`"${entry.purpose}" no longer says what kind of visit it is, so this cannot be logged yet. Add the institute to today's plan again with a current purpose. Your check-in is safe.`}
           action={
             <Button asChild className="h-11">
               <Link href="/">Go to the Dashboard</Link>
