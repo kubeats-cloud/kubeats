@@ -140,37 +140,23 @@ const shape = {
       "That earlier visit could not be identified.",
     ),
 
-  /** "How did it go?" — the one free-text box, and now the whole of it. */
+  /** "Notes" — the one free-text box, and now the whole of it. */
   notes: text(2000),
 
-  /**
-   * Who was met. One person: a name, and a number if the rep got one.
+  /*
+   * met_name and met_phone STOOD HERE — a required name, an optional mobile.
    *
-   * THE NAME IS REQUIRED AND THE NUMBER IS NOT, which is the client's spec and
-   * is the reverse of how this pair used to behave. A visit with no name
-   * against it is not a record anybody can act on — "we met someone at St
-   * Xavier's" — and there is always a name. A mobile genuinely is not always
-   * there. Hence: always ask who, never insist how to ring them.
+   * Withdrawn (change #17). The decision-maker and the principal are captured
+   * at institute registration, where they belong to the school rather than to
+   * one afternoon; asking again on every visit re-collected the same two facts
+   * and made the rep retype a name the registry already held.
    *
-   * NOTHING IN THE DATABASE ENFORCES THE FIRST HALF. `visits_met_name_length`
-   * and `visits_met_phone_valid` (0018) are both "null, or valid", and both
-   * still are: reports filed before this rule have a null met_name and still
-   * render. A NOT NULL would have refused to build against them.
+   * THE COLUMNS AND THEIR CHECKS STAY. `visits_met_name_length` and
+   * `visits_met_phone_valid` (0018) are both "null, or valid", so a report
+   * filed today with nulls satisfies them exactly as one filed last month with
+   * answers does — which is what makes this a form change and not a migration.
+   * Restoring the question is these two fields back in this shape.
    */
-  met_name: z
-    .string()
-    .trim()
-    .min(1, "Who did you meet?")
-    .max(120, "That is longer than we can store."),
-  met_phone: z
-    .string()
-    .trim()
-    .transform((v) => v.replace(/\D/g, ""))
-    .transform((v) => (v === "" ? null : v))
-    .nullable()
-    .refine((v) => v === null || /^[0-9]{10}$/.test(v), {
-      message: "A mobile number is 10 digits.",
-    }),
 
   /**
    * Conditional on the status, not on a checklist.
@@ -244,8 +230,6 @@ export function feedbackFormDataToInput(formData: FormData) {
     daily_plan_id: str("daily_plan_id") || null,
     closes_visit_id: str("closes_visit_id"),
     notes: str("notes"),
-    met_name: str("met_name"),
-    met_phone: str("met_phone"),
     students_attended: str("students_attended"),
     session_topic: str("session_topic"),
     session_taken_by: str("session_taken_by"),
@@ -268,8 +252,6 @@ export function feedbackFormDataToInput(formData: FormData) {
  * status that decides whether it is required.
  */
 export interface FeedbackState {
-  metName: string;
-  metPhone: string;
   studentsAttended: string;
   sessionTopic: string;
   sessionTakenBy: string;
@@ -277,8 +259,6 @@ export interface FeedbackState {
 }
 
 export const EMPTY_FEEDBACK: FeedbackState = {
-  metName: "",
-  metPhone: "",
   studentsAttended: "",
   sessionTopic: "",
   sessionTakenBy: "",

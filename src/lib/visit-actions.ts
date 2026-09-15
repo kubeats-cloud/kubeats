@@ -209,13 +209,31 @@ export async function assignVisit(
     if (error.code === "42501") {
       return { error: "Only an admin can assign a visit.", fieldErrors: {} };
     }
-    // FO023 — an assignment has to stay inside the rep's own campus, or it
-    // reintroduces exactly the crossing campus scoping exists to prevent. The
-    // picker is filtered too, so this is the backstop rather than the message
-    // an admin normally sees.
+    // FO023 — WIDENED BY 0028, and this message was stale until now. The guard
+    // used to check the rep's CAMPUS; it checks OWNERSHIP, which implies the
+    // campus. An institute on a rep's campus but owned by a colleague is now
+    // refused, and being told "not in that rep's campus" would send an admin to
+    // look at the campus, which is correct and not the problem.
+    //
+    // Both routes into this action are filtered — the Assign picker narrows to
+    // the chosen rep's institutes, and Pending's shortcut assigns to the owner
+    // by construction — so this is the backstop, reached mainly when an
+    // institute is reassigned between the page rendering and the button being
+    // pressed. The remedy is named because it is two taps away.
     if (error.code === "FO023") {
       return {
-        error: "That institute is not in that rep's campus.",
+        error:
+          "That institute belongs to another rep. Reassign it to this rep first, then assign the visit.",
+        fieldErrors: {},
+      };
+    }
+    // FO026 — the same ownership rule, enforced on the plan row itself. Reached
+    // by the same race; worth its own sentence rather than falling through to
+    // the generic message, which would say nothing an admin could act on.
+    if (error.code === "FO026") {
+      return {
+        error:
+          "That institute is not that rep's. Reassign it to them first, then assign the visit.",
         fieldErrors: {},
       };
     }

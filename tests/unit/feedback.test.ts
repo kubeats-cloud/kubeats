@@ -24,8 +24,6 @@ import {
 const filled = (over: Partial<Record<string, string>> = {}) => ({
   closes_visit_id: "",
   notes: "A note",
-  met_name: "A Person",
-  met_phone: "9876543210",
   students_attended: "",
   session_topic: "",
   session_taken_by: "",
@@ -41,11 +39,11 @@ describe("applyFeedbackPatch — two changes in one tick both survive", () => {
     //
     // Patches compose, so applying them in sequence keeps both. That is what
     // the parent now does inside a functional update.
-    const first = applyFeedbackPatch(EMPTY_FEEDBACK, { metName: "A Person" });
-    const second = applyFeedbackPatch(first, { metPhone: "9876543210" });
+    const first = applyFeedbackPatch(EMPTY_FEEDBACK, { sessionTopic: "Careers" });
+    const second = applyFeedbackPatch(first, { sessionTakenBy: "Dr Rao" });
 
-    expect(second.metName, "the first answer must survive").toBe("A Person");
-    expect(second.metPhone).toBe("9876543210");
+    expect(second.sessionTopic, "the first answer must survive").toBe("Careers");
+    expect(second.sessionTakenBy).toBe("Dr Rao");
   });
 
   it("shows what the old merge did, so the difference is on the record", () => {
@@ -54,24 +52,22 @@ describe("applyFeedbackPatch — two changes in one tick both survive", () => {
     // started from that same object. Reproduced here against a fixed `stale`
     // to show the loss concretely rather than describing it.
     const stale = EMPTY_FEEDBACK;
-    const oldFirst = { ...stale, metName: "A Person" };
-    const oldSecond = { ...stale, metPhone: "9876543210" }; // still merging `stale`
-    expect(oldSecond.metName, "the old way dropped the first answer").toBe("");
-    expect(oldFirst.metName).toBe("A Person"); // it existed, then was overwritten
+    const oldFirst = { ...stale, sessionTopic: "Careers" };
+    const oldSecond = { ...stale, sessionTakenBy: "Dr Rao" }; // still merging `stale`
+    expect(oldSecond.sessionTopic, "the old way dropped the first answer").toBe("");
+    expect(oldFirst.sessionTopic).toBe("Careers"); // it existed, then was overwritten
 
     // The new way threads the result through, so nothing is dropped.
     const now = applyFeedbackPatch(
-      applyFeedbackPatch(stale, { metName: "A Person" }),
-      { metPhone: "9876543210" },
+      applyFeedbackPatch(stale, { sessionTopic: "Careers" }),
+      { sessionTakenBy: "Dr Rao" },
     );
-    expect(now.metName).toBe("A Person");
-    expect(now.metPhone).toBe("9876543210");
+    expect(now.sessionTopic).toBe("Careers");
+    expect(now.sessionTakenBy).toBe("Dr Rao");
   });
 
   it("survives a whole form filled one field at a time", () => {
     const answers: [keyof FeedbackState, string][] = [
-      ["metName", "A Person"],
-      ["metPhone", "9876543210"],
       ["studentsAttended", "40"],
       ["sessionTopic", "Careers after 12th"],
       ["sessionTakenBy", "Dr Rao"],
@@ -87,7 +83,7 @@ describe("applyFeedbackPatch — two changes in one tick both survive", () => {
     // A functional update hands back the PREVIOUS state; mutating it would make
     // React's own bail-out checks see no change.
     const before = { ...EMPTY_FEEDBACK };
-    applyFeedbackPatch(before, { metName: "A Person" });
+    applyFeedbackPatch(before, { sessionTopic: "Careers" });
     expect(before).toEqual(EMPTY_FEEDBACK);
   });
 
@@ -115,8 +111,6 @@ describe("the report asks only for what close_visit() can save", () => {
   const WRITES = [
     "closes_visit_id",
     "notes",
-    "met_name",
-    "met_phone",
     "students_attended",
     "session_topic",
     "session_taken_by",
@@ -163,37 +157,30 @@ describe("the short form's rules", () => {
     expect(feedbackFieldsSchema.safeParse(filled()).success).toBe(true);
   });
 
-  it("insists on a name for the person met", () => {
-    // The client's spec: name required, phone optional. This used to be the
-    // weaker "a phone with no name is a number nobody can place", which let a
-    // report be filed naming nobody at all.
-    expect(feedbackFieldsSchema.safeParse(filled({ met_name: "" })).success).toBe(
-      false,
-    );
-    expect(
-      feedbackFieldsSchema.safeParse(filled({ met_name: "   " })).success,
-      "whitespace is not a name",
-    ).toBe(false);
-  });
+  it("no longer asks who was met, and refuses to be told", () => {
+    // Change #17. The decision-maker is captured at institute registration, so
+    // the per-visit pair was asking for a fact the registry already holds.
+    //
+    // Asserted as ABSENCE FROM THE SCHEMA rather than as "an empty name is
+    // accepted", because the columns are dormant and not dropped: a schema that
+    // merely stopped REQUIRING a name would still pass one through to
+    // close_visit, and the whole point is that nothing new is written to them.
+    expect(feedbackFieldsSchema.shape).not.toHaveProperty("met_name");
+    expect(feedbackFieldsSchema.shape).not.toHaveProperty("met_phone");
+    expect(feedbackSchema.shape).not.toHaveProperty("met_name");
+    expect(feedbackSchema.shape).not.toHaveProperty("met_phone");
 
-  it("takes a name with no mobile behind it", () => {
-    // The other half of the same rule. A rep does not always come away with a
-    // number; they always come away with a name.
-    const result = feedbackFieldsSchema.safeParse(filled({ met_phone: "" }));
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.met_phone).toBeNull();
-      expect(result.data.met_name).toBe("A Person");
+    // And a form that posts them anyway — a page cached from before this
+    // change — parses fine and simply drops them, rather than failing a rep who
+    // has already walked to the school.
+    const stale = feedbackFieldsSchema.safeParse(
+      filled({ met_name: "A Person", met_phone: "9876543210" }),
+    );
+    expect(stale.success).toBe(true);
+    if (stale.success) {
+      expect(stale.data).not.toHaveProperty("met_name");
+      expect(stale.data).not.toHaveProperty("met_phone");
     }
-  });
-
-  it("still refuses a mobile that is not ten digits", () => {
-    // Optional means "may be absent", not "may be wrong". A half-typed number
-    // is a number that will not dial, and visits_met_phone_valid (0018) would
-    // refuse it anyway.
-    expect(feedbackFieldsSchema.safeParse(filled({ met_phone: "98765" })).success).toBe(
-      false,
-    );
   });
 
   it("takes ONE student count, and does not insist on it", () => {

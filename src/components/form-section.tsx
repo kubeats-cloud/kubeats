@@ -27,8 +27,8 @@ export function FormSection({
    * Optional, and almost always given.
    *
    * A section with ONE self-labelling field is the exception: the closing
-   * report's "How did it go?" is a single textarea whose own label asks the
-   * question, and a heading above it repeating the same five words is one label
+   * report's "Notes" is a single textarea whose own label names the
+   * field, and a heading above it repeating the same word is one label
    * too many. Leaving it off keeps the card, the padding and the rhythm — only
    * the duplicated heading goes.
    *

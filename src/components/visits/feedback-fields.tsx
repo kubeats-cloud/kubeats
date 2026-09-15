@@ -91,51 +91,33 @@ export function FeedbackFields({
   return (
     <>
       {/* NO SECTION TITLE. One field, and its own label asks the question — a
-          heading above it saying "How did it go?" over a box labelled "How did
-          it go?" is one label too many. The description stays, because "this is
-          the whole report" is the thing a rep wants to know. */}
+          heading above it saying "Notes" over a box labelled "Notes" is one
+          label too many. The description stays, because "this is the whole
+          report" is the thing a rep wants to know. */}
       <FormSection description="A few words. This is the whole report.">
         <div className="space-y-2">
-          <Label htmlFor="notes">How did it go?</Label>
+          {/* "Notes", not "How did it go?" — the label only; same field, same
+              free text, same `notes` column. */}
+          <Label htmlFor="notes">Notes</Label>
           <Textarea id="notes" name="notes" rows={4} maxLength={2000} />
           {err("notes")}
         </div>
       </FormSection>
 
-      <FormSection
-        title="Who did you meet?"
-        description="One person. A number too, if you got one."
-      >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="met-name">Name</Label>
-            <Input
-              id="met-name"
-              name="met_name"
-              className="h-11"
-              maxLength={120}
-              value={value.metName}
-              onChange={(e) => set("metName", e.target.value)}
-              aria-required
-            />
-            {err("met_name")}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="met-phone">Mobile (optional)</Label>
-            <Input
-              id="met-phone"
-              name="met_phone"
-              type="tel"
-              inputMode="numeric"
-              className="h-11"
-              maxLength={15}
-              value={value.metPhone}
-              onChange={(e) => set("metPhone", e.target.value)}
-            />
-            {err("met_phone")}
-          </div>
-        </div>
-      </FormSection>
+      {/* "Who did you meet?" STOOD HERE — a required name and an optional
+          mobile. Withdrawn (change #17): the decision-maker and the principal
+          are captured once at institute registration, where they are a property
+          of the school rather than of the afternoon, so asking again on every
+          visit collected the same two facts over and over and made the rep type
+          a name they had already given us.
+
+          `met_name` and `met_phone` go DORMANT, not dropped — the same
+          treatment the outcome, the management response, the student response
+          and the rest got. `close_visit()` takes them as defaulted parameters
+          and feedback-actions.ts passes null explicitly, so every report filed
+          before today keeps its answer and renders it; only new ones are
+          silent. Bringing the question back is these fields restored, not a
+          migration. */}
 
       {(wantsSession || wantsCampusCount) && (
         <FormSection
