@@ -7,9 +7,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SectionTitle } from "@/components/section-title";
 import { LocationsPanel } from "@/components/settings/locations-panel";
 import { PurposesPanel } from "@/components/settings/purposes-panel";
+import { StatusesPanel } from "@/components/settings/statuses-panel";
 import { TeamPanel } from "@/components/settings/team-panel";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
-import { listPurposeRows, listTeamMembers } from "@/lib/admin";
+import { listPurposeRows, listStatusRows, listTeamMembers } from "@/lib/admin";
 import { getLocationTree } from "@/lib/locations";
 import { listCampuses } from "@/lib/campuses";
 
@@ -34,8 +35,9 @@ export default async function SettingsPage() {
   // The photo counts moved to /data with the flush that needed them; querying
   // storage on every Settings load for a number nothing shows would be a
   // request nobody asked for.
-  const [purposes, tree, members, campuses] = await Promise.all([
+  const [purposes, statuses, tree, members, campuses] = await Promise.all([
     listPurposeRows(),
+    listStatusRows(),
     getLocationTree(),
     listTeamMembers(),
     listCampuses(),
@@ -59,6 +61,9 @@ export default async function SettingsPage() {
         <PurposesPanel purposes={purposes} />
         <LocationsPanel tree={tree} />
       </div>
+
+      <SectionTitle className="mt-8">Institute statuses</SectionTitle>
+      <StatusesPanel statuses={statuses} />
 
       <SectionTitle className="mt-8">Storage</SectionTitle>
       <Card>

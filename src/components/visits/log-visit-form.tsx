@@ -42,7 +42,22 @@ import {
 } from "@/lib/validation/visit";
 import { FormNotice } from "@/components/form-notice";
 
-const NO_CHANGE = "__no_change__";
+/*
+ * NO_CHANGE stood here — the sentinel behind a "No change" option at the top of
+ * the status picker, and the reason status_set_to was nullable all the way
+ * through the form.
+ *
+ * Stage 4b removes it. A rep must say where the visit leaves the institute,
+ * because stage 5 rebuilds Pending around institutes whose CURRENT status is
+ * open and a visit that set none contributes nothing to that — not a follow-up
+ * owed, not a closed loop, just absent for ever with nothing to say it went
+ * missing. enforce_status_required() (FO024, migration 0027) is the backstop;
+ * this is what stops a rep reaching it.
+ *
+ * The empty string is the unselected state now, which is also what makes the
+ * Radix reset harmless here: a revert lands on nothing and the schema refuses
+ * it with a sentence rather than filing a visit that changed no status.
+ */
 
 /**
  * Log a visit — now the second step of a forced chain, not a screen a rep
@@ -107,11 +122,11 @@ export function LogVisitForm({
   const lifecycleStatus = planned?.lifecycle ?? "";
 
   const [expectedDate, setExpectedDate] = useState("");
-  const [statusSetTo, setStatusSetTo] = useState(NO_CHANGE);
+  const [statusSetTo, setStatusSetTo] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
 
-  const status = statusSetTo === NO_CHANGE ? null : statusSetTo;
+  const status = statusSetTo === "" ? null : statusSetTo;
   // Rule 3's date, unchanged in every respect except where its inputs come
   // from: a "Set" session or campus visit is a promise about a future day, so
   // it must name one. The purpose is what says Set now.
@@ -217,7 +232,7 @@ export function LogVisitForm({
       <input
         type="hidden"
         name="status_set_to"
-        value={statusSetTo === NO_CHANGE ? "" : statusSetTo}
+        value={statusSetTo}
       />
 
       {/*
@@ -288,14 +303,21 @@ export function LogVisitForm({
         <div className="space-y-2">
           <Label>Status</Label>
           <Select value={statusSetTo} onValueChange={setStatusSetTo}>
-            <SelectTrigger className="h-11 w-full" aria-label="Institute status">
-              <SelectValue />
+            <SelectTrigger
+              className="h-11 w-full"
+              aria-label="Institute status"
+              aria-invalid={fieldErrors.status_set_to ? true : undefined}
+            >
+              {/* A placeholder, because there is no longer a default to show.
+                  "No change" used to sit here and be pre-selected, which meant
+                  a rep could file a visit that moved nothing without ever
+                  touching this control. */}
+              <SelectValue placeholder="Choose where this leaves them" />
             </SelectTrigger>
             {/* Grouped so it is obvious which choices leave the institute in
                 play — and an open one is what makes the follow-up mandatory
                 below. */}
             <SelectContent>
-              <SelectItem value={NO_CHANGE}>No change</SelectItem>
               {STATUS_CATEGORIES.map((category) => (
                 <SelectGroup key={category}>
                   <SelectLabel>{CATEGORY_LABELS[category]}</SelectLabel>

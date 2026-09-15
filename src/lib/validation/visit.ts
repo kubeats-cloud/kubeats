@@ -314,15 +314,26 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
       .min(1, "A photo is required to log this visit.")
       .max(400),
     notes: optionalText(2000),
+    /**
+     * COMPULSORY as of stage 4b, where it used to be optional with a "No
+     * change" option beside it.
+     *
+     * Not a tidy-up. Stage 5 rebuilds Pending around institutes whose CURRENT
+     * status is open, and a visit that set no status contributes nothing to
+     * that: it is not a follow-up owed and it is not a closed loop — it is
+     * simply absent, for ever, with nothing anywhere to say it went missing.
+     *
+     * `enforce_status_required()` (FO024, migration 0027) is the backstop and
+     * is INSERT-only, so every visit logged under "No change" stays legal and
+     * readable. This is what stops a rep reaching it.
+     */
     status_set_to: z
       .string()
       .trim()
-      .transform((v) => (v === "" ? null : v))
-      .nullable()
-      .refine(
-        (v) => v === null || selectableStatuses(catalogue).includes(v),
-        { message: "Choose one of the listed statuses." },
-      ),
+      .min(1, "Say where this visit leaves the institute.")
+      .refine((v) => selectableStatuses(catalogue).includes(v), {
+        message: "Choose one of the listed statuses.",
+      }),
     follow_up_date: optionalDate,
     /**
      * DORMANT, and deliberately still accepted.

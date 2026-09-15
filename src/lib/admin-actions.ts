@@ -18,6 +18,9 @@ import {
   newMemberSchema,
   purposeSchema,
   removeSchema,
+  statusRenameSchema,
+  statusSchema,
+  statusUpdateSchema,
   stateSchema,
   textOf,
 } from "@/lib/validation/admin";
@@ -39,6 +42,194 @@ const FOREIGN_KEY_VIOLATION = "23503";
 
 function denied(error: string): AdminState {
   return { error, fieldErrors: {} };
+}
+
+/* ------------------------------------------------------------------ */
+/* Statuses                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What an admin is told when a foreign key refuses to move a status.
+ *
+ * 23503 here does not mean "something is missing" — it means the OPPOSITE:
+ * institutes, visits or history rows are pinned to this status, and 0026's
+ * `on update restrict on delete restrict` will not let it move out from under
+ * them. `errors.ts`'s generic wording for the code ("Something this depends on
+ * is missing, or it is still in use") is true but useless here, so this says
+ * the actionable half instead.
+ */
+const STATUS_IN_USE =
+  "That status is already recorded on visits, so it cannot be renamed. " +
+  "Add the corrected one and retire this.";
+
+/**
+ * Add a status to the vocabulary.
+ *
+ * The whole reason this action can exist at all is migration 0026: while the
+ * two status columns were CHECK constraints, a row inserted here would have
+ * been accepted by the table and then refused by every institute and visit —
+ * a status that inserts fine and can never be used. They are foreign keys now,
+ * so the table IS the vocabulary and an INSERT is the whole of adding one.
+ *
+ * `sort_order` is not asked for and not accepted from the form. 0026 drops the
+ * UNIQUE on it and gives it a default that puts a new status after the seeded
+ * nine, which is the right answer often enough that asking would be a question
+ * with no good basis for an answer.
+ */
+export async function addStatus(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = statusSchema.safeParse({
+    status: textOf(formData, "status"),
+    category: textOf(formData, "category"),
+    tone: textOf(formData, "tone"),
+    asks_expected_date: textOf(formData, "asks_expected_date") === "yes",
+    asks_session_detail: textOf(formData, "asks_session_detail") === "yes",
+    asks_head_count: textOf(formData, "asks_head_count") === "yes",
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELDS, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+
+  const { error } = await gate.supabase.from("institute_statuses").insert({
+    status: parsed.data.status,
+    category: parsed.data.category,
+    tone: parsed.data.tone,
+    asks_expected_date: parsed.data.asks_expected_date,
+    asks_session_detail: parsed.data.asks_session_detail,
+    asks_head_count: parsed.data.asks_head_count,
+  });
+
+  if (error) {
+    logError("admin:status-add", error);
+    if (error.code === UNIQUE_VIOLATION) {
+      return denied("A status with that name already exists.");
+    }
+    return denied(toFriendlyMessage(error, "We could not add that status."));
+  }
+
+  // Every screen that renders a badge or offers the picker reads the
+  // vocabulary, and listStatusCatalogue() is deliberately uncached — so a
+  // status added here is usable by a rep on their next request.
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: `Added “${parsed.data.status}”.`,
+  };
+}
+
+/**
+ * Retire a status, or bring one back.
+ *
+ * RETIRING IS THE ONLY REMOVAL PATH, and that is a design decision rather than
+ * a limitation. Deleting a status would erase what a past visit said, so 0026's
+ * three foreign keys refuse it and 0027 grants no DELETE at all — not to an
+ * admin, not for an unused status. One rule to learn, and no way to discover
+ * the difference by losing something.
+ *
+ * Restoring is the same UPDATE pointed the other way. Without it, retiring by
+ * mistake would be a dead end.
+ */
+export async function setStatusActive(
+  status: string,
+  isActive: boolean,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = statusUpdateSchema.safeParse({ status });
+  if (!parsed.success) {
+    return denied("That status could not be identified.");
+  }
+
+  const { error } = await gate.supabase
+    .from("institute_statuses")
+    .update({ is_active: isActive })
+    .eq("status", parsed.data.status);
+
+  if (error) {
+    logError("admin:status-retire", error);
+    return denied(
+      toFriendlyMessage(
+        error,
+        isActive ? "We could not restore that status." : "We could not retire that status.",
+      ),
+    );
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: isActive
+      ? `“${parsed.data.status}” is available again.`
+      : `“${parsed.data.status}” is retired. Visits that already carry it are unchanged.`,
+  };
+}
+
+/**
+ * Rename a status — which works only while nothing has used it.
+ *
+ * THE FOREIGN KEYS DECIDE, not this function. `status` is the primary key of
+ * `institute_statuses` and three tables reference it `on update restrict`, so
+ * Postgres permits the rename of an unused status and refuses one in use with
+ * 23503. That is exactly the rule worth having — the typo case is the only one
+ * anybody actually hits, and rewriting what a past visit said is the thing to
+ * prevent — and it costs no guard code at all.
+ *
+ * So this attempts the update and translates the refusal. It deliberately does
+ * NOT pre-check usage: a check-then-act would race a visit being logged in
+ * between, and the constraint is the authority either way.
+ */
+export async function renameStatus(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = statusRenameSchema.safeParse({
+    status: textOf(formData, "status"),
+    renameTo: textOf(formData, "rename_to"),
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELD, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+  if (parsed.data.status === parsed.data.renameTo) {
+    return { error: null, fieldErrors: {}, ok: true, message: "Nothing to change." };
+  }
+
+  const { error } = await gate.supabase
+    .from("institute_statuses")
+    .update({ status: parsed.data.renameTo })
+    .eq("status", parsed.data.status);
+
+  if (error) {
+    logError("admin:status-rename", error);
+    if (error.code === FOREIGN_KEY_VIOLATION) return denied(STATUS_IN_USE);
+    if (error.code === UNIQUE_VIOLATION) {
+      return denied("A status with that name already exists.");
+    }
+    return denied(toFriendlyMessage(error, "We could not rename that status."));
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: `Renamed to “${parsed.data.renameTo}”.`,
+  };
 }
 
 /* ------------------------------------------------------------------ */

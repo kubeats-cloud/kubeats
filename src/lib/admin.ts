@@ -42,6 +42,76 @@ export async function requireAdmin(): Promise<
 /* Purposes                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The whole status vocabulary, RETIRED ONES INCLUDED.
+ *
+ * Deliberately not `listStatusCatalogue()`, which is what the rest of the app
+ * reads: that one is for offering statuses to a rep and is the place retired
+ * ones are filtered out. An admin managing the vocabulary has to see what they
+ * retired, or there is no way to restore it and no way to understand why a
+ * status they remember is not in the picker.
+ *
+ * The usage counts are what decide whether a status can still be renamed or
+ * deleted at all — 0026's three foreign keys RESTRICT both — so the panel shows
+ * them rather than letting an admin discover the rule by being refused.
+ */
+export interface StatusAdminRow {
+  status: string;
+  category: string;
+  tone: string;
+  sortOrder: number;
+  isActive: boolean;
+  asksExpectedDate: boolean;
+  asksSessionDetail: boolean;
+  asksHeadCount: boolean;
+  /** How many institutes, visits and history rows are pinned to this status. */
+  usedBy: number;
+}
+
+export async function listStatusRows(): Promise<StatusAdminRow[]> {
+  const supabase = await createClient();
+
+  const [statuses, institutes, visits, history] = await Promise.all([
+    supabase
+      .from("institute_statuses")
+      .select(
+        "status, category, tone, sort_order, is_active, asks_expected_date, asks_session_detail, asks_head_count",
+      )
+      .order("sort_order")
+      .order("status"),
+    supabase.from("institutes").select("status").not("status", "is", null),
+    supabase.from("visits").select("status_set_to").not("status_set_to", "is", null),
+    supabase.from("institute_status_history").select("status"),
+  ]);
+
+  if (statuses.error) {
+    logError("admin:statuses", statuses.error);
+    return [];
+  }
+
+  // Counted in the app rather than with three grouped queries: the volumes are
+  // small, and an admin needs "is this pinned at all", not an exact census.
+  const used = new Map<string, number>();
+  const bump = (status: string | null) => {
+    if (status) used.set(status, (used.get(status) ?? 0) + 1);
+  };
+  for (const row of institutes.data ?? []) bump(row.status);
+  for (const row of visits.data ?? []) bump(row.status_set_to);
+  for (const row of history.data ?? []) bump(row.status);
+
+  return (statuses.data ?? []).map((row) => ({
+    status: row.status,
+    category: row.category,
+    tone: row.tone ?? "neutral",
+    sortOrder: row.sort_order ?? 100,
+    isActive: row.is_active ?? true,
+    asksExpectedDate: row.asks_expected_date ?? false,
+    asksSessionDetail: row.asks_session_detail ?? false,
+    asksHeadCount: row.asks_head_count ?? false,
+    usedBy: used.get(row.status) ?? 0,
+  }));
+}
+
 export interface PurposeRow {
   id: string;
   label: string;
