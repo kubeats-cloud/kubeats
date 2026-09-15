@@ -428,35 +428,41 @@ export async function getOpenFollowUps(
  * select returns what the RPC would have. It is dead code the moment 0028
  * lands, and harmless until then.
  */
+/**
+ * Institute names for a batch of rows, from the two places they can come from.
+ *
+ * THE ORDINARY READ FIRST, THE DEFINER FUNCTION ONLY FOR THE GAPS. That order
+ * is the whole correctness argument, and getting it wrong shipped a bug:
+ *
+ * This lookup serves THREE callers, and only one of them is history.
+ * `getTodayPlan()` and `getPlanById()` resolve names for entries that have been
+ * PLANNED and not yet logged — rows that have no `visits` record at all. Asking
+ * `institute_names_i_visited()` first meant those names missed, fell through to
+ * `instituteNameOr()` and rendered as "No longer yours" on a rep's own
+ * dashboard, for an institute they own and were standing in.
+ *
+ * So:
+ *
+ *   1. Select from `institutes` under the caller's own RLS. After 0028 that is
+ *      every institute they currently own — which covers a planned entry, an
+ *      in-progress visit, and all the history they have not been reassigned out
+ *      of. For a rep who has never had anything moved, this answers everything
+ *      and step 2 never runs.
+ *   2. For whatever is STILL missing — and it can only be an institute
+ *      reassigned away from them — ask the definer function, which returns
+ *      names for ids the caller provably holds a visit against.
+ *
+ * Strictly additive: step 2 can only fill blanks, never hide or change a name
+ * step 1 already found. That is what makes the ordering safe as well as
+ * correct.
+ */
 async function instituteNames(ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return new Map();
 
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("institute_names_i_visited", {
-    p_ids: unique,
-  });
+  const names = new Map<string, string>();
 
-  if (error) {
-    // PGRST202 is "no function by that name" — 0028 has not been applied yet.
-    // Anything else is a real failure and is logged as one.
-    if (error.code === "PGRST202") {
-      return instituteNamesDirect(supabase, unique);
-    }
-    logError("visits:institute-names", error);
-    return new Map();
-  }
-
-  return new Map(
-    ((data ?? []) as { id: string; name: string }[]).map((i) => [i.id, i.name]),
-  );
-}
-
-/** The pre-0028 lookup. See the note above — reachable only before it lands. */
-async function instituteNamesDirect(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  unique: string[],
-): Promise<Map<string, string>> {
   const { data, error } = await supabase
     .from("institutes")
     .select("id, name")
@@ -464,9 +470,34 @@ async function instituteNamesDirect(
 
   if (error) {
     logError("visits:institute-names", error);
-    return new Map();
+  } else {
+    for (const row of data ?? []) names.set(row.id, row.name);
   }
-  return new Map((data ?? []).map((i) => [i.id, i.name]));
+
+  // Only what the caller can no longer read: an institute reassigned away from
+  // them, whose visits are still theirs. Skipped entirely when nothing is
+  // missing, which is the normal case.
+  const missing = unique.filter((id) => !names.has(id));
+  if (missing.length === 0) return names;
+
+  const recovered = await supabase.rpc("institute_names_i_visited", {
+    p_ids: missing,
+  });
+
+  if (recovered.error) {
+    // PGRST202 is "no function by that name" — 0028 has not been applied. The
+    // names from step 1 are then the whole answer, which is exactly right on a
+    // pre-0028 database, so this is not worth a log line.
+    if (recovered.error.code !== "PGRST202") {
+      logError("visits:institute-names-recover", recovered.error);
+    }
+    return names;
+  }
+
+  for (const row of (recovered.data ?? []) as { id: string; name: string }[]) {
+    names.set(row.id, row.name);
+  }
+  return names;
 }
 
 async function memberNames(ids: string[]): Promise<Map<string, string | null>> {
