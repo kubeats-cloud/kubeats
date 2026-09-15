@@ -70,11 +70,40 @@ is the one paragraph to read before touching either:
   integer column per metric, so a seventh activity would be a metric with no
   column, no row on the Targets screen and no place in `tallyVisitMetrics()` —
   invisible in every total, which is worse than not existing.
-- **`public.purposes` is the admin-managed layer on top**, and since migration
-  0024 each row DECLARES which of those six it counts as (`purposes.activity`,
-  NOT NULL). An admin may add as many purposes as they like; the arithmetic
-  underneath never moves. That column is what lets Log Visit's Activity selector
-  be deleted and the activity derived from the plan's purpose instead.
+- **`public.purposes` is the admin-managed layer on top**, and since migrations
+  0024 and 0025 each row DECLARES what the visit will be: `activity` (which of
+  the six, NOT NULL) and `lifecycle` (Set/Done, or null). An admin may add as
+  many purposes as they like; the arithmetic underneath never moves.
+
+**Stage 3 deleted Log Visit's Activity selector.** The rep never picks an
+activity — it is derived from the purpose they planned under, through
+`daily_plans.purpose_id` → `purposes`. What the selector used to feed, it still
+feeds: `log_visit()` gets the same `p_activity`, so the meeting gate, Rule 3's
+CHECK and Rule 7's counting are untouched — only the value's SOURCE moved.
+`lifecycle` is what tells "Fix a session" from "Complete a session", both of
+which map to `session`; without it Sessions Set and Sessions Done would be
+indistinguishable.
+
+**A one-shot purpose carries lifecycle NULL, and that is not a preference.**
+`visits_lifecycle_matches_activity` (0001) refuses a lifecycle on anything that
+is not a session or a campus visit, so "First meeting", "Other", "Follow-up",
+Olympiad, Application and Admissions are all null.
+`purposes_lifecycle_matches_activity` (0025) is that same CASE expression
+written against purposes, so the two tables cannot disagree, and
+`plannedActivityIsValid()` asks the same question in TypeScript before a rep is
+walked into a visit that could not be saved.
+
+**A metric with no purpose behind it cannot be earned**, and would fail
+silently — a week's numbers simply come in flat. 0025's assertion block walks
+all eight metrics against the live table and refuses to apply if any has no
+active purpose feeding it; `purpose-activity.test.ts` checks the other half,
+that what the app derives is a shape Rule 7 can count.
+
+**Retire a purpose, never delete one.** `purposes.is_active` (0025) takes it out
+of the picker while keeping it readable, because every plan row that references
+it still needs its mapping to resolve. Deleting one strands that plan — with the
+selector gone there is no by-hand fallback — so `/log` catches it and sends the
+rep back to re-plan rather than showing a form the database would refuse.
 
 It replaces `PURPOSE_ACTIVITY`, a hard-coded map from four purpose LABELS whose
 own comment named the weakness: renaming a purpose in Settings silently dropped

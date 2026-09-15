@@ -134,34 +134,61 @@ export function expectedDateLabel(activity: string): string {
 /**
  * What a planned purpose means in the visits log.
  *
- * The Dashboard plans a visit as institute + purpose, from the admin-managed
- * `public.purposes` list. Stage 3 pre-fills Log Visit from that plan row, so
- * something has to turn "Fix a session" into (session, Set).
+ * `PURPOSE_ACTIVITY` stood here — a hard-coded map from four purpose LABELS to
+ * (activity, lifecycle), with its own comment naming the weakness: "purposes
+ * has no stable key, only an editable label, so renaming a purpose in Settings
+ * silently drops it out of this map". That was survivable while the rep still
+ * picked the Activity by hand and an unmapped purpose merely fell through.
  *
- * A LOOKUP ON THE LABEL, deliberately, and it is the weak point worth naming:
- * `purposes` has no stable key, only an editable label, so renaming a purpose
- * in Settings silently drops it out of this map. That is survivable rather
- * than dangerous — an unmapped purpose falls through to `null` and the rep
- * picks the activity by hand, which is exactly what "Other" does — but it is
- * why the fallback is a real path and not an assertion.
+ * STAGE 3 REMOVED THE SELECTOR, so there is no falling through any more. The
+ * mapping therefore moved onto the row: `purposes.activity` (migration 0024)
+ * and `purposes.lifecycle` (0025), read from the database and carried on the
+ * plan entry. A rename cannot break it, and an admin adding a purpose decides
+ * its activity at the moment they add it.
+ *
+ * The type below is what that lookup produces. It is deliberately the same
+ * shape the old constant held, because every caller wanted exactly this pair.
  */
-export const PURPOSE_ACTIVITY: Record<
-  string,
-  { activity: ActivityKey; lifecycle: "Set" | "Done" | null }
-> = {
-  "Fix a session": { activity: "session", lifecycle: "Set" },
-  "Complete a session": { activity: "session", lifecycle: "Done" },
-  "Fix a campus visit": { activity: "campus_visit", lifecycle: "Set" },
-  "Complete a campus visit": { activity: "campus_visit", lifecycle: "Done" },
-  // "Other" is deliberately absent: the rep picks.
-};
+export interface PlannedActivity {
+  activity: ActivityKey;
+  lifecycle: "Set" | "Done" | null;
+}
 
-/** What a purpose pre-fills, or null when the rep has to choose. */
-export function activityForPurpose(
-  purpose: string | null | undefined,
-): { activity: ActivityKey; lifecycle: "Set" | "Done" | null } | null {
-  if (!purpose) return null;
-  return PURPOSE_ACTIVITY[purpose.trim()] ?? null;
+/**
+ * Is this pair one the `visits` table would accept?
+ *
+ * Mirrors `visits_lifecycle_matches_activity` (0001) and its restatement on
+ * `purposes` (`purposes_lifecycle_matches_activity`, 0025). Three copies of one
+ * rule — but the other two are CHECK constraints, which cannot call a function,
+ * and 0025's assertion block compares this shape against every purpose row.
+ *
+ * Used to decide whether a plan's mapping is USABLE before the rep is walked
+ * into a visit that cannot be saved. A purpose whose activity is null (0024 not
+ * applied) or whose lifecycle contradicts its activity fails here.
+ */
+export function plannedActivityIsValid(
+  planned: { activity: string | null; lifecycle: string | null } | null,
+): planned is PlannedActivity {
+  if (!planned || planned.activity === null) return false;
+  if (!(ACTIVITY_KEYS as readonly string[]).includes(planned.activity)) return false;
+  return hasLifecycle(planned.activity)
+    ? planned.lifecycle === "Set" || planned.lifecycle === "Done"
+    : planned.lifecycle === null;
+}
+
+/**
+ * How a derived activity reads to the rep on Log Visit.
+ *
+ * They no longer choose it, so the screen's job is to show what the purpose
+ * they planned has decided — "Session · to be held later" rather than a
+ * dropdown they might change. Set and Done are spelled out because "Set" alone
+ * means nothing to somebody who has not read the schema.
+ */
+export function plannedActivityLabel(planned: PlannedActivity): string {
+  const activity = activityLabelFor(planned.activity);
+  if (planned.lifecycle === "Set") return `${activity} · to be held later`;
+  if (planned.lifecycle === "Done") return `${activity} · held today`;
+  return activity;
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -381,6 +408,37 @@ export const dailyPlanSchema = z.object({
     .trim()
     .min(1, "Choose what this visit is for.")
     .max(120, "That purpose is too long."),
+  /**
+   * What the rep actually means, when the purpose demands it.
+   *
+   * Only "Other" does today (`purposes.requires_note`, migration 0025). Stored
+   * in `daily_plans.purpose_note` and deliberately NOT folded into the label:
+   * writing "Other: dropped off brochures" into `purpose` would stop the value
+   * matching any purposes row, which is precisely the lookup the activity is
+   * now derived from.
+   */
+  purpose_note: z
+    .string()
+    .trim()
+    .max(300, "That is longer than we can store.")
+    .transform((v) => (v === "" ? null : v))
+    .nullable(),
+  /**
+   * Whether the chosen purpose demands that note.
+   *
+   * Carried as a flag rather than inferred from the label, because inferring it
+   * would put a second copy of "which purpose is Other" in the app — and the
+   * answer lives on the row, where an admin can change it.
+   */
+  requires_note: z.boolean(),
+}).superRefine((value, ctx) => {
+  if (value.requires_note && !value.purpose_note) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["purpose_note"],
+      message: "Say what this visit is for.",
+    });
+  }
 });
 
 /**
@@ -409,7 +467,12 @@ export function dailyPlanFormDataToInput(formData: FormData) {
     const value = formData.get(key);
     return typeof value === "string" ? value : "";
   };
-  return { institute_id: text("institute_id"), purpose: text("purpose") };
+  return {
+    institute_id: text("institute_id"),
+    purpose: text("purpose"),
+    purpose_note: text("purpose_note"),
+    requires_note: text("requires_note") === "yes",
+  };
 }
 
 /**
