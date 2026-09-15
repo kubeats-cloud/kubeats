@@ -72,7 +72,10 @@ export function FollowUpList({
         description={
           readOnly
             ? "No institute across the team is waiting on a follow-up."
-            : "Every institute in your campus is either finished or has not been visited yet. Anything you leave open will appear here."
+            : // "yours", not "your campus": after 0028 a rep's Pending is
+              // their own institutes, not their campus's. The query did not
+              // change — it reads institutes through RLS, and RLS narrowed.
+              "Every institute of yours is either finished or has not been visited yet. Anything you leave open will appear here."
         }
       />
     );
