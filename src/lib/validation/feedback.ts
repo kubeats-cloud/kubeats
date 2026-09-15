@@ -1,46 +1,69 @@
 import { z } from "zod";
 
 /**
- * The short feedback form — what replaced the closing report.
+ * The short closing report — what a rep fills in at the end of a visit.
  *
- * The old one asked thirty-odd questions, five of them always required and six
- * more conditional on what the rep said they had done. It was accurate and
- * nobody could finish it at a school gate. This asks seven things, two of them
- * conditional on the status already chosen, and is meant to be done standing up
- * in under a minute.
+ * Phase 2 stage 1 cut it further. It asked seven things; it now asks four, plus
+ * two that depend on the status already chosen, and is meant to be done
+ * standing up in well under a minute.
  *
- * WHAT HAPPENED TO THE OTHER FIELDS. They are still there. Every retired column
- * — activities_conducted, student_response, student_interest, students_reached,
- * most_interested_programs, student_intent, management_response,
- * discussion_summary, visit_outcome, primary_outcome, applications_collected,
- * admissions_generated, session_class, session_streams, session_duration_mins,
- * session_participation, student_questions, other_faculty_*, follow_up_action,
- * employee_remarks — keeps its column and its vocabulary CHECK. Nothing is
- * collected into them and nothing asks for them, so a report filed before this
- * still renders in full and one filed after simply shows fewer rows.
- * `report-view.tsx` skips an empty value already, so that needed no code and no
- * migration. Restoring a field is restoring its control, not writing SQL.
+ * WHAT WAS WITHDRAWN, AND WHERE IT WENT.
  *
- * THE ONLY OLD RULE THAT HAD TO GO was a database one, and it would have broken
- * this form on its first submission: `visits_follow_up_hidden_when_scheduled`
- * FORBADE a follow-up on exactly the two statuses that now REQUIRE one.
- * Migration 0018 drops it. Every other retired CHECK is vocabulary-only —
- * "null, or one of this list" — so a field simply going unasked cannot trip it.
+ *   "Is the institute interested?"      institute_interested   dormant
+ *   "How did the visit end?"            visit_outcome          dormant
+ *   "How did management respond?"       management_response    dormant
+ *   "How did the students respond?"     student_response       dormant
+ *   "Students who participated"         students_reached       dormant
+ *   "Is a next session or meeting set?" (no column — see below)
+ *
+ * NONE OF THAT NEEDED A MIGRATION, and that is the whole point of how
+ * `close_visit()` is written: every report field is a DEFAULTED parameter, so a
+ * field leaving the form is the app passing null. The column keeps its data and
+ * its vocabulary CHECK, `report-view.tsx` still renders every report filed
+ * under an older shape, and bringing one back is restoring a control. 0019's
+ * header says the same thing from the other direction — "a field coming back is
+ * a form change, and a migration only because close_visit() has to carry it".
+ * Going this way there is nothing for it to carry.
+ *
+ * `students_reached` is dormant for the SECOND time (0009 built it, 0022 woke
+ * it, this retires it again). One count is what the client's spec asks for, and
+ * `students_attended` is the one every filed report already carries.
+ * `report-view.tsx` labels the old rows by era, so nothing filed before this
+ * starts meaning something different.
+ *
+ * THE FOLLOW-UP IS NOT HERE ANY MORE, AND THAT IS A BUG FIX.
+ *
+ * `follow_up_date` and `follow_up_time` used to sit in this schema as well as
+ * in `visitSchema`, gated by an "Is a next session or meeting set?" yes/no.
+ * Two things were wrong with that:
+ *
+ *   1. The yes/no was a second answer to a question the STATUS already
+ *      answered, and the two could disagree. Choosing an open status and
+ *      answering "No" hid the date fields while `visitSchema` still required
+ *      them — the error summary named a field that was not on the screen, and
+ *      there was no way forward but guessing.
+ *   2. On the RECOVERY path this schema is submitted to `close_visit()`, which
+ *      does not write `follow_up_date` or `follow_up_time` at all. Anything the
+ *      rep typed there was silently discarded. No data was lost — the values
+ *      were written by `log_visit()` at log time — but the field was a lie.
+ *
+ * So the follow-up lives in `visitSchema` alone, where the rule already was:
+ * an OPEN status requires a date and a time, mirroring
+ * `enforce_follow_up_when_open()` (FO016). The Log Visit screen renders it
+ * beside the status that decides it; the recovery form does not ask, because it
+ * cannot save it.
  */
 
 /**
- * The three vocabularies the closing report kept, defined HERE rather than in
- * closing-report.ts.
+ * The three vocabularies the closing report used to collect.
  *
- * The direction is load-bearing rather than tidy. This module is imported by
- * client components; closing-report.ts still holds `closingReportSchema`, a
- * thirty-field zod schema nothing submits any more. Importing from there pulls
- * that whole schema into the browser bundle for the sake of three short lists.
- * closing-report.ts imports them back, which costs a server-only module nothing.
+ * Kept, and kept HERE rather than in closing-report.ts, though nothing submits
+ * them any more: `closingReportSchema` still imports them back, and every one
+ * of them matches a CHECK constraint added in 0005 that is still installed. A
+ * dropdown coming back is these lists plus a control.
  *
- * Every one of these matches a CHECK constraint added in 0005, so the lists and
- * the database agree by construction and adding a value still means changing
- * both.
+ * They no longer reach the browser bundle, because the controls that read them
+ * are gone.
  */
 export const VISIT_OUTCOMES = [
   "Successful",
@@ -69,11 +92,8 @@ export const STUDENT_RESPONSES = [
 ] as const;
 
 /**
- * Management's interest LEVEL — no longer asked for.
- *
- * Built in stage 3 and withdrawn before it shipped: an interest level beside a
- * management response is two answers to one question, and the client chose the
- * response. The column stays dormant on public.visits and this list stays here
+ * Management's interest LEVEL — withdrawn before stage 3 shipped, and still
+ * withdrawn. The column stays dormant on public.visits and this list stays here
  * because report-view.tsx still renders a report that has one.
  */
 export const MANAGEMENT_INTERESTS = ["Low", "Medium", "High", "Very High"] as const;
@@ -95,31 +115,6 @@ const count = z
   .transform((v) => (v === null ? null : Number(v)));
 
 /**
- * A yes/no that has to be answered, not merely defaulted.
- *
- * "" is a real state here — it means the rep has not touched the control — and
- * it is rejected rather than read as "no". Reading silence as no is how a form
- * this short would start producing data nobody typed.
- */
-/** A single choice from a fixed list, or nothing. */
-const oneOf = <T extends readonly string[]>(values: T, message: string) =>
-  z
-    .string()
-    .trim()
-    .transform((v) => (v === "" ? null : v))
-    .nullable()
-    .refine((v) => v === null || (values as readonly string[]).includes(v), {
-      message,
-    });
-
-const yesNo = (message: string) =>
-  z
-    .string()
-    .trim()
-    .refine((v) => v === "yes" || v === "no", { message })
-    .transform((v) => v === "yes");
-
-/**
  * The fields themselves, without the two ids.
  *
  * Split out because the Log Visit screen validates this form BEFORE the visit
@@ -127,200 +122,93 @@ const yesNo = (message: string) =>
  * against until log_visit() has run. The standalone feedback screen, which
  * recovers a visit whose filing did not land, has both ids and uses the wider
  * schema below. One shape, one set of rules, two entry points.
+ *
+ * Every field here is one `close_visit()` actually writes. That is the rule the
+ * follow-up broke and the reason it left.
  */
 const shape = {
-    /** Which earlier "Set" this visit closes, when the rep says it does. */
-    closes_visit_id: z
-      .string()
-      .trim()
-      .transform((v) => (v === "" ? null : v))
-      .nullable()
-      .refine(
-        (v) =>
-          v === null ||
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
-        "That earlier visit could not be identified.",
-      ),
-
-    /** The one free-text box. Deliberately the only one. */
-    notes: text(2000),
-
-    interested: yesNo("Say whether the institute is interested."),
-
-    /**
-     * The three dropdowns, each mirroring a CHECK from 0005.
-     *
-     * `management_response` is stored as a text[] because the column always was
-     * one — the old form offered checkboxes. This offers a single choice and
-     * sends a one-element array, so the `<@` CHECK is satisfied unchanged and
-     * widening it back to a multi-select later needs no migration.
-     */
-    visit_outcome: oneOf(VISIT_OUTCOMES, "Choose how the visit ended."),
-    management_response: oneOf(
-      MANAGEMENT_RESPONSES,
-      "Choose one of the listed responses.",
-    ),
-    student_response: oneOf(
-      STUDENT_RESPONSES,
-      "Choose one of the listed responses.",
+  /** Which earlier "Set" this visit closes, when the rep says it does. */
+  closes_visit_id: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : v))
+    .nullable()
+    .refine(
+      (v) =>
+        v === null ||
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+      "That earlier visit could not be identified.",
     ),
 
-    /** Drives the follow-up rule below, and nothing else. */
-    next_meeting_set: yesNo("Say whether a next session or meeting is set."),
-    follow_up_date: z
-      .string()
-      .trim()
-      .transform((v) => (v === "" ? null : v))
-      .nullable()
-      .refine((v) => v === null || /^\d{4}-\d{2}-\d{2}$/.test(v), "Pick a date."),
-    follow_up_time: z
-      .string()
-      .trim()
-      .transform((v) => (v === "" ? null : v))
-      .nullable()
-      .refine((v) => v === null || /^\d{2}:\d{2}$/.test(v), "Pick a time."),
+  /** "How did it go?" — the one free-text box, and now the whole of it. */
+  notes: text(2000),
 
-    /**
-     * Who was met. One person: a name, and a number if the rep got one.
-     *
-     * THE NAME IS REQUIRED AND THE NUMBER IS NOT, which is the client's spec
-     * and is the reverse of how this pair used to behave. It was name-optional,
-     * phone-optional, with a rule that a phone had to have a name attached to
-     * it; so a report could be filed naming nobody at all, and a rep who had a
-     * name but no mobile still had a field the form implied they owed.
-     *
-     * A visit with no name against it is the weaker half of that: "we met
-     * someone at St Xavier's" is not a record anybody can act on, and there is
-     * always a name — a rep standing in a school spoke to a person. A mobile is
-     * genuinely not always there. Hence: always ask who, never insist how to
-     * ring them.
-     *
-     * Designation is not here and is not coming back; it was withdrawn with the
-     * long report and the client's spec keeps it out.
-     *
-     * NOTHING IN THE DATABASE CHANGED for this. `visits_met_name_length` and
-     * `visits_met_phone_valid` (migration 0018) are both "null, or valid", and
-     * both still are: reports filed before this rule have a null met_name and
-     * still render. Requiring a name is a form rule, not an integrity one, and
-     * a NOT NULL would have refused to build against the rows already there.
-     */
-    met_name: z
-      .string()
-      .trim()
-      .min(1, "Who did you meet?")
-      .max(120, "That is longer than we can store."),
-    met_phone: z
-      .string()
-      .trim()
-      .transform((v) => v.replace(/\D/g, ""))
-      .transform((v) => (v === "" ? null : v))
-      .nullable()
-      .refine((v) => v === null || /^[0-9]{10}$/.test(v), {
-        message: "A mobile number is 10 digits.",
-      }),
+  /**
+   * Who was met. One person: a name, and a number if the rep got one.
+   *
+   * THE NAME IS REQUIRED AND THE NUMBER IS NOT, which is the client's spec and
+   * is the reverse of how this pair used to behave. A visit with no name
+   * against it is not a record anybody can act on — "we met someone at St
+   * Xavier's" — and there is always a name. A mobile genuinely is not always
+   * there. Hence: always ask who, never insist how to ring them.
+   *
+   * NOTHING IN THE DATABASE ENFORCES THE FIRST HALF. `visits_met_name_length`
+   * and `visits_met_phone_valid` (0018) are both "null, or valid", and both
+   * still are: reports filed before this rule have a null met_name and still
+   * render. A NOT NULL would have refused to build against them.
+   */
+  met_name: z
+    .string()
+    .trim()
+    .min(1, "Who did you meet?")
+    .max(120, "That is longer than we can store."),
+  met_phone: z
+    .string()
+    .trim()
+    .transform((v) => v.replace(/\D/g, ""))
+    .transform((v) => (v === "" ? null : v))
+    .nullable()
+    .refine((v) => v === null || /^[0-9]{10}$/.test(v), {
+      message: "A mobile number is 10 digits.",
+    }),
 
-    /**
-     * Conditional on the status, not on a checklist.
-     *
-     * The old form worked out what to ask from `activities_conducted`, a
-     * ten-box multi-select the rep filled in themselves. This reads the status
-     * they have already chosen, so the same fact is stated once.
-     */
-
-    /**
-     * TWO COUNTS, NOT ONE — the client's spec, and the reason 0022 exists.
-     *
-     * `students_attended` is **PRESENT**: everybody who was in the room, or who
-     * came to see the campus. It is the number this form has always asked for
-     * and the one every filed report already carries, so its meaning does not
-     * move — only its label gets sharper.
-     *
-     * `students_reached` is **PARTICIPATED**: how many of those actually took
-     * part. It is the dormant column 0009 built and the long report briefly
-     * collected, and it is the second count the spec wants, so it comes back
-     * rather than a third column being invented. The COLUMN NAME is unchanged
-     * on purpose — renaming it would touch `visits_students_reached_valid`,
-     * every backup manifest and every saved query for a label nobody reads.
-     * The form field and the RPC parameter keep the column's name for the same
-     * reason every other field here does; what a rep sees is set in
-     * `feedback-fields.tsx`.
-     *
-     * ⚠ THE MEANING IS REDEFINED, and 0009 says the opposite: it built
-     * "reached" as the WIDER number ("often more than attended"). Under the new
-     * spec participated is a SUBSET of present. A report filed by the retired
-     * long form therefore carries the old sense, which is why `report-view.tsx`
-     * labels those rows "Students reached" and only a post-0022 report reads
-     * "Students who participated". Migration 0022 restates this on the column.
-     *
-     * NEITHER IS REQUIRED. `students_attended` never was in this form, and a
-     * rep standing at a school gate who did not count heads should not be
-     * unable to file at all. The rule below is the only thing asked of them,
-     * and it only fires when both numbers are present.
-     */
-    students_attended: count,
-    students_reached: count,
-    session_topic: text(300),
-    session_taken_by: text(120),
-};
-
-type Shape = z.infer<z.ZodObject<typeof shape>>;
-
-const refine = (value: Shape, ctx: z.RefinementCtx) => {
-    const fail = (path: string, message: string) =>
-      ctx.addIssue({ code: "custom", path: [path], message });
-
-    // The whole point of the yes/no: it decides whether the diary fields are
-    // required. Mirrored by enforce_follow_up_when_open() in the database,
-    // which asks the status rather than this flag — the two agree because the
-    // form only offers "yes" alongside a status that leaves the institute open.
-    if (value.next_meeting_set) {
-      if (!value.follow_up_date) fail("follow_up_date", "When are you seeing them next?");
-      if (!value.follow_up_time) fail("follow_up_time", "And at what time?");
-    }
-
-    // The "a phone with no name is a number nobody can place" rule stood here.
-    // It is gone because it cannot fire any more: met_name is required
-    // outright, so there is no report left that carries a number and no name.
-
-    // The one rule the two student counts owe each other. Participated is a
-    // SUBSET of present — you cannot have twelve of ten students join in — so a
-    // pair that says otherwise is almost always the two numbers typed the wrong
-    // way round, which is the exact confusion two similar boxes invite.
-    //
-    // It fires only when BOTH are filled, so neither becomes required by the
-    // back door. It is a FORM rule and not a CHECK: rows filed by the retired
-    // long form carry the old "reached" sense, where the second number was
-    // deliberately the larger of the two, and a constraint would have refused
-    // to build against them.
-    if (
-      value.students_attended !== null &&
-      value.students_reached !== null &&
-      value.students_reached > value.students_attended
-    ) {
-      fail(
-        "students_reached",
-        "More took part than were there. Check which number is which.",
-      );
-    }
+  /**
+   * Conditional on the status, not on a checklist.
+   *
+   * ONE COUNT, not two. `students_attended` is everybody who was there — in the
+   * room for a session, or on the campus for a visit. It is the number this
+   * form has always asked for and the one every filed report already carries.
+   * The second count 0022 added is withdrawn; see the note at the top.
+   *
+   * NOT REQUIRED, and never has been: a rep at a school gate who did not count
+   * heads must still be able to file.
+   */
+  students_attended: count,
+  session_topic: text(300),
+  session_taken_by: text(120),
 };
 
 /** Used by Log Visit, which files before a visit id exists. */
-export const feedbackFieldsSchema = z.object(shape).superRefine(refine);
+export const feedbackFieldsSchema = z.object(shape);
 
-/** Used by the standalone feedback screen, which has both ids. */
-export const feedbackSchema = z
-  .object({
-    ...shape,
-    visit_id: z.uuid(),
-    /**
-     * Null when the check-in this visit came from is already closed — swept
-     * overnight, or cleared by an admin. The report is still owed and is still
-     * filed; there is simply no check-out left to stamp, and asking for one
-     * would be refused by daily_plans_checkout_missing_valid.
-     */
-    daily_plan_id: z.uuid().nullable(),
-  })
-  .superRefine(refine);
+/**
+ * Used by the standalone feedback screen, which has both ids.
+ *
+ * There is no `superRefine` on either any more. Both rules that lived there —
+ * the follow-up gate and "participated may not exceed present" — went with the
+ * fields they governed.
+ */
+export const feedbackSchema = z.object({
+  ...shape,
+  visit_id: z.uuid(),
+  /**
+   * Null when the check-in this visit came from is already closed — swept
+   * overnight, or cleared by an admin. The report is still owed and is still
+   * filed; there is simply no check-out left to stamp, and asking for one would
+   * be refused by daily_plans_checkout_missing_valid.
+   */
+  daily_plan_id: z.uuid().nullable(),
+});
 
 export type FeedbackFieldsInput = z.infer<typeof feedbackFieldsSchema>;
 export type FeedbackInput = z.infer<typeof feedbackSchema>;
@@ -329,7 +217,10 @@ export type FeedbackInput = z.infer<typeof feedbackSchema>;
  * What the status implies the form must also ask.
  *
  * Kept as a predicate pair rather than inlined, so the form and the schema
- * cannot disagree about which visit owes a head count.
+ * cannot disagree about which visit owes a head count. Stage 4a of Phase 2
+ * replaces the literals with the `asks_session_detail` / `asks_head_count`
+ * columns on `public.institute_statuses`, at which point a status an admin adds
+ * can ask for these too. Until then they are the two the vocabulary has.
  */
 export function needsSessionDetail(status: string | null): boolean {
   return status === "Session done";
@@ -350,17 +241,9 @@ export function feedbackFormDataToInput(formData: FormData) {
     daily_plan_id: str("daily_plan_id") || null,
     closes_visit_id: str("closes_visit_id"),
     notes: str("notes"),
-    interested: str("interested"),
-    visit_outcome: str("visit_outcome"),
-    management_response: str("management_response"),
-    student_response: str("student_response"),
-    next_meeting_set: str("next_meeting_set"),
-    follow_up_date: str("follow_up_date"),
-    follow_up_time: str("follow_up_time"),
     met_name: str("met_name"),
     met_phone: str("met_phone"),
     students_attended: str("students_attended"),
-    students_reached: str("students_reached"),
     session_topic: str("session_topic"),
     session_taken_by: str("session_taken_by"),
   };
@@ -376,36 +259,24 @@ export function feedbackFormDataToInput(formData: FormData) {
  * It lives HERE rather than in the component so this file — which the unit
  * tests already import, and which pulls in no React — owns both the shape and
  * the one operation performed on it.
+ *
+ * The follow-up is deliberately absent. It belongs to the visit, not to the
+ * report, so `log-visit-form.tsx` holds it in its own state alongside the
+ * status that decides whether it is required.
  */
 export interface FeedbackState {
-  interested: string;
-  visitOutcome: string;
-  managementResponse: string;
-  studentResponse: string;
-  nextMeetingSet: string;
-  followUpDate: string;
-  followUpTime: string;
   metName: string;
   metPhone: string;
   studentsAttended: string;
-  studentsReached: string;
   sessionTopic: string;
   sessionTakenBy: string;
   closesVisitId: string;
 }
 
 export const EMPTY_FEEDBACK: FeedbackState = {
-  interested: "",
-  visitOutcome: "",
-  managementResponse: "",
-  studentResponse: "",
-  nextMeetingSet: "",
-  followUpDate: "",
-  followUpTime: "",
   metName: "",
   metPhone: "",
   studentsAttended: "",
-  studentsReached: "",
   sessionTopic: "",
   sessionTakenBy: "",
   closesVisitId: "",
@@ -421,8 +292,8 @@ export type FeedbackPatch = Partial<FeedbackState>;
  * does: inside a functional update, so `prev` is the latest state rather than
  * whatever the component last rendered with.
  *
- * The bug this replaces was found by driving the live form: two yes/no taps in
- * the same tick both merged against the same stale prop, and the first answer
+ * The bug this replaces was found by driving the live form: two taps in the
+ * same tick both merged against the same stale prop, and the first answer
  * vanished. A rep tapping seconds apart would never have seen it, which is why
  * it survived every other check — the property worth pinning is that patches
  * COMPOSE, and that is what the test asserts.

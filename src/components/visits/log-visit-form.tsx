@@ -31,6 +31,7 @@ import {
 } from "@/lib/validation/institute";
 import {
   ACTIVITIES,
+  DEFAULT_FOLLOW_UP_TIME,
   activityForPurpose,
   expectedDateLabel,
   expectedDateRequired,
@@ -81,11 +82,27 @@ export function LogVisitForm({
   );
   const [expectedDate, setExpectedDate] = useState("");
   const [statusSetTo, setStatusSetTo] = useState(NO_CHANGE);
+  const [followUpDate, setFollowUpDate] = useState("");
+  const [followUpTime, setFollowUpTime] = useState("");
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
 
   const lifecycle = hasLifecycle(activity);
   const status = statusSetTo === NO_CHANGE ? null : statusSetTo;
   const needsDate = expectedDateRequired(activity, lifecycle ? lifecycleStatus : null);
+  const needsFollowUp = followUpRequired(status);
+
+  /**
+   * Picking the date fills in the time, once.
+   *
+   * The database wants both (`enforce_follow_up_when_open`, FO016) and the
+   * client asked for one; pre-filling keeps both without making the rep answer
+   * twice. Only ever applied to an EMPTY time, so a rep who has already set
+   * 14:30 and then corrects the date does not get it overwritten.
+   */
+  function handleFollowUpDate(value: string) {
+    setFollowUpDate(value);
+    if (value && followUpTime === "") setFollowUpTime(DEFAULT_FOLLOW_UP_TIME);
+  }
 
   const error = serverState.error ?? clientState.error;
   const fieldErrors = serverState.error
@@ -274,12 +291,67 @@ export function LogVisitForm({
             </SelectContent>
           </Select>
           {fieldError("status_set_to")}
-          {followUpRequired(status) && (
-            <p className="text-muted-foreground text-xs">
-              That leaves the institute open, so the next date and time are
-              needed below.
-            </p>
-          )}
+        </div>
+      </FormSection>
+
+      {/*
+        THE FOLLOW-UP LIVES HERE NOW, not in the feedback form, and it is driven
+        by the status rather than by a yes/no.
+
+        It used to sit at the foot of FeedbackFields behind "Is a next session
+        or meeting set?". Two things were wrong with that. The yes/no was a
+        second answer to a question the status had already answered, and the two
+        could disagree: an OPEN status with "No" hid these fields while
+        visitSchema still required them, so the error summary named a box that
+        was not on the screen and there was no way forward but guessing. And on
+        the recovery path the feedback form posts to close_visit(), which does
+        not write follow_up_date or follow_up_time at all — so what the rep
+        typed there was discarded in silence.
+
+        Both are fixed by putting it where the rule already was. visitSchema
+        requires a date and a time when followUpRequired(status), mirroring
+        enforce_follow_up_when_open() (FO016); log_visit() is what stores them.
+
+        Shown for every status, not only the open ones: a CLOSED status may
+        still carry a follow-up — "they said no, ask again next intake" is a
+        real note, and 0010 kept it permitted on purpose. Only the requirement
+        changes.
+      */}
+      <FormSection
+        title="What happens next?"
+        description={
+          needsFollowUp
+            ? "That status leaves the institute open, so put the next visit in the diary now."
+            : "Optional — only if you already know when you are going back."
+        }
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="follow-up-date">Follow-up date</Label>
+            <Input
+              id="follow-up-date"
+              name="follow_up_date"
+              type="date"
+              className="h-11"
+              value={followUpDate}
+              onChange={(event) => handleFollowUpDate(event.target.value)}
+              aria-required={needsFollowUp || undefined}
+            />
+            {fieldError("follow_up_date")}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="follow-up-time">Time</Label>
+            <Input
+              id="follow-up-time"
+              name="follow_up_time"
+              type="time"
+              className="h-11"
+              value={followUpTime}
+              onChange={(event) => setFollowUpTime(event.target.value)}
+              aria-required={needsFollowUp || undefined}
+            />
+            {fieldError("follow_up_time")}
+          </div>
         </div>
       </FormSection>
 

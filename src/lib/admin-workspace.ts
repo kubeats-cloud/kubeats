@@ -29,7 +29,11 @@ export interface VisitRow {
   status: string | null;
   notes: string | null;
   reportedAt: string | null;
-  outcome: string | null;
+  /**
+   * The one value an admin scans down the register: where this visit left the
+   * institute. Status first — see the note where it is built.
+   */
+  standing: string | null;
   memberId: string;
   memberName: string;
   instituteId: string;
@@ -125,16 +129,25 @@ export async function listTeamVisits(
       notes: row.notes,
       reportedAt: row.reported_at,
       /**
-       * The Outcome column reads `visit_outcome` again — the field is back on
-       * the form, so the column that was named after it works again.
+       * THE STATUS IS THE SUMMARY NOW — the third time this column has been
+       * remapped, and the first time onto a field that cannot go quiet.
        *
-       * The fallback to `institute_interested` stays behind it rather than
-       * being taken out. It costs one comparison and it covers the case this
-       * column has already been caught by once: a visit whose outcome was left
-       * blank still says something, instead of a dash in the one column an
-       * admin scans down.
+       * It read `visit_outcome`, with `institute_interested` behind it. Phase 2
+       * stage 1 withdraws both questions from the form, so for every visit
+       * logged from now on both are null and this column would be a dash — the
+       * exact failure stage 3 logged when it withdrew them the first time.
+       *
+       * `status_set_to` is the better answer anyway: it is what the rep
+       * actually decided, it is what Pending and the institute badge read, and
+       * from stage 4b it is compulsory, so it cannot be blank.
+       *
+       * The two old fields stay BEHIND it rather than being taken out. They
+       * cost one comparison each and they are what keeps the hundreds of visits
+       * already filed from going blank in the one column an admin scans down —
+       * including any logged with "No change", which have no status at all.
        */
-      outcome:
+      standing:
+        row.status_set_to ??
         row.visit_outcome ??
         (row.institute_interested === null
           ? null

@@ -39,12 +39,13 @@ import {
  * insists only on the parts that follow from it.
  */
 
-/** Only these three get a closing report. The rest stay quick logs. */
-export const RICH_ACTIVITIES = ["meeting", "session", "campus_visit"] as const;
-
-export function needsClosingReport(activity: string): boolean {
-  return (RICH_ACTIVITIES as readonly string[]).includes(activity);
-}
+/*
+ * `RICH_ACTIVITIES` and `needsClosingReport()` stood here — "only these three
+ * get a closing report; the rest stay quick logs". Deleted in Phase 2 stage 1
+ * because nothing had called either of them since stage 3 made EVERY visit file
+ * a report, so they described a rule the app had stopped having. They are in
+ * git if the distinction ever comes back.
+ */
 
 export const ACTIVITIES_CONDUCTED = [
   "Introduction meeting",

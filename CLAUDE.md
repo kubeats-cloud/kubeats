@@ -184,23 +184,28 @@ Concretely, and true as of Phase 9:
 
 ## Deployment ceiling
 
-Cloudflare Workers **free plan: 3072 KiB gzipped**, and this app is at **2966
-KiB** — about 106 KiB, 3.4% spare. That is the thinnest it has been: the
-admin's campus picker on the register-institute form cost 17 KiB, most of it
-pulling the campus list into a route that had not needed it. The budget is
-real: measure before adding anything sizable, and re-measure rather than
-trusting this line. It has been wrong before, in both directions — it read 2949
-for a while after the figure it described had already moved, which is how a
-stale number becomes a wrong decision about a dependency.
+**The client is on the Workers Paid plan: 10 MiB gzipped**, and this app is at
+**2963 KiB** — about 23% of the ceiling. The plan change that this file spent
+several phases recommending has happened, so **size is no longer a constraint on
+what may be added**, and the paragraph that used to sit here — 106 KiB spare,
+measure before adding a dependency, the campus picker costing 17 KiB — no longer
+describes the situation. It was true against the free plan's 3072 KiB.
 
 ```bash
 npm run build && npx wrangler deploy --dry-run --outdir /tmp/out   # "Total Upload:"
 ```
 
-Over the line, the build still passes and the **deploy** fails. The answer is
-the Workers Paid plan ($5/mo, 10 MiB), which is a plan change and nothing else —
-not more trimming. `minify` in `wrangler.jsonc` and `scripts/trim-worker.mjs`
-already claimed the easy 0.9 MiB between them; see README for both.
+**Still measure, and still re-measure rather than trusting this line.** The
+figure has been wrong before in both directions — it read 2949 for a while after
+the thing it described had already moved — and a number nobody checks is how a
+stale line becomes a wrong decision. What has changed is the consequence: a
+measurement is now a fact worth recording, not a gate to clear. Over the line
+the build still passes and the **deploy** fails, which is now four times further
+away than it was.
+
+`minify` in `wrangler.jsonc` and `scripts/trim-worker.mjs` claimed about 0.9 MiB
+between them and both stay — they cost nothing and a smaller Worker still starts
+faster. See README for both.
 
 ## Engineering notes
 
@@ -277,13 +282,27 @@ already claimed the easy 0.9 MiB between them; see README for both.
   replaces `enforce_checkin_before_meeting()` under the same trigger name and
   the same `FO009`. `enforce_meeting_gate()` is untouched and still separate —
   0014 insisted on two triggers so dropping either leaves the other standing.
-- The photo arrives one of two ways, both in `CaptureFields`: the in-app camera
-  (`getUserMedia`, rear-facing by default, in `camera-capture.tsx`) or a file
-  from the device. Whichever it is, the coordinates stamped into the image are
-  read **at the moment of attaching**, not at page load — browsers strip EXIF
-  geotags, so a live reading is both the only option and the harder one to fake.
-  If `getUserMedia` is unavailable or refused, it falls back to the native
-  `capture="environment"` input; there is no desktop webcam path beyond that.
+- **The photo comes from a camera, and only from a camera.** `CaptureFields`
+  offered a second button that picked a file from the device; Phase 2 stage 1
+  deleted it. A picture chosen from a gallery is evidence of nothing in
+  particular — any image, anywhere, any day — and the whole point of the
+  photograph is that it is evidence. The in-app camera (`getUserMedia`,
+  rear-facing by default, in `camera-capture.tsx`) takes the frame from the live
+  stream straight into the stamping canvas, so it never exists as a file the rep
+  could substitute.
+  **The native fallback is NOT the gallery and must not be deleted with it.**
+  When `getUserMedia` is unavailable or refused, `CaptureFields` hands over to a
+  hidden `capture="environment"` input, which opens the device's own CAMERA app.
+  It looks exactly like the picker that was removed, and removing it too would
+  mean a rep on such a device cannot attach a photo at all — Rule 12 then blocks
+  the save and they cannot log the visit. `tests/unit/capture-fields.test.ts`
+  fails if either half of that moves: the gallery coming back, or the fallback
+  going away. On a DESKTOP browser `capture` is only a hint and degrades to a
+  file picker, so a laptop with no webcam has no route to a photo; reps are on
+  phones, so that is accepted rather than solved.
+  Whichever camera it is, the coordinates stamped into the image are read **at
+  the moment of attaching**, not at page load — browsers strip EXIF geotags, so
+  a live reading is both the only option and the harder one to fake.
 - The stamp carries an approximate area name under the coordinates, via
   `/api/place` (server-side, so the User-Agent Nominatim's policy asks for can
   be set, no key reaches a browser, and the answer is cached in `place_cache`,
@@ -357,37 +376,48 @@ already claimed the easy 0.9 MiB between them; see README for both.
   "abandon" — a visit nobody can finish is swept overnight by
   `sweep_open_checkins()` into the same "closed, time not recorded" state the
   old escape valve used.
-- **The closing report's field set is settled** (0019, one count added in
-  0022): a response note, is the institute interested, the OUTCOME, the
-  MANAGEMENT RESPONSE, the STUDENT RESPONSE, next-session-set with its mandatory date and time, person met as
-  **name (required) + phone (optional)**, and — only when the status says so —
-  the session or campus-visit head counts with topic and who took it. The name
-  and the phone were BOTH optional until the client's spec separated them, with
-  a rule that a phone had to have a name beside it; so a report could name
-  nobody at all, while a rep who never got a mobile had a field the form implied
-  they owed. There is always a person; there is not always a number. Optional
-  still means "may be absent", never "may be wrong" — a phone that is present is
-  still ten digits, which `visits_met_phone_valid` would insist on regardless.
-  Designation stays withdrawn.
-  **The head count is TWO numbers, not one** (0022): Students PRESENT
-  (`students_attended`, unchanged since 0001) and Students PARTICIPATED
-  (`students_reached`, the dormant 0009 column coming back rather than a third
-  being invented). Neither is compulsory — a rep who did not count heads must
-  still be able to file — and the only rule between them, participated ≤
-  present, is the form's alone. It is deliberately not a CHECK: 0009 built
-  "reached" as the WIDER number and the rows the retired long report filed
-  still carry that opposite sense, so a constraint would have refused to build.
-  `report-view.tsx` therefore labels the second count by era, switching on
-  `activities_conducted`, which only the long form ever wrote. 0022 restates the
-  redefinition on both columns, because 0009's comment now says the reverse.
-  This one needed no migration either: both columns are "null, or valid", so
-  requiring a name is a form rule. A NOT NULL would have refused to build
-  against the reports already filed without one. Management interest LEVEL was collected
-  for the length of stage 3 and withdrawn: a level beside a response is two
-  answers to one question. Every retired field keeps its column and its CHECK,
-  so a report filed under any version still renders; `report-view.tsx` skips an
-  empty value. Bringing one back is a form control, and a migration only because
-  `close_visit()` has to carry it.
+- **The closing report asks four things, plus two the status asks for**
+  (Phase 2 stage 1, `docs/phase2-flow-rework-plan.md` §14): a free-text "How did
+  it go?", person met as **name (required) + phone (optional)**, and — only when
+  the status says so — ONE student count, with the session's topic and who took
+  it. That is the whole form.
+  The name and the phone were BOTH optional until the client's spec separated
+  them, with a rule that a phone had to have a name beside it; so a report could
+  name nobody at all, while a rep who never got a mobile had a field the form
+  implied they owed. There is always a person; there is not always a number.
+  Optional still means "may be absent", never "may be wrong" — a phone that is
+  present is still ten digits, which `visits_met_phone_valid` would insist on
+  regardless.
+  **Withdrawing a field costs nothing, and that is by design.** Every field in
+  `close_visit()` is a DEFAULTED parameter, so a question leaving the form is
+  the app passing null — `feedback-actions.ts` does it explicitly at both call
+  sites, with a comment, so a reader sees a decision rather than an omission.
+  The column keeps its data and its vocabulary CHECK, `report-view.tsx` skips an
+  empty value so a report filed under any version still renders, and bringing
+  one back is a control. Withdrawn so far: is-the-institute-interested, the
+  OUTCOME, the MANAGEMENT RESPONSE, the STUDENT RESPONSE, management interest
+  LEVEL, designation, and everything the retired long report asked.
+  **The head count is ONE number again.** 0009 built `students_reached`, 0022
+  woke it as a second count (PRESENT and PARTICIPATED), and stage 1 retired it
+  once more; the client's spec asks one question about students. The survivor is
+  `students_attended` — unchanged since 0001, and the number every filed report
+  already carries. It is not compulsory: a rep who did not count heads must
+  still be able to file. `report-view.tsx` still labels the old second count by
+  era, switching on `activities_conducted`, which only the long form ever wrote,
+  so nothing already filed starts meaning something different.
+  **The follow-up is NOT part of this form** and used not to be honest about it.
+  `close_visit()` never wrote `follow_up_date` or `follow_up_time`, so on the
+  recovery path the rep typed a date into a box that discarded it. The pair now
+  lives in `visitSchema` alone, rendered on Log Visit beside the status that
+  decides it, and stored by `log_visit()`. The rule is the status: OPEN requires
+  a date **and** a time (`enforce_follow_up_when_open`, FO016; the time is
+  pre-filled from `DEFAULT_FOLLOW_UP_TIME` so it is a tap, not a decision),
+  CLOSED merely permits one. The "Is a next session set?" yes/no that used to
+  gate them is gone — it was a second answer to the same question, and choosing
+  an open status while answering "No" hid fields the schema still required, so
+  the error named a box that was not on the screen.
+  `tests/unit/feedback.test.ts` asserts the whole shape, not the two absences:
+  **every field this form collects is one `close_visit()` writes.**
 - **Campus scoping is a security boundary, not a filter.** `public.campuses`
   holds the university's own five campuses — the places reps work FROM — and is
   NOT `public.institutes`, which is the pipeline of prospect schools they work

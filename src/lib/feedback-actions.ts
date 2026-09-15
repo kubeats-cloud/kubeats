@@ -93,19 +93,21 @@ export async function submitFeedback(
     p_visit_id: input.visit_id,
     p_daily_plan_id: input.daily_plan_id,
     p_notes: input.notes,
-    p_institute_interested: input.interested,
-    p_visit_outcome: input.visit_outcome,
-    // A one-element array: the column is a text[] and its <@ CHECK is
-    // unchanged, so widening this back to a multi-select is a form change.
-    p_management_response: input.management_response ? [input.management_response] : null,
-    p_student_response: input.student_response,
+    // DORMANT, not forgotten. Phase 2 stage 1 withdrew these five questions
+    // from the form; their columns and their vocabulary CHECKs are untouched,
+    // so every report filed under an older shape still renders and bringing one
+    // back is a control rather than a migration. Passed explicitly as null so a
+    // reader sees a decision here instead of an omission — the RPC's signature
+    // is unchanged and still carries all of them.
+    p_institute_interested: null,
+    p_visit_outcome: null,
+    p_management_response: null,
+    p_student_response: null,
+    p_students_reached: null,
     p_met_name: input.met_name,
     p_met_phone: input.met_phone,
-    // Two counts since 0022: attended is PRESENT, reached is PARTICIPATED.
-    // The column names are 0009's and unchanged; what a rep reads is set in
-    // feedback-fields.tsx.
+    // The one student count that survives: everybody who was there.
     p_students_attended: input.students_attended,
-    p_students_reached: input.students_reached,
     p_session_topic: input.session_topic,
     p_session_taken_by: input.session_taken_by,
     p_closes_visit_id: input.closes_visit_id,
@@ -199,8 +201,13 @@ export async function logAndFileVisit(
     p_notes: feedback.notes,
     p_status_set_to: visit.status_set_to,
     p_accuracy: visit.accuracy,
-    p_follow_up_date: feedback.follow_up_date,
-    p_follow_up_time: feedback.follow_up_time,
+    // FROM THE VISIT, not from the feedback. Both schemas used to read these
+    // two form fields and the pair is now `visitSchema`'s alone — which is
+    // where the rule lives (an OPEN status requires both, mirroring
+    // enforce_follow_up_when_open/FO016) and where they are actually stored:
+    // log_visit() writes them, close_visit() never has.
+    p_follow_up_date: visit.follow_up_date,
+    p_follow_up_time: visit.follow_up_time,
     p_daily_plan_id: visit.daily_plan_id,
   });
 
@@ -218,16 +225,16 @@ export async function logAndFileVisit(
     p_visit_id: newVisitId,
     p_daily_plan_id: visit.daily_plan_id,
     p_notes: feedback.notes,
-    p_institute_interested: feedback.interested,
-    p_visit_outcome: feedback.visit_outcome,
-    p_management_response: feedback.management_response
-      ? [feedback.management_response]
-      : null,
-    p_student_response: feedback.student_response,
+    // Dormant since Phase 2 stage 1 — see the note on the same five in
+    // submitFeedback above.
+    p_institute_interested: null,
+    p_visit_outcome: null,
+    p_management_response: null,
+    p_student_response: null,
+    p_students_reached: null,
     p_met_name: feedback.met_name,
     p_met_phone: feedback.met_phone,
     p_students_attended: feedback.students_attended,
-    p_students_reached: feedback.students_reached,
     p_session_topic: feedback.session_topic,
     p_session_taken_by: feedback.session_taken_by,
     p_closes_visit_id: feedback.closes_visit_id,

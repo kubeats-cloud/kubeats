@@ -255,7 +255,7 @@ export function VisitReview({
                     <Th>Rep</Th>
                     <Th>Institute</Th>
                     <Th>Activity</Th>
-                    <Th>Outcome</Th>
+                    <Th>Status</Th>
                     <Th>Report</Th>
                     <th className="w-10 px-2 py-2.5">
                       <span className="sr-only">Open</span>
@@ -308,7 +308,7 @@ export function VisitReview({
                         </div>
                       </td>
                       <td className="text-muted-foreground px-5 py-3">
-                        {visit.outcome ?? "—"}
+                        {visit.standing ?? "—"}
                       </td>
                       <td className="px-5 py-3">
                         <Badge variant={visit.reportedAt ? "success" : "neutral"}>
