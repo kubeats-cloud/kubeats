@@ -64,7 +64,7 @@ export function ExportExcel({
   }
 
   return (
-    <Card className="mb-4">
+    <Card className="w-full">
       <CardContent className="space-y-3 pt-6">
         <p className="text-sm font-medium">{label}</p>
         <p className="text-muted-foreground text-xs">

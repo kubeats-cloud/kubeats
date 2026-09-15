@@ -95,11 +95,9 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
         <ErrorState message={result.error} />
       ) : (
         <>
-          <div className="mb-4">
-            <ExportExcel start={start} end={end} label="Export to Excel" />
-          </div>
+          <ExportExcel start={start} end={end} label="Export to Excel" />
 
-          <SectionTitle>
+          <SectionTitle className="mt-6">
             The period
             <span className="text-muted-foreground ml-2 text-xs font-normal">
               {formatDate(start)} – {formatDate(end)}

@@ -307,10 +307,10 @@ export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
 
 /** What each colour is for, in the words the palette uses elsewhere. */
 const TONE_LABELS: Record<StatusTone, string> = {
-  success: "Green — done or achieved",
-  warning: "Amber — scheduled or in progress",
-  danger: "Red — waiting on someone else",
-  neutral: "Slate — finished, no further action",
+  success: "Green: done or achieved",
+  warning: "Amber: scheduled or in progress",
+  danger: "Red: waiting on someone else",
+  neutral: "Slate: finished, no further action",
 };
 
 function Ask({
