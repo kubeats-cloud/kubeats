@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/states";
 import { ActivitySummary } from "@/components/report/activity-summary";
 import { PeriodControls } from "@/components/weekly/period-controls";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { ExportExcel } from "@/components/report/export-excel";
 import { getActivityReport } from "@/lib/activity-report";
 import { listReps } from "@/lib/closing-report";
 import { memberName } from "@/lib/week-summary";
@@ -14,6 +15,7 @@ import {
   REPORT_PERIODS,
   isReportPeriod,
   normalisePeriodStart,
+  periodRange,
   type ReportPeriod,
 } from "@/lib/periods";
 
@@ -106,6 +108,23 @@ export default async function ReportPage(props: PageProps<"/report">) {
         member={viewingOther ? memberId : undefined}
         basePath="/report"
       />
+
+      {/* ADMIN ONLY, because the endpoint is. A rep would get a 403 saved as a
+          .xlsx, which is a worse answer than no button.
+
+          The range follows the period ON SCREEN rather than always being this
+          month: an admin looking at August who exports should get August. The
+          page itself defaults to the current month, so the default range is
+          still the current month — it simply stays in step when they navigate. */}
+      {admin && (
+        <div className="mt-4">
+          <ExportExcel
+            {...periodRange(period, periodStart)}
+            member={memberId}
+            label={`Export ${displayName}'s activity`}
+          />
+        </div>
+      )}
 
       {!result.ok ? (
         <ErrorState message="We could not load this activity report. Please try again in a moment." />

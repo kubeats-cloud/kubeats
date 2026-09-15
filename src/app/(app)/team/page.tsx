@@ -3,7 +3,9 @@ import { SectionTitle } from "@/components/section-title";
 import { ErrorState } from "@/components/states";
 import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
+import { ExportExcel } from "@/components/report/export-excel";
 import { requireAdmin } from "@/lib/admin";
+import { defaultExportRange } from "@/lib/validation/export";
 import { getTeamWeek } from "@/lib/week-summary";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
 
@@ -52,6 +54,14 @@ export default async function TeamPage(props: PageProps<"/team">) {
       />
 
       <WeekNavigator weekStart={weekStart} basePath="/team" />
+
+      {/* The export is a MONTH by default, not this week. It answers a
+          different question from the screen above it — "what did the team do
+          over a period" rather than "who is on track this week" — so it keeps
+          its own range rather than inheriting the navigator's. */}
+      <div className="mt-4">
+        <ExportExcel {...defaultExportRange()} label="Export to Excel" />
+      </div>
 
       <SectionTitle className="mt-6">
         The week
