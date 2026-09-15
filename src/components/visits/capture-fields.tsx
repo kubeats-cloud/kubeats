@@ -1,13 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  CameraIcon,
-  ImageIcon,
-  Loader2Icon,
-  RotateCcwIcon,
-  XIcon,
-} from "lucide-react";
+import { CameraIcon, Loader2Icon, RotateCcwIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { asStale, bestFix, nameArea } from "@/lib/geolocate";
 import { type LocationFix } from "@/lib/validation/location";
@@ -48,17 +42,36 @@ import { preparePhoto } from "@/lib/photo";
  * message when it does, is stage 3 of the redesign (docs/flow-redesign-plan.md,
  * change 6). Gutting the state now would only mean rebuilding it then.
  *
- * Two ways to provide the photo, and only these two:
+ * LIVE CAMERA ONLY, as of Phase 2 stage 1.
  *
- *   Take photo    the in-app camera, rear-facing by default. The frame goes
- *                 from the live stream straight into the stamping canvas and
- *                 never exists as a file the rep could substitute.
- *   Upload photo  an existing picture from the device.
+ * There used to be two buttons: the camera, and beside it a second one that
+ * opened a plain file picker onto the device's gallery. The second is gone —
+ * its wording is deliberately not repeated here, because `capture-fields.test.ts`
+ * greps this file for it. A photograph is the
+ * evidence that the visit happened, and a picture chosen from a gallery is
+ * evidence of nothing in particular: it can be any image, taken anywhere, on
+ * any day. The camera path cannot be: the frame goes from the live stream
+ * straight into the stamping canvas and never exists as a file the rep could
+ * substitute.
  *
- * Both end up in the same place. Whichever route the image arrives by, the
- * coordinates burned into it are read from this device at the moment of
- * attaching, never from the file: browsers strip EXIF geotags, and a reading
- * taken now is harder to fake than one taken from metadata.
+ * ⚠ THE NATIVE FALLBACK IS NOT THE GALLERY AND MUST NOT BE REMOVED WITH IT.
+ *
+ * `nativeCameraRef` below is an `<input capture="environment">`, which opens
+ * the device's own CAMERA app. It fires only when `getUserMedia` is unavailable
+ * or refused — an older browser, a locked-down webview, a denied permission.
+ * Deleting it would mean that on any such device the rep cannot attach a photo
+ * at all; Rule 12 then blocks the save, and they cannot log the visit. "Camera
+ * only" is about removing the gallery, not about removing the second camera.
+ *
+ * On a DESKTOP browser `capture` is only a hint and degrades to a file picker,
+ * so a laptop with no webcam has no route to a photo. Reps are on phones, so
+ * that is accepted rather than solved — but an admin testing on a desktop will
+ * meet it, and should be told rather than left to discover it.
+ *
+ * Whichever camera the image arrives from, the coordinates burned into it are
+ * read from this device at the moment of attaching, never from the file:
+ * browsers strip EXIF geotags, and a reading taken now is harder to fake than
+ * one taken from metadata.
  *
  * The photo can only be attached here, while the visit is being logged. There
  * is no path anywhere that edits it afterwards, and the database refuses one.
@@ -109,7 +122,11 @@ export function CaptureFields({ userId }: { userId: string }) {
   /** Set once this device has proved it cannot open a camera in the page. */
   const [cameraUnavailable, setCameraUnavailable] = useState<string | null>(null);
 
-  const uploadRef = useRef<HTMLInputElement>(null);
+  /**
+   * The device's own camera app, used only when the in-page one cannot open.
+   * NOT a gallery picker — see the note at the top of this file before
+   * removing it.
+   */
   const nativeCameraRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<string | null>(null);
   /** The last good fix, used only when a fresh read fails at capture time. */
@@ -324,7 +341,11 @@ export function CaptureFields({ userId }: { userId: string }) {
 
       {/* Photo ------------------------------------------------------------- */}
       <div className="space-y-2">
-        <Label htmlFor="visit-photo-upload">
+        {/* Labels the button rather than an input, because the only input here
+            is the hidden native-camera fallback and pointing a visible label at
+            an aria-hidden control would be worse than pointing at the thing the
+            rep actually presses. A <button> is a labelable element. */}
+        <Label htmlFor="visit-photo-capture">
           Photo
           <span className="text-danger" aria-hidden>
             *
@@ -332,15 +353,8 @@ export function CaptureFields({ userId }: { userId: string }) {
           <span className="sr-only">(required)</span>
         </Label>
 
-        {/* Both inputs stay mounted and hidden; the buttons above drive them. */}
-        <input
-          ref={uploadRef}
-          id="visit-photo-upload"
-          type="file"
-          accept="image/*"
-          onChange={handleFile}
-          className="sr-only"
-        />
+        {/* Stays mounted and hidden; takePhoto() drives it when the in-page
+            camera cannot open. This is a CAMERA, not a gallery picker. */}
         <input
           ref={nativeCameraRef}
           type="file"
@@ -354,31 +368,20 @@ export function CaptureFields({ userId }: { userId: string }) {
 
         {photo.status !== "ready" && !cameraOpen && (
           <>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={takePhoto}
-                disabled={busy}
-                className="h-14 flex-col gap-1"
-              >
-                <CameraIcon className="size-5" aria-hidden />
-                Take photo
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => uploadRef.current?.click()}
-                disabled={busy}
-                className="h-14 flex-col gap-1"
-              >
-                <ImageIcon className="size-5" aria-hidden />
-                Upload photo
-              </Button>
-            </div>
+            <Button
+              id="visit-photo-capture"
+              type="button"
+              variant="outline"
+              onClick={takePhoto}
+              disabled={busy}
+              className="h-14 w-full flex-col gap-1"
+            >
+              <CameraIcon className="size-5" aria-hidden />
+              Take photo
+            </Button>
             <p className="text-muted-foreground text-xs">
-              Required. The date, time and place are added to the picture
-              automatically when you attach it.
+              Required, and taken here and now — the camera opens in the app.
+              The date, time and place are added to the picture automatically.
             </p>
           </>
         )}

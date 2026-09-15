@@ -3,18 +3,8 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { FormSection } from "@/components/form-section";
 import {
-  MANAGEMENT_RESPONSES,
-  STUDENT_RESPONSES,
-  VISIT_OUTCOMES,
   needsCampusCount,
   needsSessionDetail,
   type FeedbackPatch,
@@ -27,106 +17,33 @@ import { formatDate } from "@/lib/dates";
 import { activityLabelFor } from "@/lib/validation/visit";
 
 /**
- * The short feedback form's fields, shared by the two screens that render them.
+ * The short closing report's fields, shared by the two screens that render
+ * them.
  *
  * They appear at the foot of Log Visit for a visit being logged now, and on
  * their own when a visit was logged but its feedback did not land. One copy, so
  * the two cannot drift into asking different questions.
  *
- * Everything is driven by the STATUS the rep has already chosen — not by a
+ * EVERYTHING HERE IS A FIELD `close_visit()` WRITES. That is not a coincidence,
+ * it is the rule this component now keeps: the follow-up used to be rendered
+ * here too, and on the recovery path `close_visit()` never wrote it, so the rep
+ * typed a date into a box that threw it away. The follow-up moved to Log Visit,
+ * beside the status that decides whether it is required. See validation/feedback.ts.
+ *
+ * What is asked is driven by the STATUS the rep has already chosen — not by a
  * checklist of what they did. The old form asked both and then had to reconcile
  * them; this asks once.
  */
 
-const YES_NO = [
-  { value: "yes", label: "Yes" },
-  { value: "no", label: "No" },
-] as const;
-
-function Choice({
-  name,
-  legend,
-  value,
-  onChange,
-  error,
-}: {
-  name: string;
-  legend: string;
-  value: string;
-  onChange: (v: string) => void;
-  error?: string;
-}) {
-  return (
-    <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">{legend}</legend>
-      <input type="hidden" name={name} value={value} />
-      <div className="flex gap-2">
-        {YES_NO.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={value === option.value}
-            onClick={() => onChange(option.value)}
-            className={
-              "h-11 flex-1 rounded-md border text-sm font-medium transition-colors " +
-              (value === option.value
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card hover:bg-accent")
-            }
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-      {error && <p className="text-danger text-xs">{error}</p>}
-    </fieldset>
-  );
-}
-
 /**
  * One dropdown, its hidden field and its error, in one place.
  *
- * Three near-identical selects is exactly where a copy-paste slip puts the
- * wrong `name` on the right control and the value lands in another column.
+ * `Choice` and `Picker` lived here too — five controls between them, for
+ * "Is the institute interested?", the outcome, the management response, the
+ * student response and "Is a next session set?". All five are withdrawn; their
+ * columns stay dormant and their vocabularies stay in validation/feedback.ts,
+ * so bringing one back is a control rather than a migration.
  */
-function Picker({
-  label,
-  name,
-  placeholder,
-  options,
-  value,
-  onChange,
-  error,
-}: {
-  label: string;
-  name: string;
-  placeholder: string;
-  options: readonly string[];
-  value: string;
-  onChange: (v: string) => void;
-  error?: string;
-}) {
-  return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-11 w-full" aria-label={label}>
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option} value={option}>
-              {option}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <input type="hidden" name={name} value={value} />
-      {error && <p className="text-danger text-xs">{error}</p>}
-    </div>
-  );
-}
-
 
 export function FeedbackFields({
   status,
@@ -144,8 +61,8 @@ export function FeedbackFields({
    * This used to hand back `{ ...value, [key]: v }` — the whole state, merged
    * here against the `value` prop. Two changes in one tick therefore both
    * merged against the SAME stale prop and the second silently overwrote the
-   * first, which is exactly what happened when two yes/no buttons were tapped
-   * in the same tick during live verification.
+   * first, which is exactly what happened when two buttons were tapped in the
+   * same tick during live verification.
    *
    * A patch cannot do that: the component no longer has the whole object to
    * merge, so the merge has to happen where the latest state is — inside a
@@ -164,61 +81,19 @@ export function FeedbackFields({
 
   const wantsSession = needsSessionDetail(status);
   const wantsCampusCount = needsCampusCount(status);
-  const wantsFollowUp = value.nextMeetingSet === "yes";
 
   return (
     <>
-      <FormSection
-        title="How did it go?"
-        description="A few words and two questions. This is the whole report."
-      >
+      {/* NO SECTION TITLE. One field, and its own label asks the question — a
+          heading above it saying "How did it go?" over a box labelled "How did
+          it go?" is one label too many. The description stays, because "this is
+          the whole report" is the thing a rep wants to know. */}
+      <FormSection description="A few words. This is the whole report.">
         <div className="space-y-2">
-          <Label htmlFor="notes">What did they say?</Label>
-          <Textarea id="notes" name="notes" rows={3} maxLength={2000} />
+          <Label htmlFor="notes">How did it go?</Label>
+          <Textarea id="notes" name="notes" rows={4} maxLength={2000} />
           {err("notes")}
         </div>
-
-        <Choice
-          name="interested"
-          legend="Is the institute interested?"
-          value={value.interested}
-          onChange={(v) => set("interested", v)}
-          error={fieldErrors.interested}
-        />
-
-        {/* Three dropdowns, each one a fixed vocabulary the database also
-            holds as a CHECK. The management interest LEVEL that briefly sat
-            here is gone: a level beside a response is two answers to one
-            question, and the response is the one that says something. */}
-        <Picker
-          label="How did the visit end?"
-          name="visit_outcome"
-          placeholder="Choose an outcome"
-          options={VISIT_OUTCOMES}
-          value={value.visitOutcome}
-          onChange={(v) => set("visitOutcome", v)}
-          error={fieldErrors.visit_outcome}
-        />
-
-        <Picker
-          label="How did management respond?"
-          name="management_response"
-          placeholder="Choose a response"
-          options={MANAGEMENT_RESPONSES}
-          value={value.managementResponse}
-          onChange={(v) => set("managementResponse", v)}
-          error={fieldErrors.management_response}
-        />
-
-        <Picker
-          label="How did the students respond?"
-          name="student_response"
-          placeholder="Choose a response"
-          options={STUDENT_RESPONSES}
-          value={value.studentResponse}
-          onChange={(v) => set("studentResponse", v)}
-          error={fieldErrors.student_response}
-        />
       </FormSection>
 
       <FormSection
@@ -265,17 +140,15 @@ export function FeedbackFields({
               : "Asked because you marked the campus visit done."
           }
         >
-          {/* TWO COUNTS, and the labels are the whole job.
-              A single "how many students?" box was one number for two
-              questions the client asks separately. Split, they are one word
-              apart — present vs. participated — so each carries the sentence
-              that tells a rep which is which, and they sit one above the other
-              rather than side by side so the pair is read rather than skimmed.
-              Neither is required; the schema only objects if participated
-              exceeds present, which is what two numbers typed the wrong way
-              round looks like. */}
+          {/* ONE COUNT.
+              There were two here — present and participated — and the client's
+              spec asks one question about students, not two. `students_reached`
+              goes dormant rather than being dropped, so the reports that
+              carried it still render and bringing it back is a control.
+              Not required: a rep who did not count heads must still be able to
+              file, which is how this number has always behaved. */}
           <div className="space-y-2">
-            <Label htmlFor="students-attended">Students present</Label>
+            <Label htmlFor="students-attended">Number of students</Label>
             <Input
               id="students-attended"
               name="students_attended"
@@ -290,23 +163,6 @@ export function FeedbackFields({
                 : "Everyone who came to see the campus."}
             </p>
             {err("students_attended")}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="students-reached">Students who participated</Label>
-            <Input
-              id="students-reached"
-              name="students_reached"
-              inputMode="numeric"
-              className="h-11"
-              value={value.studentsReached}
-              onChange={(e) => set("studentsReached", e.target.value)}
-            />
-            <p className="text-muted-foreground text-xs">
-              How many of them actually took part: asked something, joined
-              in. Never more than the number present.
-            </p>
-            {err("students_reached")}
           </div>
 
           {wantsSession && (
@@ -339,58 +195,6 @@ export function FeedbackFields({
           )}
         </FormSection>
       )}
-
-      <FormSection
-        title="What happens next?"
-        description="If you have fixed a next meeting, put it in the diary now."
-      >
-        <Choice
-          name="next_meeting_set"
-          legend="Is a next session or meeting set?"
-          value={value.nextMeetingSet}
-          onChange={(v) => set("nextMeetingSet", v)}
-          error={fieldErrors.next_meeting_set}
-        />
-
-        {/* Shown only when there IS one. Asking for a date beside a "No" is how
-            a form teaches people to type something to get past it. */}
-        {wantsFollowUp && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="follow-up-date">Date</Label>
-              <Input
-                id="follow-up-date"
-                name="follow_up_date"
-                type="date"
-                className="h-11"
-                value={value.followUpDate}
-                onChange={(e) => set("followUpDate", e.target.value)}
-                aria-required
-              />
-              {err("follow_up_date")}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="follow-up-time">Time</Label>
-              <Input
-                id="follow-up-time"
-                name="follow_up_time"
-                type="time"
-                className="h-11"
-                value={value.followUpTime}
-                onChange={(e) => set("followUpTime", e.target.value)}
-                aria-required
-              />
-              {err("follow_up_time")}
-            </div>
-          </div>
-        )}
-        {!wantsFollowUp && (
-          <input type="hidden" name="follow_up_date" value="" />
-        )}
-        {!wantsFollowUp && (
-          <input type="hidden" name="follow_up_time" value="" />
-        )}
-      </FormSection>
 
       {/* Q2 — the offer, never automatic. A rep who set a session here earlier
           is asked whether THIS visit is the one that completed it, and the

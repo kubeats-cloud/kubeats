@@ -64,6 +64,22 @@ export function followUpRequired(status: string | null): boolean {
 }
 
 /**
+ * The time a follow-up starts out at, so setting one is a tap rather than a
+ * decision.
+ *
+ * The client's spec asked only for a follow-up DATE; the database asks for a
+ * date AND a time (`enforce_follow_up_when_open`, FO016) and has since 0018.
+ * Both are kept, because a time is what makes a follow-up land in a diary
+ * rather than in a day — but it is pre-filled when the rep picks the date, so
+ * the fiddly half answers itself and can still be changed.
+ *
+ * Mid-morning on purpose: a school is open, the first period is over, and
+ * nobody is at lunch. It is a starting point, not a rule, and nothing anywhere
+ * enforces it.
+ */
+export const DEFAULT_FOLLOW_UP_TIME = "11:00";
+
+/**
  * The two statuses 0010 singled out, kept only so their message can say WHY.
  *
  * They are now a strict subset of the open set above, so this decides nothing —
