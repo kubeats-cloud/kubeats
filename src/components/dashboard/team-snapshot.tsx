@@ -47,7 +47,6 @@ interface Row {
   percent: number | null;
   tone: ReturnType<typeof toneFor> | "none";
   status: string;
-  loops: number;
   href: string;
   reportHref: string;
 }
@@ -55,7 +54,6 @@ interface Row {
 function rowsFrom(
   members: TeamMemberWeek[],
   weekStart: string,
-  openLoops: Map<string, number>,
 ): Row[] {
   return members.map((member) => {
     const percent = completionPercent(member.achieved, member.record.targets);
@@ -72,7 +70,6 @@ function rowsFrom(
           : member.record.locked
             ? "Submitted"
             : "In progress",
-      loops: openLoops.get(member.member) ?? 0,
       href: `/targets?week=${weekStart}&member=${member.member}`,
       // /team and /report answer different questions — all reps for one week
       // against one rep over months — so they stay separate screens. What they
@@ -85,13 +82,11 @@ function rowsFrom(
 export function TeamSnapshot({
   members,
   weekStart,
-  openLoops,
 }: {
   members: TeamMemberWeek[];
   weekStart: string;
-  openLoops: Map<string, number>;
 }) {
-  const rows = rowsFrom(members, weekStart, openLoops);
+  const rows = rowsFrom(members, weekStart);
 
   if (rows.length === 0) {
     return (
@@ -127,8 +122,6 @@ export function TeamSnapshot({
 
                 <p className="text-muted-foreground mt-0.5 truncate text-xs">
                   {row.status}
-                  {" · "}
-                  {row.loops} open loop{row.loops === 1 ? "" : "s"}
                 </p>
 
                 <Progress
@@ -173,9 +166,6 @@ export function TeamSnapshot({
                 <th scope="col" className="px-5 py-2.5 text-xs font-medium">
                   Commitment
                 </th>
-                <th scope="col" className="px-5 py-2.5 text-right text-xs font-medium">
-                  Open loops
-                </th>
                 <th scope="col" className="w-[30%] px-5 py-2.5 text-xs font-medium">
                   Progress
                 </th>
@@ -210,13 +200,6 @@ export function TeamSnapshot({
                     </Link>
                   </td>
                   <td className="text-muted-foreground px-5 py-3">{row.status}</td>
-                  <td className="px-5 py-3 text-right tabular-nums">
-                    {row.loops === 0 ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      row.loops
-                    )}
-                  </td>
                   <td className="px-5 py-3">
                     <Progress
                       value={row.percent ?? 0}

@@ -1,10 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import { todayISO } from "@/lib/visits";
 import { requireAdmin } from "@/lib/admin";
+import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { assignVisitSchema } from "@/lib/validation/closing-report";
 import { CHECK_FIELDS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
@@ -12,6 +14,7 @@ import {
   dailyPlanFormDataToInput,
   dailyPlanSchema,
   dailyPlanSummary,
+  followUpSchema,
   planIdSchema,
   visitFieldErrors,
 } from "@/lib/validation/visit";
@@ -225,6 +228,164 @@ export async function assignVisit(
   revalidatePath("/");
   revalidatePath("/settings");
   return { error: null, fieldErrors: {}, ok: true };
+}
+
+/**
+ * Start a follow-up visit at an institute that is still open.
+ *
+ * SEEDS A PLAN ROW AND HANDS OVER. It does not check in, does not log, and does
+ * not track — it puts the institute on today's plan and sends the rep to the
+ * Dashboard, which is where `CheckInButton` lives and where a visit in progress
+ * is followed.
+ *
+ * That split is the whole reason this is allowed to exist. CLAUDE.md says the
+ * Dashboard owns the daily-plan create-and-track flow, and that a second writer
+ * in front of the `daily_plans` row Rule 2 checks is the thing screen ownership
+ * exists to prevent. This writes the row and immediately gives the flow back,
+ * so there is still exactly one screen where a visit is tracked. `assignVisit()`
+ * above is a second writer under the same reasoning.
+ *
+ * It is NOT a parallel flow: from the redirect onwards this is the ordinary
+ * check-in → log → report → auto-check-out chain, with the same photo, the same
+ * presence guarantee and the same gate. Pending is only a new way in.
+ *
+ * REPS ONLY. An admin has no campus (`enforce_profile_campus`, FO021) and does
+ * not do field visits, so a launch would put the visit on the ADMIN's own day.
+ * Admin Pending is read-only (D10) and never renders the control that calls
+ * this; the guard below is what makes that true rather than merely displayed.
+ */
+export async function startFollowUp(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
+  }
+
+  const parsed = followUpSchema.safeParse({
+    institute_id: String(formData.get("institute_id") ?? ""),
+    purpose: String(formData.get("purpose") ?? ""),
+    purpose_note: String(formData.get("purpose_note") ?? ""),
+    requires_note: String(formData.get("requires_note") ?? "") === "yes",
+  });
+  if (!parsed.success) {
+    const fieldErrors = visitFieldErrors(parsed.error);
+    return { error: dailyPlanSummary(fieldErrors), fieldErrors };
+  }
+
+  if (isAdmin(await getCurrentUser())) {
+    return {
+      error: "Admins do not log visits. Assign this follow-up to a rep instead.",
+      fieldErrors: {},
+    };
+  }
+
+  /**
+   * #7 — one open visit at a time, said before the tap rather than after.
+   *
+   * `daily_plans_one_open_visit` and FO013 refuse a second arrival anyway, but
+   * that refusal would land after the rep had already been redirected and
+   * pressed Check in. Naming the institute that is holding them is the
+   * difference between a dead end and a sentence.
+   */
+  const today = todayISO();
+  const { data: openElsewhere } = await supabase
+    .from("daily_plans")
+    .select("institute_id, institutes(name)")
+    .eq("member", user.id)
+    .not("checkin_at", "is", null)
+    .is("checkout_at", null)
+    .eq("checkout_missing", false)
+    .limit(1)
+    .maybeSingle();
+
+  if (openElsewhere && openElsewhere.institute_id !== parsed.data.institute_id) {
+    // PostgREST types a one-to-one embed as an array; the same narrowing
+    // visits.ts does for the joined purpose row.
+    const joined = openElsewhere.institutes as unknown;
+    const holder = Array.isArray(joined) ? joined[0] : joined;
+    const name = (holder as { name?: string } | null)?.name ?? "another institute";
+    return {
+      error: `You are still checked in at ${name}. Finish that visit first.`,
+      fieldErrors: {},
+    };
+  }
+
+  // Resolved server-side and never trusted from the form, for the same reason
+  // addToDailyPlan does it: the purpose decides the activity, and therefore
+  // which weekly metric this visit will feed.
+  const { data: purposeRow, error: purposeError } = await supabase
+    .from("purposes")
+    .select("id, label, requires_note")
+    .eq("label", parsed.data.purpose)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (purposeError) {
+    logError("plan:follow-up-purpose", purposeError);
+    return {
+      error: toFriendlyMessage(purposeError, "We could not start that visit."),
+      fieldErrors: {},
+    };
+  }
+  if (!purposeRow) {
+    return {
+      error: "That purpose is no longer available. Pick another one.",
+      fieldErrors: {},
+    };
+  }
+  if (purposeRow.requires_note && !parsed.data.purpose_note) {
+    return {
+      error: "Say what this visit is for.",
+      fieldErrors: { purpose_note: "Say what this visit is for." },
+    };
+  }
+
+  /**
+   * An entry may already exist for today — the rep planned this institute this
+   * morning, or tapped Pending twice.
+   *
+   * IF IT IS ALREADY CHECKED IN, ITS PURPOSE IS LEFT ALONE. Overwriting it
+   * would change what the visit in progress counts as, mid-visit, from a screen
+   * the rep is not even looking at. `guard_checkin_cycle_final` (FO014) guards
+   * the DELETE path; nothing in the database guards this one, so it is the
+   * application's to get right.
+   */
+  const { data: existing } = await supabase
+    .from("daily_plans")
+    .select("id, checkin_at")
+    .eq("member", user.id)
+    .eq("date", today)
+    .eq("institute_id", parsed.data.institute_id)
+    .maybeSingle();
+
+  if (!existing?.checkin_at) {
+    const { error } = await supabase.from("daily_plans").upsert(
+      {
+        member: user.id,
+        date: today,
+        institute_id: parsed.data.institute_id,
+        purpose: purposeRow.label,
+        purpose_id: purposeRow.id,
+        purpose_note: purposeRow.requires_note ? parsed.data.purpose_note : null,
+      },
+      { onConflict: "member,date,institute_id" },
+    );
+
+    if (error) {
+      logError("plan:follow-up", error);
+      return {
+        error: toFriendlyMessage(error, "We could not start that visit."),
+        fieldErrors: {},
+      };
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/pending");
+  // Back to the one screen that tracks a visit. The rep checks in from there.
+  redirect("/?followup=1");
 }
 
 export async function removeFromDailyPlan(planId: string): Promise<FormState> {

@@ -5,7 +5,6 @@ import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { requireAdmin } from "@/lib/admin";
 import { getTeamWeek } from "@/lib/week-summary";
-import { openLoopsByMember } from "@/lib/visits";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
 
 export const metadata = { title: "Team" };
@@ -41,9 +40,8 @@ export default async function TeamPage(props: PageProps<"/team">) {
   const searchParams = await props.searchParams;
   const weekStart = normaliseWeekParam(first(searchParams.week));
 
-  const [team, openLoops] = await Promise.all([
+  const [team] = await Promise.all([
     getTeamWeek(weekStart),
-    openLoopsByMember(),
   ]);
 
   return (
@@ -66,7 +64,6 @@ export default async function TeamPage(props: PageProps<"/team">) {
         <TeamSnapshot
           members={team.members}
           weekStart={weekStart}
-          openLoops={openLoops}
         />
       ) : (
         <ErrorState message="We could not load the team's week. Please try again in a moment." />
