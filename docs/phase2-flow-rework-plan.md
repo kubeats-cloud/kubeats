@@ -953,12 +953,12 @@ Only Stage 4b is coupled to a migration on the same day.
 | --- | --- | --- | --- | --- |
 | **1** | Closing report + live camera | none | none | nothing — **start here** |
 | **2** | Purposes become typed | 0024 | apply any time before | ✅ **built** |
-| **3** | The Activity selector goes | 0026 (seed + `lifecycle`) | apply before | Stage 2, and 0026 adding `lifecycle` |
-| **4a** | Statuses come from the database | 0025 | apply any time before | nothing |
-| **4b** | Admin statuses panel + compulsory status | 0026 part 1 | ⚠ **apply immediately before deploy** | Stage 4a live |
+| **3** | The Activity selector goes | **0025** (lifecycle + seed) | ⚠ apply immediately before | ✅ **built** |
+| **4a** | Statuses come from the database | **0026** | apply any time before | nothing |
+| **4b** | Admin statuses panel + compulsory status | **0027** | ⚠ **apply immediately before deploy** | Stage 4a live |
 | **5** | Pending reworked | none | none | Stage 4b |
 | **5b** | Admin "Assign this follow-up" | none | none | Stage 5 |
-| **6** | Docs, tests, size | 0027 (optional) | none | all of the above |
+| **6** | Docs, tests, size | 0028 (optional) | none | all of the above |
 
 ### Stage 1 — closing report + live camera *(no migration)*
 

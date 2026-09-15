@@ -216,7 +216,7 @@ describe("the week range is pinned the same way", () => {
  */
 describe("adding to today's plan explains what is missing", () => {
   it("rejects an empty institute with a message worth reading", () => {
-    const parsed = dailyPlanSchema.safeParse({ institute_id: "", purpose: "Demo" });
+    const parsed = dailyPlanSchema.safeParse({ institute_id: "", purpose: "Demo", purpose_note: "", requires_note: false });
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
     const messages = parsed.error.issues.map((issue) => issue.message);
@@ -227,6 +227,8 @@ describe("adding to today's plan explains what is missing", () => {
     const parsed = dailyPlanSchema.safeParse({
       institute_id: "3f1d4f4e-2b6a-4f1a-9f4e-9d2c1b0a7e55",
       purpose: "   ",
+      purpose_note: "",
+      requires_note: false,
     });
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
@@ -240,6 +242,8 @@ describe("adding to today's plan explains what is missing", () => {
       dailyPlanSchema.safeParse({
         institute_id: "3f1d4f4e-2b6a-4f1a-9f4e-9d2c1b0a7e55",
         purpose: "Book display",
+        purpose_note: "",
+        requires_note: false,
       }).success,
     ).toBe(true);
   });

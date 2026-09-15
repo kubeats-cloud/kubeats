@@ -41,18 +41,70 @@ export async function listInstitutesForPicker(): Promise<PickerInstitute[]> {
   return data ?? [];
 }
 
-export async function listPurposes(): Promise<string[]> {
+/**
+ * A purpose as the planner needs it: the label a rep reads, and the mapping
+ * that decides what the visit will BE.
+ *
+ * Stage 3 derives the activity from this rather than asking the rep, so the
+ * picker has to carry it. `requiresNote` is what makes "Other" ask for words.
+ */
+export interface PurposeOption {
+  id: string;
+  label: string;
+  activity: string | null;
+  lifecycle: string | null;
+  requiresNote: boolean;
+}
+
+/**
+ * The purposes a rep may plan under, retired ones excluded.
+ *
+ * `is_active` is filtered HERE rather than by a policy, because a retired
+ * purpose must stay READABLE — every plan row that already references one needs
+ * its mapping to resolve for ever. Retiring takes it out of the picker, not out
+ * of the database. See migration 0025.
+ */
+export async function listPurposes(): Promise<PurposeOption[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("purposes")
-    .select("label")
+    .select("id, label, activity, lifecycle, requires_note, is_active")
+    .eq("is_active", true)
     .order("label");
 
   if (error) {
     logError("visits:purposes", error);
     return [];
   }
-  return (data ?? []).map((p) => p.label);
+  return (data ?? []).map((p) => ({
+    id: p.id,
+    label: p.label,
+    activity: p.activity,
+    lifecycle: p.lifecycle,
+    requiresNote: p.requires_note ?? false,
+  }));
+}
+
+/**
+ * The joined purpose row, whatever shape PostgREST hands back.
+ *
+ * `daily_plans.purpose_id` is a many-to-one, so the embed is logically a single
+ * row — but supabase-js infers an ARRAY from the select string, because the
+ * relationship direction is not in the literal. Rather than cast the whole
+ * result and lose every other field's type, this narrows the one embed and
+ * accepts both shapes: an object, a one-element array, or null.
+ *
+ * Null is a real and expected answer, not a failure: a plan made before 0025
+ * has no `purpose_id`, and so does one whose purpose was DELETED rather than
+ * retired. Callers ask `plannedActivityIsValid()` before relying on it.
+ */
+type JoinedPurpose = { activity: string | null; lifecycle: string | null };
+
+function purposeOf(
+  embedded: JoinedPurpose | JoinedPurpose[] | null | undefined,
+): JoinedPurpose | null {
+  if (!embedded) return null;
+  return Array.isArray(embedded) ? (embedded[0] ?? null) : embedded;
 }
 
 export interface PlanEntry {
@@ -60,6 +112,22 @@ export interface PlanEntry {
   institute_id: string;
   instituteName: string;
   purpose: string;
+  /**
+   * What this plan's purpose makes the visit, derived rather than asked.
+   *
+   * Stage 3 deleted Log Visit's Activity selector; this pair is what replaced
+   * it. It comes from the joined `purposes` row (`activity` from 0024,
+   * `lifecycle` from 0025), so a rename cannot break it and an admin adding a
+   * purpose decides it at that moment.
+   *
+   * Null when the plan predates the link, or its purpose was deleted rather
+   * than retired. `plannedActivityIsValid()` is what callers ask before walking
+   * a rep into a visit that could not be saved.
+   */
+  activity: string | null;
+  lifecycle: string | null;
+  /** "Other" — the rep's own words about what this visit is for. */
+  purposeNote: string | null;
   meetings_actual: number | null;
   follow_up_date: string | null;
   /** Set when an admin put this on the rep's plan rather than the rep. */
@@ -98,8 +166,12 @@ export async function getTodayPlan(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("daily_plans")
+    // The purpose row rides along, because it is what decides the visit's
+    // activity now. A literal select string, and the join is inferred from
+    // daily_plans.purpose_id (migration 0025) — which is also why that FK
+    // exists rather than the label being matched a second time here.
     .select(
-      "id, institute_id, purpose, meetings_actual, follow_up_date, assigned_by, checkin_at, checkin_lat, checkin_lng, checkout_at, checkout_lat, checkout_lng, checkout_missing, checkin_location_manual, checkin_manual_reason",
+      "id, institute_id, purpose, purpose_note, meetings_actual, follow_up_date, assigned_by, checkin_at, checkin_lat, checkin_lng, checkout_at, checkout_lat, checkout_lng, checkout_missing, checkin_location_manual, checkin_manual_reason, purposes(activity, lifecycle)",
     )
     .eq("member", memberId)
     .eq("date", todayISO())
@@ -130,9 +202,19 @@ export async function getTodayPlan(
         checkout_missing,
         checkin_location_manual,
         checkin_manual_reason,
+        purpose_note,
+        purposes,
         ...r
       }) => ({
         ...r,
+        // PostgREST returns an embedded one-to-one as an object, or null when
+        // purpose_id is null — a plan made before 0025, or one whose purpose was
+        // deleted rather than retired. Null here is not an error; it is a plan
+        // whose activity cannot be derived, which the Dashboard and Log Visit
+        // both handle rather than crash on.
+        activity: purposeOf(purposes)?.activity ?? null,
+        lifecycle: purposeOf(purposes)?.lifecycle ?? null,
+        purposeNote: purpose_note ?? null,
         instituteName: instituteNameFrom(names, r.institute_id, "visits"),
         assignedBy: assigned_by,
         assignedByName: assigned_by ? (assigners.get(assigned_by) ?? null) : null,
@@ -437,6 +519,9 @@ export async function getPlanById(
   institute_id: string;
   instituteName: string;
   purpose: string;
+  purposeNote: string | null;
+  activity: string | null;
+  lifecycle: string | null;
   checkinAt: string | null;
   checkoutAt: string | null;
   checkoutMissing: boolean;
@@ -444,7 +529,9 @@ export async function getPlanById(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("daily_plans")
-    .select("id, date, institute_id, purpose, checkin_at, checkout_at, checkout_missing")
+    .select(
+      "id, date, institute_id, purpose, purpose_note, checkin_at, checkout_at, checkout_missing, purposes(activity, lifecycle)",
+    )
     .eq("id", planId)
     .eq("member", memberId)
     .maybeSingle();
@@ -461,6 +548,9 @@ export async function getPlanById(
     institute_id: data.institute_id,
     instituteName: instituteNameFrom(names, data.institute_id, "visits"),
     purpose: data.purpose,
+    purposeNote: data.purpose_note ?? null,
+    activity: purposeOf(data.purposes)?.activity ?? null,
+    lifecycle: purposeOf(data.purposes)?.lifecycle ?? null,
     checkinAt: data.checkin_at,
     checkoutAt: data.checkout_at,
     checkoutMissing: data.checkout_missing ?? false,

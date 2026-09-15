@@ -30,13 +30,13 @@ import {
   statusesInCategory,
 } from "@/lib/validation/institute";
 import {
-  ACTIVITIES,
-  activityForPurpose,
+  type ActivityKey,
   expectedDateLabel,
   expectedDateRequired,
   fieldLabel,
   followUpRequired,
-  hasLifecycle,
+  plannedActivityIsValid,
+  plannedActivityLabel,
 } from "@/lib/validation/visit";
 import { FormNotice } from "@/components/form-notice";
 
@@ -74,19 +74,37 @@ export function LogVisitForm({
   );
   const [clientState] = useState<FormState>(EMPTY_STATE);
 
-  const prefill = activityForPurpose(plan.purpose);
-  const [activity, setActivity] = useState<string>(prefill?.activity ?? "meeting");
-  const [lifecycleStatus, setLifecycleStatus] = useState<string>(
-    prefill?.lifecycle ?? "Done",
-  );
+  /*
+   * THE ACTIVITY IS NOT STATE ANY MORE. It used to be two `useState`s behind
+   * two Selects — the rep picked the activity and its Set/Done — pre-filled
+   * from a hard-coded map of four purpose labels.
+   *
+   * Stage 3 derives both from the plan's purpose instead, through
+   * `purposes.activity` (0024) and `purposes.lifecycle` (0025). There is
+   * nothing to choose, so there is nothing to hold: `plan.activity` and
+   * `plan.lifecycle` came off the joined row and simply travel to the hidden
+   * fields below.
+   *
+   * `/log` refuses to render this form at all when the pair is unusable, so by
+   * the time we are here `planned` is valid. The fallback exists because a
+   * component should not depend on a caller's check for its own correctness.
+   */
+  const planned = plannedActivityIsValid(plan)
+    ? { activity: plan.activity as ActivityKey, lifecycle: plan.lifecycle }
+    : null;
+  const activity = planned?.activity ?? "";
+  const lifecycleStatus = planned?.lifecycle ?? "";
+
   const [expectedDate, setExpectedDate] = useState("");
   const [statusSetTo, setStatusSetTo] = useState(NO_CHANGE);
   const [followUpDate, setFollowUpDate] = useState("");
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
 
-  const lifecycle = hasLifecycle(activity);
   const status = statusSetTo === NO_CHANGE ? null : statusSetTo;
-  const needsDate = expectedDateRequired(activity, lifecycle ? lifecycleStatus : null);
+  // Rule 3's date, unchanged in every respect except where its inputs come
+  // from: a "Set" session or campus visit is a promise about a future day, so
+  // it must name one. The purpose is what says Set now.
+  const needsDate = expectedDateRequired(activity, lifecycleStatus || null);
   const needsFollowUp = followUpRequired(status);
 
   /*
@@ -121,20 +139,25 @@ export function LogVisitForm({
      *     associatedForm.addEventListener("reset", reset);
      *
      * Because our Selects are CONTROLLED, `setValue` calls `onValueChange` -
-     * so `setActivity` is genuinely invoked with the value the Select had when
-     * it mounted. The rep's choice is not merely hidden; the state is
-     * overwritten. Then the form re-renders from the failed action showing the
-     * plan's prefill, and a rep who corrects "Session" to "Campus Visit",
-     * submits, fixes the flagged photo and submits again files the WRONG
-     * ACTIVITY without ever seeing it change back.
+     * so the state setter behind the Select is genuinely invoked with the value
+     * it had at mount. The rep's choice is not merely hidden; the state is
+     * overwritten. They then correct it, fix the flagged photo, submit again,
+     * and file the WRONG value without ever seeing it change back.
+     *
+     * THE CONTROL IT WAS FOUND ON IS GONE. It was the Activity Select, which
+     * stage 3 deleted - the activity is derived from the plan's purpose now and
+     * is not state at all, so it cannot revert. THE FIX STILL MATTERS: the
+     * Institute status Select is still here, still Radix, and still the one
+     * value on this form a rep chooses freely. Reverting it to "No change"
+     * after a failed submit would file a visit that moved no status, silently.
      *
      * WHY IT LOOKED SELECTIVE, which is what made it worth chasing. Only the
      * Radix-backed controls reverted - Activity, Set/Done, Institute status and
-     * the three feedback Pickers. `interested`, `next_meeting_set` and the
-     * name/mobile boxes all survived, because those are plain buttons and
-     * plain inputs with no reset listener. Two useState values in the SAME
-     * component behaving differently is what ruled out a remount and pointed at
-     * the form-reset event.
+     * the three feedback Pickers, of which only the status now remains. The
+     * name/mobile boxes all survived, because those are plain inputs with no
+     * reset listener. Two useState values in the SAME component behaving
+     * differently is what ruled out a remount and pointed at the form-reset
+     * event.
      *
      * THE FIX REMOVES THE TRIGGER RATHER THAN RACING IT. Dispatching the action
      * ourselves means React is not driving the submission, so it never resets
@@ -173,15 +196,11 @@ export function LogVisitForm({
       <input type="hidden" name="institute_id" value={plan.institute_id} />
       <input type="hidden" name="daily_plan_id" value={plan.id} />
       <input type="hidden" name="activity" value={activity} />
-      <input
-        type="hidden"
-        name="lifecycle_status"
-        value={lifecycle ? lifecycleStatus : ""}
-      />
+      <input type="hidden" name="lifecycle_status" value={lifecycleStatus} />
       <input
         type="hidden"
         name="expected_date"
-        value={lifecycle && lifecycleStatus === "Set" ? expectedDate : ""}
+        value={lifecycleStatus === "Set" ? expectedDate : ""}
       />
       <input
         type="hidden"
@@ -189,48 +208,43 @@ export function LogVisitForm({
         value={statusSetTo === NO_CHANGE ? "" : statusSetTo}
       />
 
+      {/*
+        NOTHING IS ASKED HERE ANY MORE — it is shown.
+
+        This section held two Selects: the Activity, and its Set/Done. Both are
+        gone. The purpose a rep planned under decides both, through
+        purposes.activity (0024) and purposes.lifecycle (0025), so asking again
+        would invite a second and disagreeing answer to a question already
+        answered on the Dashboard.
+
+        What replaces them is a read-out, because a rep about to log a visit
+        should still be able to SEE what it will count as before they save. The
+        one thing still asked for is Rule 3's date, and only when the purpose
+        says this is a promise about a future day.
+      */}
       <FormSection
         title="What happened?"
-        description="Pre-filled from what you planned. Change it if the visit turned out differently."
+        description="Decided by what you planned on the Dashboard."
       >
         <div className="border-border bg-muted/40 rounded-md border px-3 py-2">
           <p className="text-sm font-medium">{plan.instituteName}</p>
-          <p className="text-muted-foreground text-xs">{plan.purpose}</p>
+          <p className="text-muted-foreground text-xs">
+            {plan.purpose}
+            {plan.purposeNote ? ` · ${plan.purposeNote}` : ""}
+          </p>
+          {planned && (
+            <p className="mt-1.5 text-xs font-medium">
+              Logged as {plannedActivityLabel(planned)}
+            </p>
+          )}
         </div>
 
-        <div className="space-y-2">
-          <Label>Activity</Label>
-          <Select value={activity} onValueChange={setActivity}>
-            <SelectTrigger className="h-11 w-full" aria-label="Activity">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ACTIVITIES.map((option) => (
-                <SelectItem key={option.key} value={option.key}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {fieldError("activity")}
-          {fieldError("daily_plan_id")}
-        </div>
-
-        {lifecycle && (
-          <div className="space-y-2">
-            <Label>Is it set for later, or done?</Label>
-            <Select value={lifecycleStatus} onValueChange={setLifecycleStatus}>
-              <SelectTrigger className="h-11 w-full" aria-label="Set or Done">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Set">Set for a later date</SelectItem>
-                <SelectItem value="Done">Done today</SelectItem>
-              </SelectContent>
-            </Select>
-            {fieldError("lifecycle_status")}
-          </div>
-        )}
+        {/* Still rendered, because the schema can still object to either — a
+            tampered form, or a plan whose purpose lost its mapping. A rep
+            should see the sentence rather than a silent refusal. */}
+        {fieldError("activity")}
+        {fieldError("lifecycle_status")}
+        {fieldError("daily_plan_id")}
 
         {needsDate && (
           <div className="space-y-2">

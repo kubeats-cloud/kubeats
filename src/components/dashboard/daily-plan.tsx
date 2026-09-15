@@ -6,6 +6,7 @@ import { CheckCircle2Icon, PlusIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -17,7 +18,7 @@ import { EmptyState } from "@/components/states";
 import { CheckInButton } from "@/components/dashboard/check-buttons";
 import { addToDailyPlan, removeFromDailyPlan } from "@/lib/visit-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
-import type { PickerInstitute, PlanEntry } from "@/lib/visits";
+import type { PickerInstitute, PlanEntry, PurposeOption } from "@/lib/visits";
 import {
   dailyPlanFormDataToInput,
   dailyPlanSchema,
@@ -48,7 +49,7 @@ export function DailyPlan({
   entries,
 }: {
   institutes: PickerInstitute[];
-  purposes: string[];
+  purposes: PurposeOption[];
   entries: PlanEntry[];
 }) {
   const [state, formAction, isPending] = useActionState(
@@ -58,7 +59,18 @@ export function DailyPlan({
   const [clientState, setClientState] = useState<FormState>(EMPTY_STATE);
   const [instituteId, setInstituteId] = useState("");
   const [purpose, setPurpose] = useState("");
+  const [purposeNote, setPurposeNote] = useState("");
   const [removing, startRemoving] = useTransition();
+
+  /**
+   * The purpose row behind the chosen label.
+   *
+   * Matched on the label because that is what the Select's value is and what
+   * `daily_plans.purpose` stores. Labels are UNIQUE in the database, so this
+   * cannot be ambiguous — and `purpose_id` is what the action writes, so the
+   * label is never the key anything durable depends on.
+   */
+  const chosen = purposes.find((option) => option.label === purpose) ?? null;
 
   // One attempt is being explained at a time, and the summary has to come from
   // the same attempt as the inline messages under the fields. Reading
@@ -78,6 +90,7 @@ export function DailyPlan({
   const answered: Record<string, boolean> = {
     institute_id: instituteId !== "",
     purpose: purpose !== "",
+    purpose_note: purposeNote.trim() !== "",
   };
   const fieldErrors = Object.fromEntries(
     Object.entries(shown.fieldErrors).filter(([key]) => !answered[key]),
@@ -158,6 +171,7 @@ export function DailyPlan({
     // than the machinery.
     setInstituteId("");
     setPurpose("");
+    setPurposeNote("");
   }
 
   const canAdd = institutes.length > 0 && purposes.length > 0;
@@ -214,6 +228,18 @@ export function DailyPlan({
               </p>
             )}
 
+            {/*
+              THE PURPOSE NOW DECIDES THE VISIT, not just labels it.
+              Stage 3 derives the activity — and therefore which weekly metric
+              the visit feeds, and whether the meeting gate applies — from this
+              choice, through purposes.activity (0024) and purposes.lifecycle
+              (0025). It used to be a subtitle on a card.
+
+              So the option says what it will count as. A rep choosing
+              "Fix a session" should be able to see that it lands in Sessions
+              Set before they commit, rather than discovering it on the Targets
+              screen at the end of the week.
+            */}
             <div className="space-y-1.5">
               <Select value={purpose} onValueChange={setPurpose}>
                 <SelectTrigger
@@ -228,14 +254,44 @@ export function DailyPlan({
                 </SelectTrigger>
                 <SelectContent>
                   {purposes.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
+                    <SelectItem key={option.id} value={option.label}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <FieldError id="plan-purpose-error" message={fieldErrors.purpose} />
             </div>
+
+            {/* "Other" — and anything an admin marks the same way — has to say
+                what it actually is. Without it the plan reads "Other" and the
+                visit is logged as a meeting with nothing to explain it. */}
+            <input
+              type="hidden"
+              name="requires_note"
+              value={chosen?.requiresNote ? "yes" : "no"}
+            />
+            {chosen?.requiresNote && (
+              <div className="space-y-1.5">
+                <Input
+                  name="purpose_note"
+                  className="h-11"
+                  maxLength={300}
+                  placeholder="What is this visit for?"
+                  value={purposeNote}
+                  onChange={(event: React.ChangeEvent<HTMLInputElement>) => setPurposeNote(event.target.value)}
+                  aria-label="What is this visit for?"
+                  aria-invalid={fieldErrors.purpose_note ? true : undefined}
+                  aria-describedby={
+                    fieldErrors.purpose_note ? "plan-purpose-note-error" : undefined
+                  }
+                />
+                <FieldError
+                  id="plan-purpose-note-error"
+                  message={fieldErrors.purpose_note}
+                />
+              </div>
+            )}
 
             <Button type="submit" className="h-11 w-full" disabled={isPending}>
               <PlusIcon className="size-4" aria-hidden />

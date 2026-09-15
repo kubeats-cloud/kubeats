@@ -14,6 +14,7 @@ import {
   openLoopsAt,
 } from "@/lib/visits";
 import { visitStatusOf } from "@/lib/validation/checkin";
+import { plannedActivityIsValid } from "@/lib/validation/visit";
 import { todayISO } from "@/lib/dates";
 
 export const metadata = { title: "Log Visit" };
@@ -117,6 +118,36 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
         <EmptyState
           title="Check in first"
           description="A visit is logged from the moment you arrive. Add the institute to today's plan on the Dashboard, then check in there."
+          action={
+            <Button asChild className="h-11">
+              <Link href="/">Go to the Dashboard</Link>
+            </Button>
+          }
+        />
+      </PageColumn>
+    );
+  }
+
+  /*
+   * A plan whose purpose no longer maps to an activity cannot be logged, and
+   * the rep has to be TOLD rather than shown a form that will be refused.
+   *
+   * Reachable in exactly two ways, both rare and both recoverable: a plan made
+   * before migration 0025 linked plans to purposes, or one whose purpose was
+   * DELETED rather than retired. `is_active` exists to make the second
+   * essentially impossible, which is why this is a guard and not a flow.
+   *
+   * The way out is to re-plan the institute under a live purpose. The check-in
+   * already happened and is untouched — FO011 makes it write-once — so this
+   * does not cost the rep their arrival.
+   */
+  if (!plannedActivityIsValid(entry)) {
+    return (
+      <PageColumn>
+        <PageHeader title="Log a visit" description={entry.instituteName} />
+        <EmptyState
+          title="This visit needs its purpose set again"
+          description={`"${entry.purpose}" no longer says what kind of visit it is, so this cannot be logged yet. Add the institute to today's plan again with a current purpose — your check-in is safe.`}
           action={
             <Button asChild className="h-11">
               <Link href="/">Go to the Dashboard</Link>

@@ -53,12 +53,60 @@ export async function addToDailyPlan(
     return { error: dailyPlanSummary(fieldErrors), fieldErrors };
   }
 
+  /**
+   * The purpose row is resolved SERVER-SIDE, not trusted from the form.
+   *
+   * The browser sends a label. What decides the visit's activity — and so which
+   * weekly metric it feeds, and whether the meeting gate applies — is the
+   * `purposes` row behind it, so the id is looked up here rather than posted.
+   * A tampered form can name any label it likes; if no active purpose matches,
+   * nothing is planned.
+   *
+   * `is_active` is part of the match: a retired purpose stays readable for the
+   * plans that already reference it, and cannot be used for a new one.
+   */
+  const { data: purposeRow, error: purposeError } = await supabase
+    .from("purposes")
+    .select("id, label, requires_note")
+    .eq("label", parsed.data.purpose)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (purposeError) {
+    logError("plan:purpose-lookup", purposeError);
+    return {
+      error: toFriendlyMessage(purposeError, "We could not add that to today's plan."),
+      fieldErrors: {},
+    };
+  }
+  if (!purposeRow) {
+    return {
+      error: "That purpose is no longer available. Pick another one.",
+      fieldErrors: {},
+    };
+  }
+
+  // Re-checked against the ROW rather than the form's flag, for the same
+  // reason the id is: a client that says "no note needed" must not be able to
+  // decide that.
+  if (purposeRow.requires_note && !parsed.data.purpose_note) {
+    return {
+      error: "Say what this visit is for.",
+      fieldErrors: { purpose_note: "Say what this visit is for." },
+    };
+  }
+
   const { error } = await supabase.from("daily_plans").upsert(
     {
       member: user.id,
       date: todayISO(),
       institute_id: parsed.data.institute_id,
-      purpose: parsed.data.purpose,
+      purpose: purposeRow.label,
+      purpose_id: purposeRow.id,
+      // Cleared when the purpose does not want one, so re-planning the same
+      // institute under a different purpose cannot leave yesterday's note
+      // attached to today's reason.
+      purpose_note: purposeRow.requires_note ? parsed.data.purpose_note : null,
     },
     { onConflict: "member,date,institute_id" },
   );
@@ -112,12 +160,42 @@ export async function assignVisit(
     return { error: "You cannot assign a visit in the past.", fieldErrors: {} };
   }
 
+  /**
+   * An assignment carries the purpose's mapping too, and it MUST.
+   *
+   * The rep who receives this will check in and log it, and stage 3 derives the
+   * visit's activity from `purpose_id` — so an assignment written with the
+   * label alone would hand them a planned visit the app cannot turn into an
+   * activity. Same lookup, same reasons, as the rep's own path above.
+   */
+  const { data: purposeRow, error: purposeError } = await gate.supabase
+    .from("purposes")
+    .select("id, label")
+    .eq("label", input.purpose)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (purposeError) {
+    logError("plan:assign-purpose-lookup", purposeError);
+    return {
+      error: toFriendlyMessage(purposeError, "We could not assign that visit."),
+      fieldErrors: {},
+    };
+  }
+  if (!purposeRow) {
+    return {
+      error: "That purpose is no longer available. Pick another one.",
+      fieldErrors: {},
+    };
+  }
+
   const { error } = await gate.supabase.from("daily_plans").upsert(
     {
       member: input.member,
       date: input.date,
       institute_id: input.institute_id,
-      purpose: input.purpose,
+      purpose: purposeRow.label,
+      purpose_id: purposeRow.id,
       assigned_by: gate.user.id,
     },
     { onConflict: "member,date,institute_id" },

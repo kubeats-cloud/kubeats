@@ -17,7 +17,7 @@ import { assignVisit } from "@/lib/visit-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import { assignVisitSchema } from "@/lib/validation/closing-report";
 import { visitFieldErrors } from "@/lib/validation/visit";
-import type { PickerInstitute } from "@/lib/visits";
+import type { PickerInstitute, PurposeOption } from "@/lib/visits";
 import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
 
 /**
@@ -38,7 +38,7 @@ export function AssignVisit({
 }: {
   reps: { id: string; name: string }[];
   institutes: PickerInstitute[];
-  purposes: string[];
+  purposes: PurposeOption[];
   today: string;
   /** Skip the collapsed state — used where the form is the whole screen. */
   alwaysOpen?: boolean;
@@ -172,8 +172,8 @@ export function AssignVisit({
                 </SelectTrigger>
                 <SelectContent>
                   {purposes.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
+                    <SelectItem key={option.id} value={option.label}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
