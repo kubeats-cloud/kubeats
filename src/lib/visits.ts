@@ -404,11 +404,59 @@ export async function getOpenFollowUps(
 /* Lookups kept separate rather than embedded, so nothing depends on PostgREST
  * inferring the right relationship. */
 
+/**
+ * Institute names for a batch of visit rows.
+ *
+ * NOT a plain select on `institutes`, and that is the whole point. Migration
+ * 0028 makes an institute readable only by the rep who owns it, so a rep whose
+ * institute has been REASSIGNED loses the name on their own past visits — the
+ * visit rows are still theirs (`visits` is member-scoped and nothing moved
+ * them), but the name lookup misses and their history goes anonymous.
+ *
+ * `institute_names_i_visited()` answers for exactly the rows that describes:
+ * names only, for ids the caller already provably holds a visit against. It
+ * grants no listing, no filtering and no detail, so it cannot put the institute
+ * back in the picker or back in Pending — which is what widening
+ * `institutes_select` to "institutes I have visited" would have done, RLS
+ * giving one SELECT for all purposes.
+ *
+ * THE FALLBACK IS THE DEPLOY WINDOW, not a preference. This code may run for a
+ * few minutes against a database where 0028 has not been applied, and PostgREST
+ * answers an unknown function with PGRST202 rather than with rows. So an
+ * unknown function drops back to the select this used to be, which is exactly
+ * right on a pre-0028 database: the policy there is still campus-scoped, so the
+ * select returns what the RPC would have. It is dead code the moment 0028
+ * lands, and harmless until then.
+ */
 async function instituteNames(ids: string[]): Promise<Map<string, string>> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return new Map();
 
   const supabase = await createClient();
+  const { data, error } = await supabase.rpc("institute_names_i_visited", {
+    p_ids: unique,
+  });
+
+  if (error) {
+    // PGRST202 is "no function by that name" — 0028 has not been applied yet.
+    // Anything else is a real failure and is logged as one.
+    if (error.code === "PGRST202") {
+      return instituteNamesDirect(supabase, unique);
+    }
+    logError("visits:institute-names", error);
+    return new Map();
+  }
+
+  return new Map(
+    ((data ?? []) as { id: string; name: string }[]).map((i) => [i.id, i.name]),
+  );
+}
+
+/** The pre-0028 lookup. See the note above — reachable only before it lands. */
+async function instituteNamesDirect(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  unique: string[],
+): Promise<Map<string, string>> {
   const { data, error } = await supabase
     .from("institutes")
     .select("id, name")

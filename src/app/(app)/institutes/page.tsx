@@ -17,11 +17,21 @@ export default async function InstitutesPage() {
     getCurrentUser(),
   ]);
 
+  const admin = isAdmin(user);
+
   return (
     <>
       <PageHeader
         title="Institutes"
-        description="The shared registry of schools, coaching centres and consultants."
+        // NOT "the shared registry" any more. After 0028 a rep sees only the
+        // institutes they registered, so the old line promised a list they do
+        // not get. An admin still sees all of them, and for them "everyone's"
+        // is the honest word.
+        description={
+          admin
+            ? "Every school, coaching centre and consultant, across all campuses."
+            : "The schools, coaching centres and consultants you registered."
+        }
         action={
           <Button asChild className="h-11">
             <Link href="/institutes/new">
@@ -38,7 +48,7 @@ export default async function InstitutesPage() {
           catalogue={catalogue}
           // Admin-only: a rep sees only their own institutes, so an owner
           // column would repeat one name down the page.
-          showOwner={isAdmin(user)}
+          showOwner={admin}
         />
       ) : (
         <ErrorState message="We could not load the registry just now. Please try again in a moment." />
