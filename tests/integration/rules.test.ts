@@ -2,7 +2,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { tallyVisitMetrics } from "@/lib/validation/weekly";
 import {
-  INSTITUTE_STATUSES,
+  SEED_STATUSES,
+  SEED_STATUS_CATALOGUE,
   isOpenStatus,
   statusCategory,
 } from "@/lib/validation/institute";
@@ -1560,7 +1561,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .order("sort_order");
 
         expect(error).toBeNull();
-        expect(data?.map((row) => row.status)).toEqual([...INSTITUTE_STATUSES]);
+        expect(data?.map((row) => row.status)).toEqual([...SEED_STATUSES]);
       });
 
       it("gives every status the same category the app does", async () => {
@@ -1569,26 +1570,26 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .select("status, category");
 
         for (const row of data ?? []) {
-          expect(row.category, row.status).toBe(statusCategory(row.status));
+          expect(row.category, row.status).toBe(statusCategory(SEED_STATUS_CATALOGUE, row.status));
         }
       });
 
       it("answers institute_status_category() the way the app does", async () => {
-        for (const status of INSTITUTE_STATUSES) {
+        for (const status of SEED_STATUSES) {
           const { data, error } = await admin.rpc("institute_status_category", {
             p_status: status,
           });
           expect(error, status).toBeNull();
-          expect(data, status).toBe(statusCategory(status));
+          expect(data, status).toBe(statusCategory(SEED_STATUS_CATALOGUE, status));
         }
       });
 
       it("answers institute_status_is_open() the way the app does", async () => {
-        for (const status of INSTITUTE_STATUSES) {
+        for (const status of SEED_STATUSES) {
           const { data } = await admin.rpc("institute_status_is_open", {
             p_status: status,
           });
-          expect(data, status).toBe(isOpenStatus(status));
+          expect(data, status).toBe(isOpenStatus(SEED_STATUS_CATALOGUE, status));
         }
       });
 
@@ -1731,14 +1732,14 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           // them. enforce_follow_up_when_open() only ever sees new rows.
           //
           // It asks institute_status_is_open() rather than keeping its own
-          // list, and followUpRequired() asks isOpenStatus(), so this compares
+          // list, and followUpRequired(SEED_STATUS_CATALOGUE, ) asks isOpenStatus(SEED_STATUS_CATALOGUE, ), so this compares
           // two answers to one question rather than two copies of a list.
-          for (const status of INSTITUTE_STATUSES) {
+          for (const status of SEED_STATUSES) {
             const { error } = await admin
               .from("visits")
               .insert(visitWith(status, null));
             expect(Boolean(error), `${status} without a follow-up`).toBe(
-              followUpRequired(status),
+              followUpRequired(SEED_STATUS_CATALOGUE, status),
             );
           }
         },

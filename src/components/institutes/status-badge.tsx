@@ -1,45 +1,38 @@
 import { Badge } from "@/components/ui/badge";
 import {
-  type InstituteStatus,
-  statusCategory,
+  statusRow,
+  type StatusCatalogue,
 } from "@/lib/validation/institute";
 
 /**
- * Rule 4's nine statuses, coloured by the semantic palette rather than by
- * arbitrary hue: anything "done" is green, anything merely "scheduled" or
- * awaiting a reply is amber, anything waiting on someone else's decision is
- * red, and a closed-but-negative outcome is slate.
+ * An institute's status, coloured by the semantic palette.
  *
- * Colour tracks the *outcome*, not the open/closed category — the two are
- * related but not the same, and conflating them would paint "First meeting
- * done" amber merely because more work follows it. The category is what
- * groups the dropdown and what features C and D will query; see
- * INSTITUTE_STATUS_CATALOGUE.
+ * THE COLOUR IS DATA NOW. This held a nine-key `Record` mapping each status to
+ * a variant, which stopped being possible the moment an admin could add one —
+ * migration 0026 makes `institutes.status` a foreign key to
+ * `public.institute_statuses`, and that table carries a `tone` column.
  *
- * "Will not come" is deliberately slate rather than red: red is reserved for
- * pending and overdue, and a firm no is neither. It is a finished loop, so it
- * gets the quietest treatment on the screen.
+ * It is a stored value and NOT a derivation, and that is the part worth
+ * keeping: colour tracks the **outcome**, not the open/closed category. The two
+ * are related and are not the same. "First meeting done" is green and still
+ * open; deriving the colour from the category would paint it amber merely
+ * because more work follows it. "Will not come" is deliberately slate rather
+ * than red — red is for pending and overdue, and a firm no is neither. It is a
+ * finished loop and gets the quietest treatment on the screen.
+ *
+ * A status the catalogue does not have falls back to neutral rather than
+ * throwing. That is reachable for one render after an admin retires a status
+ * the page was already holding, and a grey badge is a better answer than a
+ * crash.
  */
-const VARIANTS: Record<
-  InstituteStatus,
-  "success" | "warning" | "danger" | "neutral"
-> = {
-  "First meeting done": "success",
-  "Session done": "success",
-  "Campus visit done": "success",
-  "RSVP received": "success",
-  "Session scheduled": "warning",
-  "Campus visit scheduled": "warning",
-  "Invited principal for event": "warning",
-  "Pending for management approval": "danger",
-  "Will not come": "neutral",
-};
-
 export function InstituteStatusBadge({
   status,
+  catalogue,
   className,
 }: {
-  status: InstituteStatus | null;
+  status: string | null;
+  /** The vocabulary, loaded from the database by the page that renders this. */
+  catalogue: StatusCatalogue;
   className?: string;
 }) {
   if (!status) {
@@ -49,14 +42,17 @@ export function InstituteStatusBadge({
       </Badge>
     );
   }
+
+  const row = statusRow(catalogue, status);
+
   // The category rides along as a data attribute rather than as more colour:
-  // it costs nothing, and it is what C's timeline and D's re-add flow will
-  // want to key off when they style a row.
+  // it costs nothing, and it is what a timeline or a re-add flow keys off when
+  // it wants to style a row.
   return (
     <Badge
-      variant={VARIANTS[status] ?? "neutral"}
+      variant={row?.tone ?? "neutral"}
       className={className}
-      data-status-category={statusCategory(status) ?? undefined}
+      data-status-category={row?.category ?? undefined}
     >
       {status}
     </Badge>

@@ -12,10 +12,11 @@ import {
   feedbackSchema,
 } from "@/lib/validation/feedback";
 import {
+  makeVisitSchema,
   visitFieldErrors,
   visitFormDataToInput,
-  visitSchema,
 } from "@/lib/validation/visit";
+import { listStatusCatalogue } from "@/lib/statuses";
 
 /**
  * Filing the short feedback form — which is also the check-out.
@@ -166,7 +167,19 @@ export async function logAndFileVisit(
     return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
   }
 
-  const visitParsed = visitSchema.safeParse(visitFormDataToInput(formData));
+  /**
+   * THE SCHEMA IS BUILT FROM THE LOADED VOCABULARY, not from a constant.
+   *
+   * Migration 0026 made the status columns foreign keys to
+   * public.institute_statuses, so an admin can add a status — and a schema
+   * holding the seeded nine would refuse the very value the database is about
+   * to accept. This is the call that has to use makeVisitSchema(); the exported
+   * visitSchema is the seeded fallback and is for tests.
+   */
+  const catalogue = await listStatusCatalogue();
+  const visitParsed = makeVisitSchema(catalogue).safeParse(
+    visitFormDataToInput(formData),
+  );
   const feedbackParsed = feedbackFieldsSchema.safeParse(
     feedbackFormDataToInput(formData),
   );

@@ -15,6 +15,8 @@ import {
 } from "@/lib/visits";
 import { visitStatusOf } from "@/lib/validation/checkin";
 import { plannedActivityIsValid } from "@/lib/validation/visit";
+import { listStatusCatalogue } from "@/lib/statuses";
+import { statusRow } from "@/lib/validation/institute";
 import { todayISO } from "@/lib/dates";
 
 export const metadata = { title: "Log Visit" };
@@ -47,7 +49,13 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
   const planId = typeof planParam === "string" ? planParam : undefined;
 
   const today = todayISO();
-  const plan = await getTodayPlan(user.id);
+  // The status vocabulary. Needed by BOTH branches below: the full form offers
+  // it, and the recovery form reads the already-recorded status off it to know
+  // which extra questions that status turns on.
+  const [plan, catalogue] = await Promise.all([
+    getTodayPlan(user.id),
+    listStatusCatalogue(),
+  ]);
   const entries = plan.ok ? plan.entries : [];
 
   // The visit in progress: the one checked in and not yet checked out. Named
@@ -101,7 +109,12 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
           // there is no check-out left to stamp and the database would refuse
           // one (daily_plans_checkout_missing_valid).
           planId={stillOpen ? target.id : null}
-          status={existing.status_set_to}
+          asks={{
+            sessionDetail:
+              statusRow(catalogue, existing.status_set_to)?.asksSessionDetail ?? false,
+            headCount:
+              statusRow(catalogue, existing.status_set_to)?.asksHeadCount ?? false,
+          }}
           openLoops={openLoops}
           alreadyClosed={!stillOpen}
         />
@@ -171,7 +184,12 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
   return (
     <PageColumn>
       <PageHeader title="Log a visit" description={entry.instituteName} />
-      <LogVisitForm userId={user.id} plan={entry} openLoops={openLoops} />
+      <LogVisitForm
+        userId={user.id}
+        plan={entry}
+        openLoops={openLoops}
+        catalogue={catalogue}
+      />
     </PageColumn>
   );
 }

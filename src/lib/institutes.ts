@@ -3,7 +3,7 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
 import { signVisitPhotos, type VisitPhoto } from "@/lib/photos";
-import type { InstituteStatus, InstituteType } from "@/lib/validation/institute";
+import type { InstituteType } from "@/lib/validation/institute";
 
 export interface Institute {
   id: string;
@@ -22,7 +22,7 @@ export interface Institute {
   decision_maker_mobile: string | null;
   class11: string[];
   class12: Record<string, number>;
-  status: InstituteStatus | null;
+  status: string | null;
   status_updated_at: string | null;
   created_at: string;
 }
@@ -176,7 +176,7 @@ export async function getInstituteVisits(
 
 export interface StatusChange {
   id: string;
-  status: InstituteStatus;
+  status: string;
   changedAt: string;
   changedBy: string | null;
   /** Null when RLS hides that profile — a rep may only read their own. */
@@ -236,7 +236,7 @@ export async function getInstituteStatusHistory(
     ok: true,
     changes: rows.map((r) => ({
       id: r.id,
-      status: r.status as InstituteStatus,
+      status: r.status,
       changedAt: r.changed_at,
       changedBy: r.changed_by,
       changedByName: r.changed_by ? (names.get(r.changed_by) ?? null) : null,

@@ -5,8 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { FormSection } from "@/components/form-section";
 import {
-  needsCampusCount,
-  needsSessionDetail,
+  type FeedbackAsks,
   type FeedbackPatch,
   type FeedbackState,
 } from "@/lib/validation/feedback";
@@ -46,14 +45,21 @@ import { activityLabelFor } from "@/lib/validation/visit";
  */
 
 export function FeedbackFields({
-  status,
+  asks,
   value,
   onChange,
   fieldErrors,
   openLoops,
 }: {
-  /** The institute status the rep chose. It decides what else is asked. */
-  status: string | null;
+  /**
+   * Which extra question groups the chosen status turns on.
+   *
+   * Read off the status row by the caller (asks_session_detail /
+   * asks_head_count, migration 0026) rather than worked out here from the
+   * status name. This component no longer has an opinion about which statuses
+   * have students in them, which is what lets an admin add one that does.
+   */
+  asks: FeedbackAsks;
   value: FeedbackState;
   /**
    * Emits a PATCH, not a merged object, and that is the whole fix.
@@ -79,8 +85,8 @@ export function FeedbackFields({
   const err = (key: string) =>
     fieldErrors[key] ? <p className="text-danger text-xs">{fieldErrors[key]}</p> : null;
 
-  const wantsSession = needsSessionDetail(status);
-  const wantsCampusCount = needsCampusCount(status);
+  const wantsSession = asks.sessionDetail;
+  const wantsCampusCount = asks.headCount && !asks.sessionDetail;
 
   return (
     <>

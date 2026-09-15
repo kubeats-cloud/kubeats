@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
 import { instituteNameFrom } from "@/lib/institute-scope";
 import { todayISO } from "@/lib/dates";
-import type { InstituteStatus } from "@/lib/validation/institute";
+
 
 /*
  * There used to be a second copy of todayISO() here, computing the day from the
@@ -24,7 +24,7 @@ export interface PickerInstitute {
    * this exists so a rep can SEE that they are reopening an old thread rather
    * than starting a new one by mistake.
    */
-  status: InstituteStatus | null;
+  status: string | null;
 }
 
 export async function listInstitutesForPicker(): Promise<PickerInstitute[]> {

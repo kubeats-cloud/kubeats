@@ -7,10 +7,12 @@ import {
   applyFeedbackPatch,
   feedbackFieldsSchema,
   feedbackSchema,
-  needsCampusCount,
-  needsSessionDetail,
   type FeedbackState,
 } from "@/lib/validation/feedback";
+import {
+  SEED_STATUS_CATALOGUE,
+  statusRow,
+} from "@/lib/validation/institute";
 
 /**
  * The short closing report: the state the form holds, and the rules it applies.
@@ -218,15 +220,39 @@ describe("the short form's rules", () => {
   });
 
   it("asks the session questions for a session, and the count alone for a campus visit", () => {
-    // Driven by the STATUS the rep already chose, not by a second checklist.
-    // Stage 4a moves these onto institute_statuses so an admin-added status can
-    // ask for them too; until then these are the two the vocabulary has.
-    expect(needsSessionDetail("Session done")).toBe(true);
-    expect(needsCampusCount("Session done")).toBe(false);
-    expect(needsCampusCount("Campus visit done")).toBe(true);
-    expect(needsSessionDetail("Campus visit done")).toBe(false);
-    expect(needsSessionDetail(null)).toBe(false);
-    expect(needsCampusCount(null)).toBe(false);
+    // Driven by the STATUS the rep already chose, and as of stage 4a by DATA
+    // rather than by a literal: needsSessionDetail()/needsCampusCount() compared
+    // the status to "Session done" and "Campus visit done", which stopped being
+    // possible once an admin could add one. Migration 0026 moved the answer onto
+    // public.institute_statuses, and the seed below is what the app falls back
+    // to and what the database is checked against.
+    const asks = (status: string | null) => {
+      const row = statusRow(SEED_STATUS_CATALOGUE, status);
+      return {
+        sessionDetail: row?.asksSessionDetail ?? false,
+        headCount: row?.asksHeadCount ?? false,
+      };
+    };
+
+    expect(asks("Session done")).toEqual({ sessionDetail: true, headCount: true });
+    expect(asks("Campus visit done")).toEqual({
+      sessionDetail: false,
+      headCount: true,
+    });
+    // A status with nothing extra behind it, and no status at all.
+    expect(asks("First meeting done")).toEqual({
+      sessionDetail: false,
+      headCount: false,
+    });
+    expect(asks(null)).toEqual({ sessionDetail: false, headCount: false });
+  });
+
+  it("asks nothing extra for a status the catalogue has never heard of", () => {
+    // The fallback that matters after 0026: an admin can retire a status while
+    // a page is still holding it. Unknown must mean "no extra questions", never
+    // a crash and never a half-rendered section.
+    const row = statusRow(SEED_STATUS_CATALOGUE, "Invented by a stale client");
+    expect(row).toBeNull();
   });
 
   it("keeps the vocabularies of the questions it stopped asking", () => {

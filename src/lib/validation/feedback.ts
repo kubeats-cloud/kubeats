@@ -216,18 +216,21 @@ export type FeedbackInput = z.infer<typeof feedbackSchema>;
 /**
  * What the status implies the form must also ask.
  *
- * Kept as a predicate pair rather than inlined, so the form and the schema
- * cannot disagree about which visit owes a head count. Stage 4a of Phase 2
- * replaces the literals with the `asks_session_detail` / `asks_head_count`
- * columns on `public.institute_statuses`, at which point a status an admin adds
- * can ask for these too. Until then they are the two the vocabulary has.
+ * `needsSessionDetail()` and `needsCampusCount()` stood here, each comparing
+ * the status to a literal — "Session done" and "Campus visit done". That
+ * stopped being possible in stage 4a: migration 0026 moved the answer onto
+ * `public.institute_statuses` as `asks_session_detail` and `asks_head_count`,
+ * so a status an ADMIN adds can ask for the same things.
+ *
+ * The caller reads those flags off the chosen status row and hands the two
+ * booleans in. There is no predicate left to keep, which is the point — the
+ * form no longer has an opinion about which statuses have students in them.
  */
-export function needsSessionDetail(status: string | null): boolean {
-  return status === "Session done";
-}
-
-export function needsCampusCount(status: string | null): boolean {
-  return status === "Campus visit done";
+export interface FeedbackAsks {
+  /** Topic and who took it. */
+  sessionDetail: boolean;
+  /** The one student count. */
+  headCount: boolean;
 }
 
 /** Shared so the browser and the server action read the form identically. */

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CATEGORY_LABELS,
-  INSTITUTE_STATUSES,
-  INSTITUTE_STATUS_CATALOGUE,
+  SEED_STATUSES,
+  SEED_STATUS_CATALOGUE,
   STATUS_CATEGORIES,
   institutePickerLabel,
   reopeningInstitute,
@@ -89,39 +89,39 @@ const baseVisit = {
 
 describe("the institute status catalogue", () => {
   it("carries exactly the nine statuses, in display order", () => {
-    expect(INSTITUTE_STATUSES).toEqual(Object.keys(EXPECTED));
+    expect(SEED_STATUSES).toEqual(Object.keys(EXPECTED));
   });
 
   it("gives every status the category the spec asks for", () => {
     for (const [status, category] of Object.entries(EXPECTED)) {
-      expect(statusCategory(status), status).toBe(category);
+      expect(statusCategory(SEED_STATUS_CATALOGUE, status), status).toBe(category);
     }
   });
 
   it("lists no status twice", () => {
-    expect(new Set(INSTITUTE_STATUSES).size).toBe(INSTITUTE_STATUSES.length);
+    expect(new Set(SEED_STATUSES).size).toBe(SEED_STATUSES.length);
   });
 
   it("has a category for every entry and no third category", () => {
-    for (const entry of INSTITUTE_STATUS_CATALOGUE) {
+    for (const entry of SEED_STATUS_CATALOGUE) {
       expect(STATUS_CATEGORIES, entry.status).toContain(entry.category);
     }
   });
 
   it("partitions the catalogue — every status in exactly one category", () => {
     const grouped = STATUS_CATEGORIES.flatMap((category) => [
-      ...statusesInCategory(category),
+      ...statusesInCategory(SEED_STATUS_CATALOGUE, category),
     ]);
-    expect(grouped.toSorted()).toEqual([...INSTITUTE_STATUSES].toSorted());
-    expect(new Set(grouped).size).toBe(INSTITUTE_STATUSES.length);
+    expect(grouped.toSorted()).toEqual([...SEED_STATUSES].toSorted());
+    expect(new Set(grouped).size).toBe(SEED_STATUSES.length);
   });
 
   it("keeps each category in catalogue order", () => {
-    expect(statusesInCategory("open")).toEqual(
-      INSTITUTE_STATUSES.filter((s) => EXPECTED[s] === "open"),
+    expect(statusesInCategory(SEED_STATUS_CATALOGUE, "open")).toEqual(
+      SEED_STATUSES.filter((s) => EXPECTED[s] === "open"),
     );
-    expect(statusesInCategory("closed")).toEqual(
-      INSTITUTE_STATUSES.filter((s) => EXPECTED[s] === "closed"),
+    expect(statusesInCategory(SEED_STATUS_CATALOGUE, "closed")).toEqual(
+      SEED_STATUSES.filter((s) => EXPECTED[s] === "closed"),
     );
   });
 
@@ -136,27 +136,27 @@ describe("statusCategory", () => {
   it("says nothing about no status at all", () => {
     // Null is "no status yet", which is neither open nor closed. D's re-add
     // flow leans on that distinction, so it is asserted rather than assumed.
-    expect(statusCategory(null)).toBeNull();
-    expect(isOpenStatus(null)).toBe(false);
-    expect(isClosedStatus(null)).toBe(false);
+    expect(statusCategory(SEED_STATUS_CATALOGUE, null)).toBeNull();
+    expect(isOpenStatus(SEED_STATUS_CATALOGUE, null)).toBe(false);
+    expect(isClosedStatus(SEED_STATUS_CATALOGUE, null)).toBe(false);
   });
 
   it("says nothing about a status it does not know", () => {
-    expect(statusCategory("Invented by a stale client")).toBeNull();
-    expect(isOpenStatus("Invented by a stale client")).toBe(false);
-    expect(isClosedStatus("Invented by a stale client")).toBe(false);
+    expect(statusCategory(SEED_STATUS_CATALOGUE, "Invented by a stale client")).toBeNull();
+    expect(isOpenStatus(SEED_STATUS_CATALOGUE, "Invented by a stale client")).toBe(false);
+    expect(isClosedStatus(SEED_STATUS_CATALOGUE, "Invented by a stale client")).toBe(false);
   });
 
   it("is case- and whitespace-sensitive, like the CHECK constraint", () => {
-    expect(statusCategory("rsvp received")).toBeNull();
-    expect(statusCategory(" RSVP received")).toBeNull();
+    expect(statusCategory(SEED_STATUS_CATALOGUE, "rsvp received")).toBeNull();
+    expect(statusCategory(SEED_STATUS_CATALOGUE, " RSVP received")).toBeNull();
   });
 });
 
 describe("Rule 5, with the three new statuses folded in", () => {
   it("gives every one of the nine the follow-up rule the spec asks for", () => {
-    for (const status of INSTITUTE_STATUSES) {
-      expect(followUpRequired(status), `${status} required`).toBe(
+    for (const status of SEED_STATUSES) {
+      expect(followUpRequired(SEED_STATUS_CATALOGUE, status), `${status} required`).toBe(
         EXPECTED_FOLLOW_UP[status] === "required",
       );
     }
@@ -164,33 +164,33 @@ describe("Rule 5, with the three new statuses folded in", () => {
 
   it("requires a follow-up for exactly the OPEN statuses, and no others", () => {
     // The rule and the category are the same question now, which is the whole
-    // point of asking isOpenStatus() rather than keeping a second list.
-    for (const status of INSTITUTE_STATUSES) {
-      expect(followUpRequired(status), status).toBe(isOpenStatus(status));
+    // point of asking isOpenStatus(SEED_STATUS_CATALOGUE, ) rather than keeping a second list.
+    for (const status of SEED_STATUSES) {
+      expect(followUpRequired(SEED_STATUS_CATALOGUE, status), status).toBe(isOpenStatus(SEED_STATUS_CATALOGUE, status));
     }
-    expect(followUpRequired(null)).toBe(false);
+    expect(followUpRequired(SEED_STATUS_CATALOGUE, null)).toBe(false);
   });
 
   it("no longer FORBIDS a follow-up on the two scheduled statuses", () => {
     // The reversal, asserted directly. These two used to be "hidden" — a
     // follow-up on them was refused by visits_follow_up_hidden_when_scheduled,
     // which 0018 drops. They are now the statuses that most need one.
-    expect(followUpRequired("Session scheduled")).toBe(true);
-    expect(followUpRequired("Campus visit scheduled")).toBe(true);
+    expect(followUpRequired(SEED_STATUS_CATALOGUE, "Session scheduled")).toBe(true);
+    expect(followUpRequired(SEED_STATUS_CATALOGUE, "Campus visit scheduled")).toBe(true);
   });
 
   it("requires a chase date for an invitation, as it does for approval", () => {
-    expect(followUpRequired("Invited principal for event")).toBe(true);
-    expect(followUpRequired("Pending for management approval")).toBe(true);
+    expect(followUpRequired(SEED_STATUS_CATALOGUE, "Invited principal for event")).toBe(true);
+    expect(followUpRequired(SEED_STATUS_CATALOGUE, "Pending for management approval")).toBe(true);
   });
 
   it("never requires a follow-up on a closed status", () => {
     // A closed status may still CARRY one — "they said no, ask again next
     // intake" is a real note, and 0010 kept it permitted on purpose — but it
     // is never demanded.
-    for (const status of INSTITUTE_STATUSES) {
-      if (!isOpenStatus(status)) {
-        expect(followUpRequired(status), status).toBe(false);
+    for (const status of SEED_STATUSES) {
+      if (!isOpenStatus(SEED_STATUS_CATALOGUE, status)) {
+        expect(followUpRequired(SEED_STATUS_CATALOGUE, status), status).toBe(false);
       }
     }
   });
@@ -199,25 +199,25 @@ describe("Rule 5, with the three new statuses folded in", () => {
     // Permitted, never demanded — 0010 kept a follow-up legal on a closed
     // status so "they said no, ask again next intake" can still be recorded.
     for (const status of ["RSVP received", "Will not come"]) {
-      expect(followUpRequired(status), status).toBe(false);
+      expect(followUpRequired(SEED_STATUS_CATALOGUE, status), status).toBe(false);
     }
   });
 
   it("asks nothing of a visit that changes no status", () => {
-    expect(followUpRequired(null)).toBe(false);
+    expect(followUpRequired(SEED_STATUS_CATALOGUE, null)).toBe(false);
   });
 });
 
 describe("visitSchema accepts the widened vocabulary", () => {
   it("takes every one of the nine statuses", () => {
-    for (const status of INSTITUTE_STATUSES) {
+    for (const status of SEED_STATUSES) {
       const result = visitSchema.safeParse({
         ...baseVisit,
         status_set_to: status,
         // The open statuses demand a date; supplying one here keeps this test
         // about the vocabulary rather than about Rule 5. No time — 0023 took
         // that half of the rule away.
-        follow_up_date: followUpRequired(status) ? "2026-09-30" : "",
+        follow_up_date: followUpRequired(SEED_STATUS_CATALOGUE, status) ? "2026-09-30" : "",
       });
       expect(result.success, `${status}: ${result.error?.message}`).toBe(true);
     }
@@ -296,39 +296,39 @@ describe("institutePickerLabel — finding a finished institute again (feature D
   const base = { name: "Horizon International School", city: "Ahmedabad" };
 
   it("spells out the status when the loop is closed", () => {
-    expect(institutePickerLabel({ ...base, status: "RSVP received" })).toBe(
+    expect(institutePickerLabel(SEED_STATUS_CATALOGUE, { ...base, status: "RSVP received" })).toBe(
       "Horizon International School · Ahmedabad (closed: RSVP received)",
     );
   });
 
   it("marks every closed status and no open one", () => {
-    for (const status of INSTITUTE_STATUSES) {
-      const label = institutePickerLabel({ ...base, status });
-      expect(label.includes("(closed:"), status).toBe(isClosedStatus(status));
+    for (const status of SEED_STATUSES) {
+      const label = institutePickerLabel(SEED_STATUS_CATALOGUE, { ...base, status });
+      expect(label.includes("(closed:"), status).toBe(isClosedStatus(SEED_STATUS_CATALOGUE, status));
       // The status itself is only worth the space when it changes what the
       // rep is about to do.
-      expect(label.includes(status), status).toBe(isClosedStatus(status));
+      expect(label.includes(status), status).toBe(isClosedStatus(SEED_STATUS_CATALOGUE, status));
     }
   });
 
   it("says nothing extra for an institute with no status yet", () => {
-    expect(institutePickerLabel({ ...base, status: null })).toBe(
+    expect(institutePickerLabel(SEED_STATUS_CATALOGUE, { ...base, status: null })).toBe(
       "Horizon International School · Ahmedabad",
     );
   });
 
   it("copes with a missing city", () => {
-    expect(institutePickerLabel({ name: "Zenith", city: null, status: null })).toBe(
+    expect(institutePickerLabel(SEED_STATUS_CATALOGUE, { name: "Zenith", city: null, status: null })).toBe(
       "Zenith",
     );
     expect(
-      institutePickerLabel({ name: "Zenith", city: null, status: "Will not come" }),
+      institutePickerLabel(SEED_STATUS_CATALOGUE, { name: "Zenith", city: null, status: "Will not come" }),
     ).toBe("Zenith (closed: Will not come)");
   });
 
   it("does not mark a status it does not recognise", () => {
     // A stale row or a future status must not be silently called closed.
-    expect(institutePickerLabel({ ...base, status: "Something else" })).toBe(
+    expect(institutePickerLabel(SEED_STATUS_CATALOGUE, { ...base, status: "Something else" })).toBe(
       "Horizon International School · Ahmedabad",
     );
   });
@@ -343,30 +343,30 @@ describe("reopeningInstitute — when the picker should warn (feature D)", () =>
   ];
 
   it("returns the institute when its loop is already closed", () => {
-    expect(reopeningInstitute(institutes, "closed-1")?.name).toBe("Horizon");
-    expect(reopeningInstitute(institutes, "closed-2")?.name).toBe("Pinnacle");
+    expect(reopeningInstitute(SEED_STATUS_CATALOGUE, institutes, "closed-1")?.name).toBe("Horizon");
+    expect(reopeningInstitute(SEED_STATUS_CATALOGUE, institutes, "closed-2")?.name).toBe("Pinnacle");
   });
 
   it("says nothing for an open one, an unstatused one, or no selection", () => {
-    expect(reopeningInstitute(institutes, "open-1")).toBeNull();
-    expect(reopeningInstitute(institutes, "fresh-1")).toBeNull();
-    expect(reopeningInstitute(institutes, "")).toBeNull();
+    expect(reopeningInstitute(SEED_STATUS_CATALOGUE, institutes, "open-1")).toBeNull();
+    expect(reopeningInstitute(SEED_STATUS_CATALOGUE, institutes, "fresh-1")).toBeNull();
+    expect(reopeningInstitute(SEED_STATUS_CATALOGUE, institutes, "")).toBeNull();
   });
 
   it("says nothing for an id that is not in the list", () => {
-    expect(reopeningInstitute(institutes, "not-a-real-id")).toBeNull();
+    expect(reopeningInstitute(SEED_STATUS_CATALOGUE, institutes, "not-a-real-id")).toBeNull();
   });
 
   it("agrees with the catalogue for every one of the nine", () => {
-    for (const status of INSTITUTE_STATUSES) {
+    for (const status of SEED_STATUSES) {
       const list = [{ id: "x", name: "Somewhere", status }];
-      expect(Boolean(reopeningInstitute(list, "x")), status).toBe(
-        isClosedStatus(status),
+      expect(Boolean(reopeningInstitute(SEED_STATUS_CATALOGUE, list, "x")), status).toBe(
+        isClosedStatus(SEED_STATUS_CATALOGUE, status),
       );
     }
   });
 
   it("copes with an empty registry", () => {
-    expect(reopeningInstitute([], "closed-1")).toBeNull();
+    expect(reopeningInstitute(SEED_STATUS_CATALOGUE, [], "closed-1")).toBeNull();
   });
 });

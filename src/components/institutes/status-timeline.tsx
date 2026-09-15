@@ -2,7 +2,7 @@ import { formatDateTime } from "@/lib/dates";
 import { Badge } from "@/components/ui/badge";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
 import {
-  type InstituteStatus,
+  type StatusCatalogue,
   type StatusCategory,
   statusCategory,
 } from "@/lib/validation/institute";
@@ -35,15 +35,18 @@ const DOT: Record<StatusCategory, string> = {
 export function StatusTimeline({
   changes,
   currentStatus,
+  catalogue,
 }: {
   changes: StatusChange[];
   /** Used only to mark the newest entry as where things stand now. */
-  currentStatus: InstituteStatus | null;
+  currentStatus: string | null;
+  /** The vocabulary, loaded from the database by the page. */
+  catalogue: StatusCatalogue;
 }) {
   return (
     <ol className="border-border ml-1 space-y-4 border-l pl-5">
       {changes.map((change, index) => {
-        const category = statusCategory(change.status);
+        const category = statusCategory(catalogue, change.status);
         const isCurrent = index === 0 && change.status === currentStatus;
 
         return (
@@ -56,7 +59,7 @@ export function StatusTimeline({
             />
 
             <div className="flex flex-wrap items-center gap-2">
-              <InstituteStatusBadge status={change.status} />
+              <InstituteStatusBadge status={change.status} catalogue={catalogue} />
               {isCurrent && <Badge variant="secondary">Current</Badge>}
             </div>
 
