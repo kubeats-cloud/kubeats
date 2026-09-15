@@ -12,6 +12,7 @@ import {
   statusesInCategory,
   type StatusCatalogue,
 } from "@/lib/validation/institute";
+import { makeVisitSchema } from "@/lib/validation/visit";
 
 /**
  * Stage 4a — the status vocabulary is data, and the app asks rather than knows.
@@ -164,5 +165,99 @@ describe("SEED_STATUSES is a seed, not the vocabulary", () => {
       expect(statusCategory(WITH_ADMIN_ADDED, status)).not.toBeNull();
     }
     expect(WITH_ADMIN_ADDED.length).toBeGreaterThan(SEED_STATUSES.length);
+  });
+});
+
+/**
+ * Stage 4b — a visit must say where it left the institute.
+ *
+ * "No change" was an option on Log Visit from 0001 until now, and it is gone.
+ * Not as a tidy-up: stage 5 rebuilds Pending around institutes whose CURRENT
+ * status is open, and a visit that set no status contributes nothing to that.
+ * It is not a follow-up owed and it is not a closed loop — it is absent, for
+ * ever, with nothing anywhere to say it went missing.
+ *
+ * `enforce_status_required()` (FO024, migration 0027) is the backstop and is
+ * INSERT-only, so every visit logged under "No change" stays legal and
+ * readable. These are what stop a rep reaching it.
+ */
+describe("a status is compulsory on a new visit", () => {
+  const base = {
+    activity: "olympiad",
+    institute_id: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+    daily_plan_id: "3f2504e0-4f89-11d3-9a0c-0305e82c3399",
+    lifecycle_status: "",
+    expected_date: "",
+    latitude: "",
+    longitude: "",
+    photo_path: "9f8b7c6d-1e2f-4a3b-8c9d-0e1f2a3b4c5d/proof.jpg",
+    notes: "",
+    status_set_to: "RSVP received",
+    follow_up_date: "",
+    follow_up_time: "",
+  };
+  const schema = makeVisitSchema(SEED_STATUS_CATALOGUE);
+
+  it("refuses a visit that names no status", () => {
+    const result = schema.safeParse({ ...base, status_set_to: "" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path[0] === "status_set_to");
+      expect(issue?.message).toBe("Say where this visit leaves the institute.");
+    }
+  });
+
+  it("refuses whitespace, which is what a tampered hidden field looks like", () => {
+    expect(schema.safeParse({ ...base, status_set_to: "   " }).success).toBe(false);
+  });
+
+  it("accepts any status the catalogue offers", () => {
+    for (const status of selectableStatuses(SEED_STATUS_CATALOGUE)) {
+      const open = isOpenStatus(SEED_STATUS_CATALOGUE, status);
+      const result = schema.safeParse({
+        ...base,
+        status_set_to: status,
+        // Rule 5 is unchanged and orthogonal: an open status still owes a date.
+        follow_up_date: open ? "2026-10-15" : "",
+      });
+      expect(result.success, `${status}: ${result.error?.message}`).toBe(true);
+    }
+  });
+
+  it("accepts a status an ADMIN added, built against that catalogue", () => {
+    // The whole point of 4a + 4b together. A schema holding the seeded nine
+    // would refuse the very value the database is about to accept.
+    const admins = makeVisitSchema(WITH_ADMIN_ADDED);
+    const result = admins.safeParse({
+      ...base,
+      status_set_to: "Awaiting trustee sign-off",
+      follow_up_date: "2026-10-15", // it is open, so Rule 5 applies
+    });
+    expect(result.success, result.error?.message).toBe(true);
+
+    // ...and the seeded schema, which has never heard of it, refuses it. That
+    // is the failure this arrangement exists to prevent in production.
+    expect(
+      makeVisitSchema(SEED_STATUS_CATALOGUE).safeParse({
+        ...base,
+        status_set_to: "Awaiting trustee sign-off",
+        follow_up_date: "2026-10-15",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("refuses a RETIRED status, because it is no longer offered", () => {
+    // Retired means "not for new visits". The visits already carrying it stay
+    // readable — statusCategory() still resolves it — but a rep cannot pick it,
+    // and the schema is what makes that true rather than just the dropdown.
+    expect(
+      makeVisitSchema(WITH_ADMIN_ADDED).safeParse({
+        ...base,
+        status_set_to: "Merged into another campus",
+      }).success,
+    ).toBe(false);
+    expect(statusCategory(WITH_ADMIN_ADDED, "Merged into another campus")).toBe(
+      "closed",
+    );
   });
 });

@@ -60,7 +60,8 @@ const RPC_MESSAGES: Record<string, string> = {
   FO008: "The photo was taken during the visit and cannot be changed afterwards.",
   FO009: "Check in at this institute before logging the visit.",
   FO016:
-    "That status leaves the institute open, so a follow-up date and time are needed.",
+    "That status leaves the institute open, so a follow-up date is needed.",
+  FO024: "Say where this visit leaves the institute before saving it.",
   FO015: "The departure time was already recorded and cannot be changed.",
   FO017: "That visit could not be found, or it belongs to someone else.",
   FO018: "That visit has already been filed.",

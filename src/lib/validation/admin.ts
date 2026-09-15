@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ACTIVITY_KEYS } from "@/lib/validation/visit";
+import { STATUS_CATEGORIES, STATUS_TONES } from "@/lib/validation/institute";
 
 /**
  * What an admin is allowed to type, checked identically in the browser and on
@@ -44,6 +45,51 @@ export const purposeSchema = z.object({
   activity: z.enum(ACTIVITY_KEYS, {
     message: "Choose what this purpose counts as.",
   }),
+});
+
+/**
+ * A status an admin adds to the vocabulary.
+ *
+ * EVERY PART OF IT IS REQUIRED, and none of it has a default, because each
+ * answer decides something a rep then lives with:
+ *
+ *   category   open or closed. It drives Rule 5 — an OPEN status makes a
+ *              follow-up date compulsory, enforced by FO016 from the database —
+ *              and from stage 5 it decides whether the institute sits in
+ *              Pending. Guessing it would be guessing whether somebody is
+ *              chased next week.
+ *   tone       the badge colour. It tracks the OUTCOME rather than the
+ *              category, so nothing can compute it: "First meeting done" is
+ *              green and still open.
+ *   asks_*     which extra questions the closing report asks. Each maps to a
+ *              real column on public.visits — a closed vocabulary of groups,
+ *              never free-form fields.
+ *
+ * The label is the PRIMARY KEY of public.institute_statuses and is what every
+ * institute and visit stores, so it is a name, not an id, and renaming one is
+ * refused by the foreign keys the moment it has been used.
+ */
+export const statusSchema = z.object({
+  status: name(80, "The status"),
+  category: z.enum(STATUS_CATEGORIES, {
+    message: "Say whether this leaves the institute open or closed.",
+  }),
+  tone: z.enum(STATUS_TONES, { message: "Choose a colour for the badge." }),
+  asks_expected_date: z.boolean(),
+  asks_session_detail: z.boolean(),
+  asks_head_count: z.boolean(),
+});
+
+export type StatusInput = z.infer<typeof statusSchema>;
+
+/** Retiring, restoring, and renaming all target one existing status. */
+export const statusUpdateSchema = z.object({
+  status: z.string().trim().min(1, "That status could not be identified.").max(80),
+});
+
+export const statusRenameSchema = z.object({
+  status: z.string().trim().min(1, "That status could not be identified.").max(80),
+  renameTo: name(80, "The new name"),
 });
 
 export const stateSchema = z.object({

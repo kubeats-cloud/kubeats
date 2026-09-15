@@ -82,7 +82,10 @@ const baseVisit = {
   longitude: "",
   photo_path: "9f8b7c6d-1e2f-4a3b-8c9d-0e1f2a3b4c5d/proof.jpg",
   notes: "",
-  status_set_to: "",
+  // Compulsory since stage 4b (FO024, migration 0027), so the base fixture
+  // carries one. A CLOSED status deliberately: an open one would also demand a
+  // follow-up date, and these cases are about everything else.
+  status_set_to: "RSVP received",
   follow_up_date: "",
   follow_up_time: "",
 };

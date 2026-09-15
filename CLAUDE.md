@@ -324,13 +324,32 @@ faster. See README for both.
   category and so already covers anything an admin adds — but if one of those
   two is ever retired and replaced under a new name, the CHECK stops covering it
   and only the trigger remains.
-  `INSTITUTE_STATUS_CATALOGUE` in `src/lib/validation/institute.ts` is still the
-  app's copy and still has to be changed together with the table — the
-  `institute_status_category` suite fails if only one moves. Stage 4b demotes it
-  to a seed and has the app read the vocabulary from the database, which is what
-  makes an admin-added status legible; **until then no status may be added**, or
-  it renders as an unstyled badge, makes `isClosedStatus()` false, and is
-  refused by `visitSchema`.
+  `SEED_STATUS_CATALOGUE` in `src/lib/validation/institute.ts` is a **seed and a
+  fallback, not the vocabulary**: the nine a fresh database is created with, and
+  what the app renders if the read fails. `listStatusCatalogue()` is the single
+  place that asks the database, **deliberately uncached**, so a status an admin
+  adds is usable by a rep on their next request. Every helper takes a catalogue
+  and `visitSchema` is `makeVisitSchema(catalogue)` — a schema holding the
+  seeded nine would refuse the very status the database just accepted.
+  **An admin maintains the vocabulary from Settings** (stage 4b): add, rename
+  while unused, retire. There is **no delete** — not for an admin, not even for
+  a status nothing has used. Retiring is the one removal path, so there is one
+  rule to learn and no way to discover the difference by losing something.
+  Renaming needs no guard code: the foreign keys are `on update restrict`, so an
+  unused status renames cleanly and one in use is refused with 23503, which the
+  action turns into "add the corrected one and retire this".
+- **Every visit must say where it left the institute.**
+  `enforce_status_required()` (FO024, migration 0027) refuses an insert with no
+  `status_set_to`, and "No change" is gone from Log Visit. It is a database rule
+  rather than form validation because Pending is built on it: a visit that set
+  no status is not a follow-up owed and not a closed loop — it is absent, for
+  ever, with nothing to say it went missing. **INSERT-only**, so every visit
+  logged under "No change" stays legal, readable and countable; a NOT NULL could
+  not have been built against them, and rewriting them would be inventing data.
+  ⚠ **0027 is the one deploy-coupled migration in Phase 2.** Applied before the
+  code ships it refuses every rep who picks "No change" — on a visit they have
+  already walked to and photographed. Deploy-first is survivable; apply-first is
+  not, which is the opposite of the usual advice.
 - **Rule 5 IS the open category now**, which is the reverse of what this said
   through stage 2. An OPEN status needs a follow-up **date**; a CLOSED one does
   not (though it may still carry one — "they said no, ask again next intake" is
