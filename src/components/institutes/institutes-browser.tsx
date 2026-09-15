@@ -26,6 +26,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const ALL = "__all__";
+/** Its own sentinel, because "no owner" is a real filter and not the absence of one. */
+const UNASSIGNED = "__unassigned__";
 
 /**
  * Search and filtering run in the browser over the list the server already
@@ -39,16 +41,28 @@ const ALL = "__all__";
 export function InstitutesBrowser({
   institutes,
   catalogue,
+  showOwner = false,
 }: {
   institutes: Institute[];
   /** The status vocabulary, loaded by the page that renders this. */
   catalogue: StatusCatalogue;
+  /**
+   * ADMIN-ONLY. Shows who registered each institute, and lets the list be
+   * filtered down to one rep.
+   *
+   * Off for a rep and deliberately so: once rep-owned institutes ship a rep
+   * sees only their own, so an owner line would say the same name on every row
+   * and a filter would have one option. It would be noise standing in for
+   * information.
+   */
+  showOwner?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [state, setState] = useState(ALL);
   const [city, setCity] = useState(ALL);
   const [type, setType] = useState(ALL);
   const [boards, setBoards] = useState<string[]>([]);
+  const [owner, setOwner] = useState(ALL);
 
   const availableStates = useMemo(
     () => [...new Set(institutes.map((i) => i.state).filter(Boolean))].sort() as string[],
@@ -73,6 +87,37 @@ export function InstitutesBrowser({
     [institutes],
   );
 
+  /**
+   * The owners present in the list, plus "Unassigned" when any row has none.
+   *
+   * Built from the rows rather than from the team, so it offers exactly the
+   * people who actually hold something — an admin looking for "everything
+   * Sumit registered" is not helped by a list of reps who registered nothing.
+   *
+   * UNASSIGNED IS AN OPTION, and it is the one that earns this control its
+   * place. D-A means transferring a rep orphans their whole pipeline at once,
+   * and `registered_by` is `on delete set null`, so removing a departed rep
+   * does the same. Without a way to select them, finding those rows means
+   * scrolling the registry looking for red badges.
+   */
+  const ownerOptions = useMemo(() => {
+    const named = new Map<string, string>();
+    let anyUnassigned = false;
+    for (const institute of institutes) {
+      if (!institute.registered_by) {
+        anyUnassigned = true;
+        continue;
+      }
+      named.set(institute.registered_by, institute.ownerName ?? "Unnamed rep");
+    }
+    return {
+      reps: [...named.entries()]
+        .map(([id, name]) => ({ id, name }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+      anyUnassigned,
+    };
+  }, [institutes]);
+
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return institutes.filter((i) => {
@@ -85,9 +130,12 @@ export function InstitutesBrowser({
       if (type !== ALL && i.type !== type) return false;
       if (boards.length > 0 && !(i.boards ?? []).some((b) => boards.includes(b)))
         return false;
+      if (owner === UNASSIGNED && i.registered_by) return false;
+      if (owner !== ALL && owner !== UNASSIGNED && i.registered_by !== owner)
+        return false;
       return true;
     });
-  }, [institutes, search, state, city, type, boards]);
+  }, [institutes, search, state, city, type, boards, owner]);
 
   function toggleBoard(board: string) {
     setBoards((current) =>
@@ -197,6 +245,27 @@ export function InstitutesBrowser({
         </div>
       )}
 
+      {showOwner && (ownerOptions.reps.length > 0 || ownerOptions.anyUnassigned) && (
+        <div className="md:max-w-xs">
+          <Select value={owner} onValueChange={setOwner}>
+            <SelectTrigger className="h-11 w-full" aria-label="Filter by owner">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All reps</SelectItem>
+              {ownerOptions.reps.map((rep) => (
+                <SelectItem key={rep.id} value={rep.id}>
+                  {rep.name}
+                </SelectItem>
+              ))}
+              {ownerOptions.anyUnassigned && (
+                <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       <p className="text-muted-foreground text-xs">
         {filtered.length} of {institutes.length} institute
         {institutes.length === 1 ? "" : "s"}
@@ -213,7 +282,11 @@ export function InstitutesBrowser({
           <ul className="space-y-3 md:hidden">
             {filtered.map((institute) => (
               <li key={institute.id}>
-                <InstituteCard institute={institute} catalogue={catalogue} />
+                <InstituteCard
+                  institute={institute}
+                  catalogue={catalogue}
+                  showOwner={showOwner}
+                />
               </li>
             ))}
           </ul>
@@ -239,6 +312,11 @@ export function InstitutesBrowser({
                     <th scope="col" className="px-5 py-2.5 text-xs font-medium">
                       Key contact
                     </th>
+                    {showOwner && (
+                      <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                        Registered by
+                      </th>
+                    )}
                     <th
                       scope="col"
                       className="px-5 py-2.5 text-right text-xs font-medium"
@@ -285,6 +363,17 @@ export function InstitutesBrowser({
                           <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
                         </td>
                         <td className="px-5 py-3">{keyContact(institute)}</td>
+                        {showOwner && (
+                          <td className="px-5 py-3">
+                            {institute.registered_by ? (
+                              <span className="text-muted-foreground">
+                                {institute.ownerName ?? "Unnamed rep"}
+                              </span>
+                            ) : (
+                              <Badge variant="danger">Unassigned</Badge>
+                            )}
+                          </td>
+                        )}
                         <td className="px-5 py-3 text-right tabular-nums">{streams}</td>
                         <td className="px-5 py-3 text-right tabular-nums">
                           ~{students}
@@ -324,9 +413,11 @@ function keyContact(institute: Institute): string {
 function InstituteCard({
   institute,
   catalogue,
+  showOwner,
 }: {
   institute: Institute;
   catalogue: StatusCatalogue;
+  showOwner: boolean;
 }) {
   const streams = streamCount(institute.class11, institute.class12);
   const students = class12Total(institute.class12);
@@ -352,8 +443,18 @@ function InstituteCard({
           />
         </div>
 
-        <div className="mt-3">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
+          {showOwner &&
+            (institute.registered_by ? (
+              <span className="text-muted-foreground text-xs">
+                {institute.ownerName ?? "Unnamed rep"}
+              </span>
+            ) : (
+              /* Loud, because nothing else on any screen says an institute has
+                 fallen out of every rep's sight. See reassign-owner.tsx. */
+              <Badge variant="danger">Unassigned</Badge>
+            ))}
         </div>
 
         <p className="text-muted-foreground mt-3 truncate text-xs">

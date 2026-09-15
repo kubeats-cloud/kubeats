@@ -6,13 +6,15 @@ import { ErrorState } from "@/components/states";
 import { InstitutesBrowser } from "@/components/institutes/institutes-browser";
 import { listInstitutes } from "@/lib/institutes";
 import { listStatusCatalogue } from "@/lib/statuses";
+import { getCurrentUser, isAdmin } from "@/lib/auth";
 
 export const metadata = { title: "Institutes" };
 
 export default async function InstitutesPage() {
-  const [result, catalogue] = await Promise.all([
+  const [result, catalogue, user] = await Promise.all([
     listInstitutes(),
     listStatusCatalogue(),
+    getCurrentUser(),
   ]);
 
   return (
@@ -31,7 +33,13 @@ export default async function InstitutesPage() {
       />
 
       {result.ok ? (
-        <InstitutesBrowser institutes={result.institutes} catalogue={catalogue} />
+        <InstitutesBrowser
+          institutes={result.institutes}
+          catalogue={catalogue}
+          // Admin-only: a rep sees only their own institutes, so an owner
+          // column would repeat one name down the page.
+          showOwner={isAdmin(user)}
+        />
       ) : (
         <ErrorState message="We could not load the registry just now. Please try again in a moment." />
       )}

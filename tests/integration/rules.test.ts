@@ -2434,6 +2434,17 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(monthly.error?.code).toBe(CHECK_VIOLATION);
 
       // ...and the same date is perfectly valid as a day.
+      //
+      // Cleared first rather than inserted blind: the sibling test above commits
+      // a daily target for TODAY, and on the one day a year when today is this
+      // hardcoded Wednesday the two collide on targets_unique_per_period and
+      // this assertion fails for a reason that has nothing to do with the grid.
+      await admin
+        .from("targets")
+        .delete()
+        .eq("member", subject.id)
+        .eq("period", "daily")
+        .eq("period_start", wednesday);
       const daily = await subject.db
         .from("targets")
         .insert({ member: subject.id, period: "daily", period_start: wednesday });

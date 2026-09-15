@@ -19,6 +19,9 @@ import {
 } from "@/lib/institutes";
 import { activityLabel } from "@/lib/activities";
 import { listStatusCatalogue } from "@/lib/statuses";
+import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { listRepsForCampus } from "@/lib/admin";
+import { ReassignOwner } from "@/components/institutes/reassign-owner";
 import { class12Total, STREAMS, TYPE_LABELS } from "@/lib/validation/institute";
 
 export const metadata = { title: "Institute" };
@@ -49,11 +52,16 @@ export default async function InstituteDetailPage(
   const institute = await getInstitute(id);
   if (!institute) notFound();
 
-  // Two independent reads, so the slower one does not hold up the other.
-  const [history, statusHistory, catalogue] = await Promise.all([
+  const admin = isAdmin(await getCurrentUser());
+
+  // Independent reads, so the slower one does not hold up the others. The reps
+  // list is fetched for an ADMIN only: it is the reassign picker's, and a rep
+  // has nothing to reassign.
+  const [history, statusHistory, catalogue, reps] = await Promise.all([
     getInstituteVisits(id),
     getInstituteStatusHistory(id),
     listStatusCatalogue(),
+    admin ? listRepsForCampus(institute.campus_id) : Promise.resolve([]),
   ]);
   const total = class12Total(institute.class12);
 
@@ -195,6 +203,22 @@ export default async function InstituteDetailPage(
           />
         )}
       </div>
+
+      {/*
+        OWNERSHIP, ADMIN-ONLY, and placed here rather than at the top on
+        purpose: it is administration of the record, not a fact about the
+        school, so it sits below the school's own details and above its history.
+        A rep never sees it — they own everything they can open.
+      */}
+      {admin && (
+        <div className="mb-6">
+          <ReassignOwner
+            instituteId={institute.id}
+            ownerName={institute.ownerName}
+            reps={reps}
+          />
+        </div>
+      )}
 
       <SectionTitle>Visit history</SectionTitle>
       {!history.ok ? (

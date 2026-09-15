@@ -92,6 +92,20 @@ export const statusRenameSchema = z.object({
   renameTo: name(80, "The new name"),
 });
 
+/**
+ * Moving an institute to another rep.
+ *
+ * Two ids and nothing else — the CAMPUS rule is not expressed here on purpose.
+ * A schema can check that a uuid looks like a uuid; it cannot know which campus
+ * a rep is on without a query, and putting a second opinion about that in the
+ * app is how it drifts from the trigger that actually decides. The picker
+ * offers only same-campus reps and FO025 refuses the rest.
+ */
+export const reassignSchema = z.object({
+  institute_id: z.uuid("That institute could not be identified."),
+  member: z.uuid("Choose a rep to hand it to."),
+});
+
 export const stateSchema = z.object({
   name: name(80, "The state name"),
 });

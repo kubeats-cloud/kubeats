@@ -142,6 +142,44 @@ export async function listPurposeRows(): Promise<PurposeRow[]> {
 /* Team                                                                */
 /* ------------------------------------------------------------------ */
 
+/** A rep an institute could be reassigned to. */
+export interface CampusRep {
+  id: string;
+  name: string;
+}
+
+/**
+ * The reps on one campus — the only people an institute may be reassigned to.
+ *
+ * AN ADMIN IS NEVER IN THIS LIST, and that is the point rather than an
+ * oversight: an admin has no campus (`enforce_profile_campus`, FO021), so
+ * `campus_id` cannot match, and an institute owned by an admin would be one no
+ * rep could see. Ownership is a rep's thing.
+ *
+ * A null `campusId` returns nothing rather than everyone. An institute with no
+ * campus is a broken row — FO022 refuses to create one — and offering the whole
+ * team as candidates would be inviting an admin to make it worse.
+ */
+export async function listRepsForCampus(
+  campusId: string | null,
+): Promise<CampusRep[]> {
+  if (!campusId) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, name")
+    .eq("role", "rep")
+    .eq("campus_id", campusId)
+    .order("name");
+
+  if (error) {
+    logError("admin:campus-reps", error);
+    return [];
+  }
+  return (data ?? []).map((row) => ({ id: row.id, name: row.name ?? "Unnamed rep" }));
+}
+
 export interface TeamMember {
   id: string;
   name: string;
