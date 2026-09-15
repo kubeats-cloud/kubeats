@@ -63,21 +63,17 @@ export function followUpRequired(status: string | null): boolean {
   return isOpenStatus(status);
 }
 
-/**
- * The time a follow-up starts out at, so setting one is a tap rather than a
- * decision.
+/*
+ * DEFAULT_FOLLOW_UP_TIME stood here — the 11:00 a follow-up time started out
+ * at, so that answering it was a tap rather than a decision.
  *
- * The client's spec asked only for a follow-up DATE; the database asks for a
- * date AND a time (`enforce_follow_up_when_open`, FO016) and has since 0018.
- * Both are kept, because a time is what makes a follow-up land in a diary
- * rather than in a day — but it is pre-filled when the rep picks the date, so
- * the fiddly half answers itself and can still be changed.
- *
- * Mid-morning on purpose: a school is open, the first period is over, and
- * nobody is at lunch. It is a starting point, not a rule, and nothing anywhere
- * enforces it.
+ * It is gone with the field it pre-filled. The client's spec asked for a
+ * follow-up DATE; the database wanted a date AND a time from 0018, and
+ * pre-filling was the way to keep both without making a rep answer twice.
+ * Migration 0023 drops the time from the rule outright, so there is nothing
+ * left to pre-fill: `follow_up_time` is dormant on public.visits, kept with
+ * every value it already holds and collected by nothing.
  */
-export const DEFAULT_FOLLOW_UP_TIME = "11:00";
 
 /**
  * The two statuses 0010 singled out, kept only so their message can say WHY.
@@ -264,6 +260,20 @@ export const visitSchema = z
         { message: "Choose one of the listed statuses." },
       ),
     follow_up_date: optionalDate,
+    /**
+     * DORMANT, and deliberately still accepted.
+     *
+     * No control posts this any more and `enforce_follow_up_when_open()` no
+     * longer asks for it (migration 0023). It stays in the schema for the
+     * length of a deploy: a Log Visit page cached from before this shipped
+     * still has a time picker on it, and a rep who fills that page in should
+     * have what they typed stored rather than silently dropped. Same reasoning
+     * as `accuracy` above, pointing the other way — that one tolerates a field
+     * being ABSENT from an old form, this one tolerates a field being PRESENT.
+     *
+     * After the deploy window it is always null, and the column keeps the
+     * values 0018-to-0023 recorded.
+     */
     follow_up_time: optionalTime,
   })
   .superRefine((value, ctx) => {
@@ -312,26 +322,22 @@ export const visitSchema = z
       });
     }
 
-    // Rule 5 — an open status needs a date AND a time to chase on.
+    // Rule 5 — an open status needs a DATE to chase on. Not a time.
     //
-    // Mirrors enforce_follow_up_when_open() in 0018, which asks the same
-    // question of the same lookup table. The old "forbidden when scheduled"
-    // half is gone: 0018 drops the constraint that stated it.
-    if (followUpRequired(value.status_set_to)) {
-      if (!value.follow_up_date) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["follow_up_date"],
-          message: `"${value.status_set_to}" leaves this open, so a follow-up date is needed.`,
-        });
-      }
-      if (!value.follow_up_time) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["follow_up_time"],
-          message: "And a time, so it lands in a diary rather than a day.",
-        });
-      }
+    // Mirrors enforce_follow_up_when_open() as migration 0023 rewrites it,
+    // which asks the same question of the same lookup table. Two halves of the
+    // old rule have now been dropped, in opposite directions and for opposite
+    // reasons: 0018 dropped "a follow-up is FORBIDDEN on the two scheduled
+    // statuses", and 0023 drops "and a time as well as a date".
+    //
+    // `follow_up_time` is still ACCEPTED below — see the field — but nothing
+    // renders it and nothing requires it.
+    if (followUpRequired(value.status_set_to) && !value.follow_up_date) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["follow_up_date"],
+        message: `"${value.status_set_to}" leaves this open, so a follow-up date is needed.`,
+      });
     }
   });
 

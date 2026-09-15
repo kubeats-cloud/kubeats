@@ -31,7 +31,6 @@ import {
 } from "@/lib/validation/institute";
 import {
   ACTIVITIES,
-  DEFAULT_FOLLOW_UP_TIME,
   activityForPurpose,
   expectedDateLabel,
   expectedDateRequired,
@@ -83,7 +82,6 @@ export function LogVisitForm({
   const [expectedDate, setExpectedDate] = useState("");
   const [statusSetTo, setStatusSetTo] = useState(NO_CHANGE);
   const [followUpDate, setFollowUpDate] = useState("");
-  const [followUpTime, setFollowUpTime] = useState("");
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
 
   const lifecycle = hasLifecycle(activity);
@@ -91,18 +89,12 @@ export function LogVisitForm({
   const needsDate = expectedDateRequired(activity, lifecycle ? lifecycleStatus : null);
   const needsFollowUp = followUpRequired(status);
 
-  /**
-   * Picking the date fills in the time, once.
-   *
-   * The database wants both (`enforce_follow_up_when_open`, FO016) and the
-   * client asked for one; pre-filling keeps both without making the rep answer
-   * twice. Only ever applied to an EMPTY time, so a rep who has already set
-   * 14:30 and then corrects the date does not get it overwritten.
+  /*
+   * handleFollowUpDate() stood here — it pre-filled the time to 11:00 the
+   * moment a date was chosen. Both it and the Time field are gone: 0023 drops
+   * the time from Rule 5, so there is no second half left to answer for the
+   * rep. setFollowUpDate is wired straight to the one remaining input.
    */
-  function handleFollowUpDate(value: string) {
-    setFollowUpDate(value);
-    if (value && followUpTime === "") setFollowUpTime(DEFAULT_FOLLOW_UP_TIME);
-  }
 
   const error = serverState.error ?? clientState.error;
   const fieldErrors = serverState.error
@@ -309,8 +301,14 @@ export function LogVisitForm({
         typed there was discarded in silence.
 
         Both are fixed by putting it where the rule already was. visitSchema
-        requires a date and a time when followUpRequired(status), mirroring
-        enforce_follow_up_when_open() (FO016); log_visit() is what stores them.
+        requires a DATE when followUpRequired(status), mirroring
+        enforce_follow_up_when_open() (FO016); log_visit() is what stores it.
+
+        A DATE AND NOTHING ELSE. From 0018 to 0023 this asked for a time too,
+        pre-filled to 11:00 so the rep only really answered once. The client's
+        spec settled on the date alone, so migration 0023 drops the time from
+        the trigger and the control goes with it. visits.follow_up_time keeps
+        every value it recorded in between and is collected by nothing.
 
         Shown for every status, not only the open ones: a CLOSED status may
         still carry a follow-up — "they said no, ask again next intake" is a
@@ -325,33 +323,18 @@ export function LogVisitForm({
             : "Optional — only if you already know when you are going back."
         }
       >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="follow-up-date">Follow-up date</Label>
-            <Input
-              id="follow-up-date"
-              name="follow_up_date"
-              type="date"
-              className="h-11"
-              value={followUpDate}
-              onChange={(event) => handleFollowUpDate(event.target.value)}
-              aria-required={needsFollowUp || undefined}
-            />
-            {fieldError("follow_up_date")}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="follow-up-time">Time</Label>
-            <Input
-              id="follow-up-time"
-              name="follow_up_time"
-              type="time"
-              className="h-11"
-              value={followUpTime}
-              onChange={(event) => setFollowUpTime(event.target.value)}
-              aria-required={needsFollowUp || undefined}
-            />
-            {fieldError("follow_up_time")}
-          </div>
+        <div className="space-y-2 sm:max-w-xs">
+          <Label htmlFor="follow-up-date">Follow-up date</Label>
+          <Input
+            id="follow-up-date"
+            name="follow_up_date"
+            type="date"
+            className="h-11"
+            value={followUpDate}
+            onChange={(event) => setFollowUpDate(event.target.value)}
+            aria-required={needsFollowUp || undefined}
+          />
+          {fieldError("follow_up_date")}
         </div>
       </FormSection>
 

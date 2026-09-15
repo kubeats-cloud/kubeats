@@ -34,8 +34,8 @@ Everything in sections 3 and 4 follows from that sentence.
 
 | | Decision | Answer |
 | --- | --- | --- |
-| **D1** | What produces a `meeting`? | No new "Meeting" purpose. Existing purposes declare their activity; **"First meeting" and "Other" → `meeting`**. 0025 seeds Follow-up, Olympiad, Application and Admissions — §3.3 |
-| **D2** | Follow-up: date, or date and time? | **Both**, with the time **pre-filled** |
+| **D1** | What produces a `meeting`? | No new "Meeting" purpose. Existing purposes declare their activity; **"First meeting" and "Other" → `meeting`**. 0026 seeds Follow-up, Olympiad, Application and Admissions — §3.3 |
+| **D2** | Follow-up: date, or date and time? | ~~Both, pre-filled~~ → **DATE ONLY.** Client reversed it after Stage 1 shipped; migration **0023** drops the time from FO016 |
 | **D3** | Save the date on a Done session / campus visit? | **Yes** — fix `log_visit()`, one `case` expression, same signature |
 | **D4** | Who owns that date field? | **One field.** Strictness from the purpose: Set → required "Tentative…"; Done → optional, pre-filled, "Session date" |
 | **D5** | One student count or two? | **One.** `students_reached` goes dormant, reversibly |
@@ -101,7 +101,7 @@ the obvious design turned out to be unbuildable. Do the same here.
 | ~~P3~~ | `select label from public.purposes order by label;` | **ANSWERED (2026-09-15): six rows** — *First meeting* (added 2026-09-15), *Other*, *Fix a session*, *Complete a session*, *Fix a campus visit*, *Complete a campus visit*. So a meeting-mapped purpose exists and Meetings will not go silent. The column is `label`, not `name`. §3.3 |
 | P1 | `select distinct status from public.institutes where status is not null;` and the same for `visits.status_set_to` | Every value is one of the nine. **If not, the CHECK→FK swap in §4.2 fails to build** |
 | P2 | `select count(*) from public.visits where status_set_to is null;` | **> 0 is expected** — "No change" has always been offered. Confirms D9's rule must be a TRIGGER, not a NOT NULL or a CHECK |
-| P4 | `select purpose, count(*) from public.daily_plans group by 1 order by 2 desc;` | Which purpose labels are in history, so 0023's `purpose_id` backfill can be checked for misses |
+| P4 | `select purpose, count(*) from public.daily_plans group by 1 order by 2 desc;` | Which purpose labels are in history, so 0024's `purpose_id` backfill can be checked for misses |
 | P5 | `select count(*) from public.visits where status_set_to is not null and follow_up_time is null and public.institute_status_is_open(status_set_to);` | Pre-0018 rows exist with no time. Confirms Pending must render "no date recorded" rather than assume one |
 | P6 | `select count(*) from public.institutes i where public.institute_status_is_open(i.status);` | The size of the new Pending list on day one. If it is large, the rep's first sight of the new screen is a backlog — worth knowing before it is a surprise |
 | P7 | `select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid in ('public.institutes'::regclass,'public.visits'::regclass) and contype = 'c';` | Confirms which CHECKs are actually installed, against the file record |
@@ -145,10 +145,10 @@ the seed for `purposes.activity` / `purposes.lifecycle`:
 | **Complete a session** | live | `session` | `Done` | no | Sessions Done | may close an earlier "Set" via `closes_visit_id`; `closed_at` stamped |
 | **Fix a campus visit** | live | `campus_visit` | `Set` | no | Campus Visits Set | `expected_date` **required** (D4) |
 | **Complete a campus visit** | live | `campus_visit` | `Done` | no | Campus Visits Done | may close an earlier "Set"; `closed_at` stamped |
-| **Olympiad registration** | **0025 seeds** | `olympiad` | — | no | Olympiad Registrations | one-shot, no lifecycle |
-| **Application forms** | **0025 seeds** | `application` | — | no | Application Forms | one-shot, no lifecycle |
-| **Admissions** | **0025 seeds** | `admission` | — | no | Admissions | one-shot, no lifecycle |
-| **Follow-up** | **0025 seeds** | `meeting` | — | no | **Meetings** | as First meeting — the second and later visits to a school |
+| **Olympiad registration** | **0026 seeds** | `olympiad` | — | no | Olympiad Registrations | one-shot, no lifecycle |
+| **Application forms** | **0026 seeds** | `application` | — | no | Application Forms | one-shot, no lifecycle |
+| **Admissions** | **0026 seeds** | `admission` | — | no | Admissions | one-shot, no lifecycle |
+| **Follow-up** | **0026 seeds** | `meeting` | — | no | **Meetings** | as First meeting — the second and later visits to a school |
 | *(any admin-added purpose)* | — | admin picks one of the six | per the rule below | admin's choice | whichever the activity feeds | whichever the activity turns on |
 
 `lifecycle` is non-null **iff** the activity is `session` or `campus_visit` —
@@ -172,19 +172,19 @@ has to be seeded to protect it.
 Two things the probe also settled, both carried into the table above:
 
 * **Olympiad registration, Application forms and Admissions do not exist as
-  purposes.** They are seeded by 0025 with Stage 3, which is the file that also
+  purposes.** They are seeded by 0026 with Stage 3, which is the file that also
   makes the selector unnecessary. Until then those three metrics are reachable
   only through the selector — which is precisely why the seed and the selector's
   removal ship together.
-* **There is no "Follow-up" purpose either, and 0025 seeds one.** *First
+* **There is no "Follow-up" purpose either, and 0026 seeds one.** *First
   meeting* is the only meeting-shaped row, so a second visit to the same school
   is currently planned as "First meeting" — which is wrong on its face — or as
   "Other", which buries an ordinary follow-up under the free-text catch-all.
   Both map to `meeting`, so no metric moves either way; what improves is that
-  the plan says what the visit actually is. **Locked: 0025 seeds
+  the plan says what the visit actually is. **Locked: 0026 seeds
   "Follow-up" → `meeting`.**
 
-So 0025's purpose seed is exactly four rows:
+So 0026's purpose seed is exactly four rows:
 
 | Label | `activity` | `lifecycle` | Free text? |
 | --- | --- | --- | --- |
@@ -407,7 +407,7 @@ no CHECK could constrain it, `report-view.tsx` could not render it, and
 
 | Group | Fields it shows | Column(s) |
 | --- | --- | --- |
-| *(the follow-up)* | follow-up date **and time** (D2) | `follow_up_date`, `follow_up_time` |
+| *(the follow-up)* | follow-up **date** (D2) | `follow_up_date` — `follow_up_time` is dormant from 0023 |
 | `asks_expected_date` | the session / campus-visit date (D4) | `expected_date` |
 | `asks_session_detail` | topic, taken by | `session_topic`, `session_taken_by` |
 | `asks_head_count` | number of students — **one count** (D5) | `students_attended` |
@@ -420,11 +420,26 @@ Open ⇒ follow-up, full stop. That is Rule 5, and it is in the database.
 
 ### 4.6 D2, D3 and D4, as built
 
-**D2 — the follow-up keeps its time, pre-filled.** `enforce_follow_up_when_open()`
-is untouched, `visits_follow_up_required_when_awaiting` is untouched, and the
-form gains a default time (a sensible working hour) applied when the date is
-first chosen. A time is what makes Pending sortable into a day rather than a
-pile; pre-filling removes the fiddle without losing the data. **Zero migration.**
+**D2 — the follow-up is a DATE. ⚠ REVERSED after Stage 1 shipped.**
+
+It was first settled as "keep both, pre-fill the time to 11:00" — a time is what
+makes Pending sortable into a day rather than a pile, and pre-filling removed the
+fiddle without losing the data. That shipped, and the client then asked for the
+date alone.
+
+So **migration 0023** replaces `enforce_follow_up_when_open()` with one that asks
+for `follow_up_date` and nothing else, the Time control and
+`DEFAULT_FOLLOW_UP_TIME` are deleted, and `visits.follow_up_time` goes **dormant
+rather than dropped** — it keeps every value recorded between 0018 and 0023.
+`visits_follow_up_required_when_awaiting` (0010) is untouched: it only ever
+required the DATE.
+
+**0023 only LOOSENS**, which makes it the first migration in this plan that is
+safe to apply before *or* after its deploy. Apply-first is still preferred: the
+other order leaves FO016 refusing every open-status visit until it is run.
+
+One consequence for Area D: Pending's rows sort by day, not by time of day. That
+is what the client asked for and it is worth noticing rather than discovering.
 
 **D3 — `log_visit()` stops discarding the date.** Today it writes
 
@@ -440,7 +455,7 @@ each did, with the changed line marked.
 
 It is a **loosening** — the live app never sends a date on a Done visit, because
 the field is only rendered when the lifecycle is `Set` — so it is safe to apply
-early and rides in 0024 alongside the `asks_expected_date` seed that makes the
+early and rides in 0025 alongside the `asks_expected_date` seed that makes the
 field appear.
 
 **D4 — one field, strictness from the purpose.** Shown when *either* the purpose
@@ -549,7 +564,7 @@ all.**
 | Session topic / taken by | shown when status = Session done | **stays**, driven by `asks_session_detail` | `session_topic`, `session_taken_by` | — |
 | "Is a next session set?" | yes/no gating the date fields | **removed** (D6) | — | see §5.3 |
 | Follow-up date + time | shown when the yes/no said yes | **stays**, shown by the status's category, time pre-filled (D2) | `follow_up_date`, `follow_up_time` | see §5.3 |
-| Session / campus-visit date | asked only on a "Set" | **also on Done**, optional, pre-filled (D3, D4) | `expected_date` | needs 0024's `log_visit()` fix or it is discarded |
+| Session / campus-visit date | asked only on a "Set" | **also on Done**, optional, pre-filled (D3, D4) | `expected_date` | needs 0025's `log_visit()` fix or it is discarded |
 | Does this close an earlier plan? | the open-loop offer | **stays — do not remove** | `closes_visit_id` | Rule 7's Set→Done arithmetic (§6.3) |
 
 ### 5.3 D6 removes a live dead end, and one more thing with it
@@ -671,6 +686,8 @@ Edge cases to render rather than hide:
 * **No follow-up date** — probe P5 says pre-0018 rows exist. Render "no date
   recorded" rather than assuming one. Overdue = `follow_up_date < todayISO()`,
   which replaces the current `expected_date` comparison in `pending-list.tsx`.
+  There is no time to sort within a day: D2 was reversed to a date only, so
+  Pending orders by day and by nothing finer.
 
 ### 6.3 What happens to "open loops" (D7)
 
@@ -766,7 +783,11 @@ writer. **It is Stage 5b, its own small stage**, so Stage 5 stays tight.
 comment-only file. `close_visit()` is not touched; `log_visit()` is touched by
 body only.
 
-### 0023 — purposes become typed *(additive; safe at any time)*
+**0023 is already spoken for** — `0023_follow_up_date_only.sql`, the D2 reversal
+(§4.6). It shipped as a follow-up to Stage 1 rather than as part of any stage
+below, which is why the numbering here starts at 0024.
+
+### 0024 — purposes become typed *(additive; safe at any time)*
 
 ```sql
 alter table public.purposes
@@ -806,9 +827,9 @@ constraint daily_plans_purpose_note_length
 
 **Safe early:** every column is nullable or defaulted, and the live app neither
 reads nor writes any of them. The new purposes are **not** seeded here — see
-0025.
+0026.
 
-### 0024 — statuses become data, and `log_visit()` keeps the date *(additive plus a constraint swap; safe at any time)*
+### 0025 — statuses become data, and `log_visit()` keeps the date *(additive plus a constraint swap; safe at any time)*
 
 1. The new columns on `institute_statuses` (§4.3) and the seed for the nine.
 2. Drop `institute_statuses_sort_order_unique`; add a plain index.
@@ -832,9 +853,9 @@ so it cannot offer a status it does not know and cannot break. **But no status
 may be added until Stage 4a is live.** A status added early would show as an
 unstyled "neutral" badge, would make `isClosedStatus()` false so the picker stops
 warning about a closed institute, and would be rejected by the old `visitSchema`.
-Not corrupting — confusing. Apply 0024 early; ship the admin panel with 4b.
+Not corrupting — confusing. Apply 0025 early; ship the admin panel with 4b.
 
-### 0025 — the tightening *(deploy-coupled: apply immediately before the deploy)*
+### 0026 — the tightening *(deploy-coupled: apply immediately before the deploy)*
 
 Two statements:
 
@@ -844,13 +865,13 @@ Two statements:
    *Application forms*, *Admissions* — each with its `activity` / `lifecycle` /
    `requires_note` from §3.2, `on conflict (label) do nothing`.
 
-### 0026 — comment-only retractions *(optional; any time)*
+### 0027 — comment-only retractions *(optional; any time)*
 
 Following 0021's precedent of retracting a notice a later change made untrue:
 mark `visit_outcome`, `management_response`, `student_response` and
 `institute_interested` dormant, and retract 0022's "live again" note on
 `students_reached` (D5) rather than leaving the column describing a field nothing
-collects. Can be merged into 0025 if you would rather have three files.
+collects. Can be merged into 0026 if you would rather have three files.
 
 ### What needs no migration at all
 
@@ -881,7 +902,7 @@ collects. Can be merged into 0025 if you would rather have three files.
 | C14 | Pending is documented as read-only with no action for anybody | stage 3 | **High** | One action for reps, seed-and-hand-off (F3); admins stay read-only (D10) |
 | C15 | `openLoopsByMember()` feeds two screens with the old meaning of "open" | stage 3 | Medium | D7: both screens lose the count; **the function is deleted** |
 | C16 | `visit_outcome` / `institute_interested` are the admin review's summary | 0019 | Medium | Remap to the status, as stage 3 remapped it once already |
-| C17 | `expected_date` on a Done visit is discarded by `log_visit()` | 0015 | **High** | D3: one `case` expression, same signature, in 0024 |
+| C17 | `expected_date` on a Done visit is discarded by `log_visit()` | 0015 | **High** | D3: one `case` expression, same signature, in 0025 |
 | C18 | `close_visit()` never writes `follow_up_date`, so the recovery form discards it | 0018/0019 | Medium | §5.3 — the follow-up moves to `visitSchema`; the recovery form stops asking |
 | C19 | `RICH_ACTIVITIES` / `needsClosingReport()` are dead code | stage 3 | Low | Delete in Stage 1 |
 
@@ -917,13 +938,13 @@ Only Stage 4b is coupled to a migration on the same day.
 | # | Stage | Migration | Coupling | Blocked by |
 | --- | --- | --- | --- | --- |
 | **1** | Closing report + live camera | none | none | nothing — **start here** |
-| **2** | Purposes become typed | 0023 | apply any time before | nothing |
-| **3** | The Activity selector goes | 0025 part 2 (seed) | apply before | Stage 2 |
-| **4a** | Statuses come from the database | 0024 | apply any time before | nothing |
-| **4b** | Admin statuses panel + compulsory status | 0025 part 1 | ⚠ **apply immediately before deploy** | Stage 4a live |
+| **2** | Purposes become typed | 0024 | apply any time before | nothing |
+| **3** | The Activity selector goes | 0026 part 2 (seed) | apply before | Stage 2 |
+| **4a** | Statuses come from the database | 0025 | apply any time before | nothing |
+| **4b** | Admin statuses panel + compulsory status | 0026 part 1 | ⚠ **apply immediately before deploy** | Stage 4a live |
 | **5** | Pending reworked | none | none | Stage 4b |
 | **5b** | Admin "Assign this follow-up" | none | none | Stage 5 |
-| **6** | Docs, tests, size | 0026 (optional) | none | all of the above |
+| **6** | Docs, tests, size | 0027 (optional) | none | all of the above |
 
 ### Stage 1 — closing report + live camera *(no migration)*
 
@@ -935,9 +956,9 @@ remove the gallery upload; remap the admin review summary; delete
 *Ships alone.* Reverts with `git revert`. Nothing in the database moves, so there
 is no ordering hazard at all, and it is net negative on the bundle.
 
-### Stage 2 — purposes become typed *(0023; additive)*
+### Stage 2 — purposes become typed *(0024; additive)*
 
-Apply 0023 whenever convenient. Deploy: `PurposesPanel` gains the activity /
+Apply 0024 whenever convenient. Deploy: `PurposesPanel` gains the activity /
 lifecycle / free-text controls and a retire action; `activityForPurpose()` reads
 the purpose row instead of the label map; `addToDailyPlan` writes `purpose_id`.
 
@@ -952,7 +973,7 @@ hidden fields are fed from the plan's purpose, and "Other" shows its free-text
 box.
 
 **One precondition, and it is absolute:** every row in `public.purposes`
-carries an `activity` — which 0023's `not null` guarantees, with its notice as
+carries an `activity` — which 0024's `not null` guarantees, with its notice as
 the admin's review list (F6).
 
 The seed adds four purposes, none of which exist yet (P3): **Follow-up,
@@ -960,20 +981,20 @@ Olympiad registration, Application forms and Admissions** (§3.3 has the table).
 It ships *with* the selector's removal rather than before it, because until the
 selector goes three of those four metrics are reachable only through it.
 
-### Stage 4a — statuses come from the database *(0024; additive)*
+### Stage 4a — statuses come from the database *(0025; additive)*
 
-Apply 0024 whenever convenient. Deploy: the catalogue becomes the seed, the
+Apply 0025 whenever convenient. Deploy: the catalogue becomes the seed, the
 status helpers take a catalogue argument, `visitSchema` becomes a factory, the
 badge reads `tone`, the conditional fields read `asks_*`, and D4's date field
-appears on a Done session — which is what 0024's `log_visit()` fix is for.
+appears on a Done session — which is what 0025's `log_visit()` fix is for.
 
 Apart from that one new field, **nothing visible changes** — the same nine
 statuses, categories, colours and conditional fields. That is the point: a
 substitution of the source, proved by everything else looking identical.
 
-### Stage 4b — admin statuses panel + compulsory status *(0025 part 1)*
+### Stage 4b — admin statuses panel + compulsory status *(0026 part 1)*
 
-Deploy the panel and the compulsory status **with** 0025's trigger, applied
+Deploy the panel and the compulsory status **with** 0026's trigger, applied
 immediately before. The only tightly coupled pair in the plan:
 
 * trigger before deploy → every "No change" on the live app fails;
@@ -1008,8 +1029,8 @@ marked answered. Measure the bundle.
 | Stage | Revert |
 | --- | --- |
 | 1, 3, 5, 5b | `git revert`. No schema dependency |
-| 2 | `git revert`. 0023's columns are additive and harmless when unread |
-| 4a | `git revert`. 0024's columns, FKs and `log_visit` fix are all harmless when unread — **unless a status has been added**, in which case the old app cannot render it. This is why the panel is not in 4a |
+| 2 | `git revert`. 0024's columns are additive and harmless when unread |
+| 4a | `git revert`. 0025's columns, FKs and `log_visit` fix are all harmless when unread — **unless a status has been added**, in which case the old app cannot render it. This is why the panel is not in 4a |
 | 4b | `git revert` **and** drop the status-required trigger — otherwise the reverted app's "No change" is refused |
 
 ---
@@ -1045,9 +1066,9 @@ Measure at Stage 4b, the one that only adds.
 
 | # | Decision | Answer | What it costs |
 | --- | --- | --- | --- |
-| **D1** | What produces a `meeting` | No new "Meeting" purpose. Existing purposes declare their activity: **"First meeting" and "Other" → `meeting`**; session and campus-visit purposes → their pair. 0025 seeds four more: **Follow-up → `meeting`**, Olympiad → `olympiad`, Application → `application`, Admissions → `admission`. Admin-added purposes each declare one of the six | **Fully resolved.** Probe P3 (2026-09-15): six live rows, "First meeting" among them, so Meetings keeps a source with or without the seed (§3.3) |
-| **D2** | Follow-up date, or date and time | **Both**, with the time pre-filled to a sensible working hour | Nothing. No trigger change, no migration |
-| **D3** | Save the date on a Done session / campus visit | **Yes.** `log_visit()`'s one `case` expression, same signature | One function body in 0024. A loosening, so safe early |
+| **D1** | What produces a `meeting` | No new "Meeting" purpose. Existing purposes declare their activity: **"First meeting" and "Other" → `meeting`**; session and campus-visit purposes → their pair. 0026 seeds four more: **Follow-up → `meeting`**, Olympiad → `olympiad`, Application → `application`, Admissions → `admission`. Admin-added purposes each declare one of the six | **Fully resolved.** Probe P3 (2026-09-15): six live rows, "First meeting" among them, so Meetings keeps a source with or without the seed (§3.3) |
+| **D2** | Follow-up date, or date and time | **DATE ONLY.** Originally "both, pre-filled"; the client reversed it after Stage 1 was live | Migration **0023** — replaces `enforce_follow_up_when_open()`. A pure loosening, so safe to apply any time. `follow_up_time` dormant, not dropped |
+| **D3** | Save the date on a Done session / campus visit | **Yes.** `log_visit()`'s one `case` expression, same signature | One function body in 0025. A loosening, so safe early |
 | **D4** | Who owns the date field | **One field.** Purpose says Set → required, "Tentative…". Status asks and purpose says Done → optional, pre-filled with today, "Session date" | `expectedDateLabel()` gains the lifecycle as an argument |
 | **D5** | One student count or two | **One.** `students_reached` dormant, reversibly | App-only. A comment-only retraction of 0022 |
 | **D6** | Keep "Is a next session set?" | **Remove it.** The status drives visibility | Fixes a live dead end, and exposes C18 — the recovery form's discarded follow-up (§5.3) |
@@ -1065,10 +1086,10 @@ Measure at Stage 4b, the one that only adds.
 | **F1** | Removing the native `capture="environment"` fallback along with the gallery button. Rule 12 blocks the save, so a device where `getUserMedia` fails cannot log a visit **at all**. Desktop has no route either way — say so rather than let an admin discover it |
 | **F2** | If Pending's dedupe is ever built as a SQL view it **must** be `with (security_invoker = true)`, or it runs as owner and defeats both the per-rep RLS and 0020b's campus boundary in one line |
 | **F3** | Pending's launch action is a second writer in front of `daily_plans`, which `CLAUDE.md` names as the thing screen ownership exists to prevent. The resolution — seed and hand off, never track — has to be written into `CLAUDE.md`, or it reads as drift |
-| **F4** | Applying 0025's compulsory-status trigger before the deploy breaks every "No change" on the live app. It is the only statement in the plan with that property |
+| **F4** | Applying 0026's compulsory-status trigger before the deploy breaks every "No change" on the live app. It is the only statement in the plan with that property |
 | **F5** | Adding a status before Stage 4a is live leaves it unrenderable and unvalidatable by any client still holding the hard-coded catalogue |
-| **F6** | Removing the Activity selector before **every** purpose has an activity leaves a plan entry that cannot be logged at all. Also: removing it before 0025 seeds Olympiad / Application / Admissions makes those three metrics unreachable, which is why the seed and the removal are one stage |
-| **F7** | `institute_statuses_sort_order_unique` will reject an admin's second status with a raw 23505 unless it is dropped in 0024 |
+| **F6** | Removing the Activity selector before **every** purpose has an activity leaves a plan entry that cannot be logged at all. Also: removing it before 0026 seeds Olympiad / Application / Admissions makes those three metrics unreachable, which is why the seed and the removal are one stage |
+| **F7** | `institute_statuses_sort_order_unique` will reject an admin's second status with a raw 23505 unless it is dropped in 0025 |
 | **F8** | Deleting a purpose (rather than retiring it) leaves `purpose_id` null and the activity unresolvable for any plan row not yet logged |
 | **F9** | The CHECK→FK swap fails to build if probe P1 finds any status outside the nine. Guard it, or the migration half-applies |
 | **F10** | `getUnreportedVisits()` is the only route back to a visit whose report never landed once the day rolls over. Removing that block from Pending can strand a rep, still checked in, for a day |
@@ -1132,7 +1153,7 @@ they simply stop reaching the client bundle.
   `tests/unit/log-visit-form.test.ts`.
 * `CLAUDE.md`: the closing-report field-set paragraph, the two-student-counts
   paragraph, and the "photo arrives one of two ways" paragraph.
-* Optional: write 0026 now (comment-only) so `students_reached` stops describing
+* Optional: write 0027 now (comment-only) so `students_reached` stops describing
   a field nothing collects.
 
 ### Expected size

@@ -207,6 +207,10 @@ export async function logAndFileVisit(
     // enforce_follow_up_when_open/FO016) and where they are actually stored:
     // log_visit() writes them, close_visit() never has.
     p_follow_up_date: visit.follow_up_date,
+    // DORMANT since 0023 — the form has no time picker and the trigger no
+    // longer asks for one. Still passed rather than hard-coded to null: during
+    // a deploy a cached page can still post a time, and what a rep typed should
+    // be stored rather than dropped. Normally null.
     p_follow_up_time: visit.follow_up_time,
     p_daily_plan_id: visit.daily_plan_id,
   });
