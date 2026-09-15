@@ -300,16 +300,37 @@ faster. See README for both.
   0002); it runs SECURITY INVOKER, so RLS and every trigger still apply. It
   raises `FO001`-`FO007` for the cases a rep can cause, and `src/lib/visit-actions.ts`
   maps those codes — never the message text — to sentences.
-- Rule 4's status vocabulary is nine values, each carrying an OPEN or CLOSED
-  category. `INSTITUTE_STATUS_CATALOGUE` in `src/lib/validation/institute.ts` is
-  the app's single source of truth for the mapping; `public.institute_statuses`
-  plus `institute_status_category()` (migration 0010) is the database's, so a
-  query can tell open from closed without the app. **They have to be changed
-  together** — the `institute_status_category` suite in
-  `tests/integration/rules.test.ts` fails if only one of them moves, and 0010
-  itself refuses to apply if its lookup table and its two CHECK constraints
-  disagree. Nothing may decide open-vs-closed for itself; ask one of those two.
-  Note that null is neither open nor closed: "no status yet" is its own thing.
+- **Rule 4's status vocabulary lives in ONE place in the database**, and since
+  migration 0026 that is `public.institute_statuses` — not a CHECK constraint.
+  Each row carries an OPEN or CLOSED category; `institute_status_category()` and
+  `institute_status_is_open()` (0010) read it, so a query can tell open from
+  closed without the app. Null is neither: "no status yet" is its own thing.
+  **`institutes.status` and `visits.status_set_to` are FOREIGN KEYS to it**
+  (0026), replacing the two CHECKs that each listed the nine literals.
+  `institute_status_history.status` has been one since 0011. The reason is not
+  tidiness: **a CHECK cannot be extended by an admin and an FK can.** An admin
+  adding a row while the CHECKs stood would create a status that inserts fine
+  into the vocabulary and is then refused by every institute and visit with a
+  raw 23514. Drift is now impossible by construction rather than by 0010's
+  assertion, which only ever ran once.
+  All three FKs are `on update restrict on delete restrict`, which gives the
+  editing rule for free and with no code: a status **never used** renames or
+  deletes cleanly (the typo case), one **in use** is refused with 23503, and
+  retiring is `is_active = false`. Referential checks ignore RLS, so a rep's
+  insert is validated exactly as an admin's — the same reasoning 0011 gives.
+  **`visits_follow_up_required_when_awaiting` (0010) is deliberately NOT
+  converted.** It is about a RULE, not a vocabulary, and being a literal list of
+  two statuses is what it is for. It is a strict subset of FO016, which asks the
+  category and so already covers anything an admin adds — but if one of those
+  two is ever retired and replaced under a new name, the CHECK stops covering it
+  and only the trigger remains.
+  `INSTITUTE_STATUS_CATALOGUE` in `src/lib/validation/institute.ts` is still the
+  app's copy and still has to be changed together with the table — the
+  `institute_status_category` suite fails if only one moves. Stage 4b demotes it
+  to a seed and has the app read the vocabulary from the database, which is what
+  makes an admin-added status legible; **until then no status may be added**, or
+  it renders as an unstyled badge, makes `isClosedStatus()` false, and is
+  refused by `visitSchema`.
 - **Rule 5 IS the open category now**, which is the reverse of what this said
   through stage 2. An OPEN status needs a follow-up **date**; a CLOSED one does
   not (though it may still carry one — "they said no, ask again next intake" is

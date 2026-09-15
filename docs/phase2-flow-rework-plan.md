@@ -954,7 +954,7 @@ Only Stage 4b is coupled to a migration on the same day.
 | **1** | Closing report + live camera | none | none | nothing — **start here** |
 | **2** | Purposes become typed | 0024 | apply any time before | ✅ **built** |
 | **3** | The Activity selector goes | **0025** (lifecycle + seed) | ⚠ apply immediately before | ✅ **built** |
-| **4a** | Statuses come from the database | **0026** | apply any time before | nothing |
+| **4a** | Statuses become managed data (FK conversion) | **0026** | apply any time before | ✅ **built** (DB only — the app-side read moves to 4b) |
 | **4b** | Admin statuses panel + compulsory status | **0027** | ⚠ **apply immediately before deploy** | Stage 4a live |
 | **5** | Pending reworked | none | none | Stage 4b |
 | **5b** | Admin "Assign this follow-up" | none | none | Stage 5 |
