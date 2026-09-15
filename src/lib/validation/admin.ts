@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ACTIVITY_KEYS } from "@/lib/validation/visit";
 
 /**
  * What an admin is allowed to type, checked identically in the browser and on
@@ -24,8 +25,25 @@ const name = (max: number, label: string) =>
     // A name made only of punctuation passes a length check but is not a name.
     .refine((v) => nameLooksValid(v, max), `${label} needs some letters.`);
 
+/**
+ * A purpose, and the activity it counts as.
+ *
+ * THE ACTIVITY IS REQUIRED, and it is the point of the whole of stage 2. A
+ * purpose is what a rep plans a visit under; from stage 3 it is also what
+ * decides the visit's `activity`, and seven of the eight weekly metrics are
+ * counted by that. So an admin adding "Follow up on the proposal" is deciding
+ * which number on the Targets screen that work will land in, and the form makes
+ * them say which rather than defaulting to one.
+ *
+ * `ACTIVITY_KEYS` is the same six-value list `visitSchema` validates against and
+ * `purposes_activity_valid` (migration 0024) mirrors as a CHECK. Three copies,
+ * two of which the migration's own assertion block compares — see 0024 §4.
+ */
 export const purposeSchema = z.object({
   label: name(120, "The purpose"),
+  activity: z.enum(ACTIVITY_KEYS, {
+    message: "Choose what this purpose counts as.",
+  }),
 });
 
 export const stateSchema = z.object({

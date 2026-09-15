@@ -107,6 +107,12 @@ describe("the other forms a Radix revert could corrupt", () => {
   const LEFT = [
     "src/components/dashboard/daily-plan.tsx",
     "src/components/dashboard/assign-visit.tsx",
+    // Gained a Radix Select in stage 2 (the purpose's activity) and is left
+    // here for the same reason as the two above: the picker mounts EMPTY, so a
+    // revert is a revert to nothing and purposeSchema refuses it with a
+    // sentence. It fails loudly rather than filing something valid-but-wrong,
+    // which is the only shape that made this bug dangerous.
+    "src/components/settings/purposes-panel.tsx",
   ];
 
   it.each(LEFT)("%s is left on the action prop, and says why", (file) => {

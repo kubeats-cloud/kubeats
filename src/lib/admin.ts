@@ -45,13 +45,20 @@ export async function requireAdmin(): Promise<
 export interface PurposeRow {
   id: string;
   label: string;
+  /**
+   * Which of the six fixed activities a visit planned under this purpose counts
+   * as (migration 0024). NOT NULL in the database; typed nullable here only so
+   * a page rendered against a database where 0024 has not been applied degrades
+   * to "not set" rather than throwing.
+   */
+  activity: string | null;
 }
 
 export async function listPurposeRows(): Promise<PurposeRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("purposes")
-    .select("id, label")
+    .select("id, label, activity")
     .order("label");
 
   if (error) {

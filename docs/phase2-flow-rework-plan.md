@@ -787,7 +787,21 @@ body only.
 (§4.6). It shipped as a follow-up to Stage 1 rather than as part of any stage
 below, which is why the numbering here starts at 0024.
 
-### 0024 — purposes become typed *(additive; safe at any time)*
+### 0024 — purposes become typed *(additive; safe at any time)* — **BUILT**
+
+Shipped as `supabase/migrations/0024_typed_purposes.sql`. It is **narrower than
+the design below**: it adds `activity` only, and deliberately leaves `lifecycle`,
+`requires_note`, `is_active`, `sort_order`, `daily_plans.purpose_id` and
+`daily_plans.purpose_note` to 0026, which is the file that seeds the four new
+purposes anyway. The chain is forward-only, so none of them needs 0024 reopened.
+
+⚠ **`lifecycle` is the one that blocks Stage 3.** Without it "Fix a session" and
+"Complete a session" both map to `session` and are indistinguishable, so Set/Done
+cannot be derived from the purpose. 0026 must add it, back-fill Set/Done for the
+four existing session and campus-visit purposes, and carry it on the four it
+seeds.
+
+The design as originally planned, for 0026 to finish:
 
 ```sql
 alter table public.purposes
@@ -938,8 +952,8 @@ Only Stage 4b is coupled to a migration on the same day.
 | # | Stage | Migration | Coupling | Blocked by |
 | --- | --- | --- | --- | --- |
 | **1** | Closing report + live camera | none | none | nothing — **start here** |
-| **2** | Purposes become typed | 0024 | apply any time before | nothing |
-| **3** | The Activity selector goes | 0026 part 2 (seed) | apply before | Stage 2 |
+| **2** | Purposes become typed | 0024 | apply any time before | ✅ **built** |
+| **3** | The Activity selector goes | 0026 (seed + `lifecycle`) | apply before | Stage 2, and 0026 adding `lifecycle` |
 | **4a** | Statuses come from the database | 0025 | apply any time before | nothing |
 | **4b** | Admin statuses panel + compulsory status | 0026 part 1 | ⚠ **apply immediately before deploy** | Stage 4a live |
 | **5** | Pending reworked | none | none | Stage 4b |

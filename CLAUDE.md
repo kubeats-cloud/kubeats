@@ -61,6 +61,32 @@ This is load-bearing, not a layout preference: the meeting gate (rule 2) checks
 a visit against that member's `daily_plans` rows for that date, so a meeting
 cannot be logged at all unless the Dashboard flow put it on the plan first.
 
+**A purpose is admin-managed; an activity is not, and the asymmetry is
+arithmetic.** Two requests that sound identical get opposite answers, and this
+is the one paragraph to read before touching either:
+
+- **`activity` is six values and stays six.** Seven of the eight weekly metrics
+  are counted by `(activity, lifecycle_status)` and `public.targets` has one
+  integer column per metric, so a seventh activity would be a metric with no
+  column, no row on the Targets screen and no place in `tallyVisitMetrics()` —
+  invisible in every total, which is worse than not existing.
+- **`public.purposes` is the admin-managed layer on top**, and since migration
+  0024 each row DECLARES which of those six it counts as (`purposes.activity`,
+  NOT NULL). An admin may add as many purposes as they like; the arithmetic
+  underneath never moves. That column is what lets Log Visit's Activity selector
+  be deleted and the activity derived from the plan's purpose instead.
+
+It replaces `PURPOSE_ACTIVITY`, a hard-coded map from four purpose LABELS whose
+own comment named the weakness: renaming a purpose in Settings silently dropped
+it out. The mapping travels on the row now. `purposes_activity_valid` and
+`visits_activity_valid` are two hand-written copies of one vocabulary, and
+0024's assertion block compares them and refuses to leave them disagreeing —
+the same guard, for the same reason, as 0010's for statuses.
+
+**Adding a purpose is choosing a metric**, so `PurposesPanel`'s activity picker
+mounts EMPTY and is required. A picker pre-set to "Meeting" would let an admin
+add a session purpose that silently counts as a meeting for ever.
+
 **A rep commits to a week, and to nothing else.** Stage 2 of the redesign
 (`docs/flow-redesign-plan.md`, changes 3 and 4) removed commitment altogether;
 the client's authoritative spec restored half of it. The two halves went
@@ -145,6 +171,27 @@ else redirects to `/login` for anyone without a session.
   interaction and why a private app takes belt and braces.
 - **Neither is a security control.** The boundary is `proxy.ts`, the `(app)`
   layout's own server-side check, and RLS.
+- **`/api/*` is a fourth surface and is NOT behind the page gate.** `proxy.ts`
+  returns early for it, so every route under it authenticates itself or it is
+  public. `/api/health` is the worked example and it answers twice: a static
+  `{"ok":true}` to anyone, and — only to a caller presenting
+  `HEALTH_CHECK_TOKEN` as `x-health-token` — a real database check, plus the
+  **commit the bundle was built from**. The split is the pen-test F2 finding: an
+  anonymous caller must not be able to spend database quota or learn whether
+  Postgres is up, and need not learn which commit to go and read either.
+  The SHA is what makes "has the new build gone out?" a one-line check, and it
+  is needed because every screen the current rework changes sits behind auth —
+  two consecutive builds are otherwise indistinguishable from outside, and
+  comparing content-hashed asset names does not work because those hashes are
+  not reproducible across build environments. It arrives as `APP_COMMIT_SHA`,
+  read in `env.ts` like every other variable; the platform maps its own spelling
+  onto that generic name **in the build command**, never in `wrangler.jsonc`,
+  which must never grow a `vars` block because Workers Builds prints those in
+  plaintext into the build log. **It has to be written into an `.env*` file, not
+  just exported** — the OpenNext adapter bakes in what Next loaded from env
+  files, so a shell-only value is present during the build and absent from the
+  bundle, and the symptom is a null field with nothing to explain it. Verified,
+  not assumed; `.env.example` carries the working command.
 - **There are TWO 404s and both are needed.** `src/app/not-found.tsx` answers an
   unmatched URL, renders in the root layout, and assumes no session;
   `src/app/(app)/not-found.tsx` answers `notFound()` thrown inside the app group

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { healthCheckToken } from "@/lib/env";
+import { appCommitSha, healthCheckToken } from "@/lib/env";
 import { logError } from "@/lib/errors";
 
 /**
@@ -21,6 +21,17 @@ import { logError } from "@/lib/errors";
  * HEALTH_CHECK_TOKEN and send it as x-health-token; without that variable the
  * deep check is not merely locked, it is absent, so a default deployment has
  * no second surface at all.
+ *
+ * The deep answer also names the COMMIT the bundle was built from, which is
+ * what makes "has the new build gone out?" a one-line check:
+ *
+ *     curl -s -H "x-health-token: $TOKEN" https://.../api/health
+ *     {"status":"ok","checks":{"database":"ok"},...,"commit":"41491ff..."}
+ *
+ * Worth having because every screen this app has changed lately sits behind
+ * auth, so two consecutive builds are indistinguishable from outside. The
+ * alternative — comparing content-hashed asset names against a local build —
+ * does not work: those hashes are not reproducible across build environments.
  *
  * THE PATTERN NOTE, WHICH MATTERS MORE THAN THIS FILE
  *
@@ -92,6 +103,14 @@ export async function GET(request: Request) {
         checks: { database: ok ? "ok" : "unreachable" },
         latencyMs: Date.now() - startedAt,
         time: new Date().toISOString(),
+        // WHICH BUILD IS ANSWERING. Null unless APP_COMMIT_SHA was set when the
+        // bundle was built — see env.ts for how a platform maps its own
+        // variable onto that name without any platform spelling reaching src/.
+        //
+        // Here and nowhere else. The public answer below stays a static
+        // {"ok":true}: a stranger polling this endpoint learns that a Worker is
+        // serving, and nothing whatever about what it is serving.
+        commit: appCommitSha(),
       },
       { status: ok ? 200 : 503, headers: NO_STORE },
     );
