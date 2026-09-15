@@ -7,17 +7,20 @@ import { cn } from "@/lib/utils";
  *
  * The tiles carry the counts so the plan card below can get on with being a
  * list — the same figures in both places would only invite them to disagree.
- * Open loops is deliberately not week-scoped: a session left open a fortnight
- * ago is the one that needs chasing today.
+ *
+ * THERE WERE THREE. "Open loops" counted visits still at "Set" and not closed,
+ * and it is gone (decision D7). Pending means something wider now — every
+ * institute whose current status is OPEN — so the tile would have sat here
+ * counting a different thing under the same word, one tap away from the screen
+ * that disagreed with it. Two "open" numbers that do not match is how a team
+ * stops trusting both.
  */
 export function TodaySnapshot({
   planned,
   held,
-  openLoops,
 }: {
   planned: number;
   held: number;
-  openLoops: number;
 }) {
   const heldTone =
     planned === 0
@@ -29,15 +32,9 @@ export function TodaySnapshot({
           : "text-danger";
 
   return (
-    <div className="mb-5 grid grid-cols-3 gap-3 md:mb-6 md:max-w-2xl">
+    <div className="mb-5 grid grid-cols-2 gap-3 md:mb-6 md:max-w-md">
       <Tile label="Planned" value={planned} />
       <Tile label="Held" value={held} valueClassName={heldTone} />
-      <Tile
-        label="Open loops"
-        value={openLoops}
-        valueClassName={openLoops > 0 ? "text-warning" : "text-muted-foreground"}
-        href="/pending"
-      />
     </div>
   );
 }

@@ -232,62 +232,164 @@ export async function getTodayPlan(
   };
 }
 
-export interface PendingVisit {
-  id: string;
-  activity: string;
-  institute_id: string;
+/** One institute still in play, and the visit that left it that way. */
+export interface FollowUp {
+  instituteId: string;
   instituteName: string;
-  date: string;
-  expected_date: string | null;
-  member: string;
+  city: string | null;
+  /** The institute's CURRENT status, which is what makes it open. */
+  status: string;
+  /** From the visit that set it. Null when nothing visible explains it. */
+  visitId: string | null;
+  member: string | null;
   memberName: string | null;
+  setOn: string | null;
+  followUpDate: string | null;
+  /** A session or campus visit's own date, when the status carries one. */
+  expectedDate: string | null;
   notes: string | null;
+  /** Whether the viewer is the one who left it open. */
+  mine: boolean;
 }
 
 /**
- * Everything still sitting at "Set" (rule 3), oldest first so the longest-open
- * loop is at the top.
+ * What is still owed: every institute whose CURRENT status is OPEN.
  *
- * Scoped by RLS: a rep sees their own, an admin sees the whole team's.
+ * THIS IS NOT WHAT PENDING USED TO ASK. It listed visits sitting at
+ * `lifecycle_status = 'Set'` — sessions and campus visits promised and not yet
+ * held. That was one particular kind of owing, and it missed every other:
+ * a first meeting that needs chasing, an approval nobody has come back on, an
+ * invitation with no RSVP. Those are exactly the statuses the vocabulary calls
+ * OPEN, so that is what this asks now.
+ *
+ * DRIVEN OFF `institutes.status`, NOT OFF EACH VISIT, and the difference
+ * matters three times over:
+ *
+ *   * it is the same value as the badge on /institutes, so the two screens
+ *     cannot disagree about whether a school is still in play;
+ *   * it collapses correctly — an institute visited five times is ONE row, not
+ *     five;
+ *   * it handles supersession across reps. Under campus scoping two reps share
+ *     a campus, so if A logs "Session scheduled" and B later logs "Session
+ *     done", the loop is closed and it must leave Pending. Reading each visit
+ *     would leave A's row sitting there for ever.
+ *
+ * OPEN COMES FROM THE MANAGED VOCABULARY, never from a list here. A status an
+ * admin adds and marks open appears in Pending on the next request, with no
+ * code change — which is the whole point of stages 4a and 4b.
+ *
+ * SCOPING IS RLS'S, TWICE OVER AND FOR TWO DIFFERENT REASONS:
+ *
+ *   institutes   campus-scoped (0020b). A rep sees the open institutes in THEIR
+ *                campus; an admin sees every campus. This is what decides which
+ *                rows exist at all.
+ *   visits       `member = auth.uid() or is_admin()`. This decides only whether
+ *                the row can be ATTRIBUTED — a rep sees who left it open when
+ *                it was them, and an admin sees whoever it was.
+ *
+ * So a rep sees an open institute in their campus even when a colleague set the
+ * status, and the row says so rather than being hidden. That is deliberate:
+ * this list is what is owed in the campus, and silently dropping a school
+ * because somebody else touched it last would be a gap nobody could see.
  */
-export async function getPendingVisits(): Promise<
-  { ok: true; visits: PendingVisit[] } | { ok: false }
-> {
+export async function getOpenFollowUps(
+  openStatuses: readonly string[],
+  viewerId: string,
+): Promise<{ ok: true; items: FollowUp[] } | { ok: false }> {
+  // A vocabulary with nothing open is a real answer, not an error — and `.in()`
+  // with an empty list is a query worth not sending.
+  if (openStatuses.length === 0) return { ok: true, items: [] };
+
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("visits")
-    .select("id, activity, institute_id, date, expected_date, member, notes")
-    .eq("lifecycle_status", "Set")
-    // Q2 — a Set is closed by the rep checking in again and logging the visit
-    // that completes it. That stamps closed_at here and leaves lifecycle_status
-    // alone, so Rule 7 keeps crediting the Set to the week it was set in and
-    // the Done to the week it happened. Without this filter a completed loop
-    // would sit on Pending for ever.
-    .is("closed_at", null)
-    // Soonest due first, which is what the rep has to act on. `date` is only a
-    // tiebreak now that it records when the visit was logged, not when it is due.
-    .order("expected_date", { ascending: true, nullsFirst: false })
-    .order("date", { ascending: true });
+  const { data: institutes, error } = await supabase
+    .from("institutes")
+    .select("id, name, city, status")
+    .in("status", openStatuses)
+    .order("name");
 
   if (error) {
-    logError("visits:pending", error);
+    logError("visits:open-follow-ups", error);
     return { ok: false };
   }
 
-  const rows = data ?? [];
-  const [names, members] = await Promise.all([
-    instituteNames(rows.map((r) => r.institute_id)),
-    memberNames(rows.map((r) => r.member)),
-  ]);
+  const rows = institutes ?? [];
+  if (rows.length === 0) return { ok: true, items: [] };
 
-  return {
-    ok: true,
-    visits: rows.map((r) => ({
-      ...r,
-      instituteName: instituteNameFrom(names, r.institute_id, "visits"),
-      memberName: members.get(r.member) ?? null,
-    })),
-  };
+  // The visits that could explain any of them, newest first. `date` then
+  // `created_at`, so two visits on one day still resolve in the order they
+  // happened rather than arbitrarily.
+  const { data: visits, error: visitError } = await supabase
+    .from("visits")
+    .select(
+      "id, institute_id, member, date, status_set_to, follow_up_date, expected_date, notes",
+    )
+    .in("institute_id", rows.map((r) => r.id))
+    .in("status_set_to", openStatuses)
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (visitError) {
+    logError("visits:open-follow-ups-attribution", visitError);
+    return { ok: false };
+  }
+
+  /**
+   * The visit that left each institute where it is.
+   *
+   * Matched on the institute's CURRENT status, not merely on being the latest
+   * visit: a rep who logged "Session scheduled" and then, later, "First meeting
+   * done" leaves the institute at the second, and the follow-up date that
+   * matters is the one recorded with it. The list is already newest-first, so
+   * the first match wins.
+   */
+  const attribution = new Map<string, (typeof visits)[number]>();
+  for (const visit of visits ?? []) {
+    const institute = rows.find((r) => r.id === visit.institute_id);
+    if (!institute || visit.status_set_to !== institute.status) continue;
+    if (!attribution.has(visit.institute_id)) {
+      attribution.set(visit.institute_id, visit);
+    }
+  }
+
+  const memberIds = [...attribution.values()].map((v) => v.member);
+  const members = await memberNames(memberIds);
+
+  const items: FollowUp[] = rows.map((institute) => {
+    const visit = attribution.get(institute.id) ?? null;
+    return {
+      instituteId: institute.id,
+      instituteName: institute.name,
+      city: institute.city,
+      status: institute.status as string,
+      visitId: visit?.id ?? null,
+      member: visit?.member ?? null,
+      memberName: visit ? (members.get(visit.member) ?? null) : null,
+      setOn: visit?.date ?? null,
+      followUpDate: visit?.follow_up_date ?? null,
+      expectedDate: visit?.expected_date ?? null,
+      notes: visit?.notes ?? null,
+      mine: visit?.member === viewerId,
+    };
+  });
+
+  /**
+   * Soonest first, and anything with no date at the end.
+   *
+   * A row with no follow-up date is either a visit logged before Rule 5 started
+   * demanding one, or an institute whose status was set without a visit this
+   * viewer can see. Neither is urgent in the way an overdue chase is, and
+   * sorting them to the top would bury the dates that do mean something.
+   */
+  items.sort((a, b) => {
+    if (a.followUpDate && b.followUpDate) {
+      return a.followUpDate.localeCompare(b.followUpDate);
+    }
+    if (a.followUpDate) return -1;
+    if (b.followUpDate) return 1;
+    return a.instituteName.localeCompare(b.instituteName);
+  });
+
+  return { ok: true, items };
 }
 
 /* Lookups kept separate rather than embedded, so nothing depends on PostgREST
@@ -328,36 +430,23 @@ async function memberNames(ids: string[]): Promise<Map<string, string | null>> {
   return new Map((data ?? []).map((p) => [p.id, p.name]));
 }
 
-/**
- * Open loops per member — everything still at "Set", all-time rather than
- * week-scoped, because an unclosed session from three weeks ago is exactly the
- * one that needs chasing.
+/*
+ * openLoopsByMember() stood here — a count of visits still at "Set" and not
+ * closed, per member. It fed two tiles: "Open loops" on the rep's Dashboard,
+ * and a column of the same name on the admin's Team screen.
  *
- * RLS decides the scope: a rep's call returns only their own, an admin's
- * returns the whole team's, which is what the team snapshot needs.
+ * Both are deleted, and the function with them (decision D7). Pending now means
+ * "institutes whose current status is OPEN", which is a different and wider
+ * question — so the tiles would have sat beside it counting something else
+ * under the same word. Two near-identical "open" numbers that disagree is how a
+ * team stops trusting either.
+ *
+ * The Set→Done machinery is NOT gone and must not be confused with this: it is
+ * Rule 7's arithmetic, not a screen. `openLoopsAt()` below, `closes_visit_id`,
+ * `closed_at` and `visits_open_set_idx` are all untouched, and the activity
+ * report still distinguishes a lifecycle activity that stays open until it is
+ * closed as Done.
  */
-export async function openLoopsByMember(): Promise<Map<string, number>> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("visits")
-    .select("member")
-    .eq("lifecycle_status", "Set")
-    // The same filter Pending uses, and it has to be here too: miss it and the
-    // Dashboard's "open loops" tile never comes down even though the loop is
-    // closed and gone from the list.
-    .is("closed_at", null);
-
-  if (error) {
-    logError("visits:open-loops", error);
-    return new Map();
-  }
-
-  const counts = new Map<string, number>();
-  for (const row of data ?? []) {
-    counts.set(row.member, (counts.get(row.member) ?? 0) + 1);
-  }
-  return counts;
-}
 
 /* ------------------------------------------------------------------ */
 /* Q2 — the earlier "Set" a visit can close                            */

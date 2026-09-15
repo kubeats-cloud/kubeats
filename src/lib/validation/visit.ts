@@ -508,6 +508,40 @@ export function dailyPlanSummary(fieldErrors: Record<string, string>): string {
   return "Pick an institute and a purpose before adding this to today's plan.";
 }
 
+/**
+ * Starting a follow-up from Pending.
+ *
+ * The same three answers a plan entry needs, with the institute already decided
+ * by the row that was tapped. Deliberately a separate schema from
+ * dailyPlanSchema rather than a reuse: the messages differ, because a rep here
+ * has not chosen an institute and telling them to pick one would be nonsense.
+ */
+export const followUpSchema = z
+  .object({
+    institute_id: z.uuid("That institute could not be identified."),
+    purpose: z
+      .string()
+      .trim()
+      .min(1, "Choose what this follow-up is for.")
+      .max(120, "That purpose is too long."),
+    purpose_note: z
+      .string()
+      .trim()
+      .max(300, "That is longer than we can store.")
+      .transform((v) => (v === "" ? null : v))
+      .nullable(),
+    requires_note: z.boolean(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.requires_note && !value.purpose_note) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["purpose_note"],
+        message: "Say what this visit is for.",
+      });
+    }
+  });
+
 /** Ids arriving from the browser are still input, and still get checked. */
 export const planIdSchema = z.uuid("That entry could not be identified.");
 

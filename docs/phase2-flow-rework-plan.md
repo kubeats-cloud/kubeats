@@ -956,7 +956,7 @@ Only Stage 4b is coupled to a migration on the same day.
 | **3** | The Activity selector goes | **0025** (lifecycle + seed) | ⚠ apply immediately before | ✅ **built** |
 | **4a** | Statuses become managed data: FK conversion + tone/flags + the app-side read | **0026** | apply any time before | ✅ **built** — rep-invisible |
 | **4b** | Admin statuses panel + compulsory status | **0027** | ⚠ **apply immediately before deploy** | ✅ **built** |
-| **5** | Pending reworked | none | none | Stage 4b |
+| **5** | Pending reworked | none | none | ✅ **built** |
 | **5b** | Admin "Assign this follow-up" | none | none | Stage 5 |
 | **6** | Docs, tests, size | 0028 (optional) | none | all of the above |
 

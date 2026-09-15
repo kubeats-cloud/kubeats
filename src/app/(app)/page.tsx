@@ -14,7 +14,6 @@ import {
   getTodayPlan,
   listInstitutesForPicker,
   listPurposes,
-  openLoopsByMember,
 } from "@/lib/visits";
 import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf } from "@/lib/weeks";
@@ -31,11 +30,10 @@ export default async function DashboardPage() {
 
   // An admin loads the supervision view; a rep loads their own day. Neither
   // pays for the other's queries.
-  const [plan, institutes, purposes, openLoops, week, overview, catalogue] = await Promise.all([
+  const [plan, institutes, purposes, week, overview, catalogue] = await Promise.all([
     admin ? Promise.resolve({ ok: true as const, entries: [] }) : getTodayPlan(user.id),
     admin ? Promise.resolve([]) : listInstitutesForPicker(),
     admin ? Promise.resolve([]) : listPurposes(),
-    admin ? Promise.resolve(new Map<string, number>()) : openLoopsByMember(),
     admin ? Promise.resolve(null) : getWeekSummary(user.id, weekStart),
     admin ? getOverview() : Promise.resolve(null),
     // The status vocabulary. Cheap, and needed by the plan picker to say when an
@@ -65,7 +63,6 @@ export default async function DashboardPage() {
           <TodaySnapshot
             planned={entries.length}
             held={held}
-            openLoops={openLoops.get(user.id) ?? 0}
           />
 
           {plan.ok ? (

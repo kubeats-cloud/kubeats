@@ -493,13 +493,44 @@ faster. See README for both.
   the open-loops tile therefore both read `lifecycle_status = 'Set' AND
   closed_at IS NULL` — `getPendingVisits()` **and** `openLoopsByMember()`; miss
   the second and the tile never comes down.
-- **Pending is a read-only notice board.** Nothing is closed from it, by anyone.
-  Filing happens inside the visit: submitting the short feedback form calls
-  `close_visit()`, which writes the report, closes any earlier Set and stamps
-  the check-out in one transaction. There is no check-out button and no rep-facing
-  "abandon" — a visit nobody can finish is swept overnight by
-  `sweep_open_checkins()` into the same "closed, time not recorded" state the
-  old escape valve used.
+- **Pending is what is still OWED**, which is a wider question than it used to
+  ask. It listed visits at `lifecycle_status = 'Set'` — sessions and campus
+  visits promised and not held — and missed every other kind of owing: a first
+  meeting nobody chased, an approval nobody came back on, an invitation with no
+  answer. Phase 2 stage 5 asks the vocabulary instead: **one row per institute
+  whose CURRENT status is OPEN.** It holds no list of its own, so a status an
+  admin adds and marks open appears there on the next request.
+  Driven off `institutes.status` rather than off each visit, for three reasons:
+  it is the same value as the badge on `/institutes` so the two cannot disagree;
+  it collapses to ONE row for an institute visited five times; and it handles
+  supersession across reps, since two reps share a campus and B logging "Session
+  done" must take A's row off the screen.
+  Scoping is RLS's, twice and differently: `institutes` is campus-scoped, which
+  decides which rows exist; `visits` is `member = auth.uid() or is_admin()`,
+  which decides only whether a row can be ATTRIBUTED. A rep therefore sees an
+  open institute in their campus even when a colleague left it open, and the row
+  says whose it is rather than hiding it.
+- **Nothing is CLOSED from Pending, and a rep can now START from it.** Filing
+  still happens inside the visit — the feedback form calls `close_visit()`,
+  which writes the report, closes any earlier Set and stamps the check-out in
+  one transaction — and there is still no check-out button and no rep-facing
+  "abandon"; a visit nobody can finish is swept overnight by
+  `sweep_open_checkins()`. What stage 5 adds is a way IN: `startFollowUp()` puts
+  the institute on today's plan and **hands straight back to the Dashboard**.
+  That is what keeps it inside the screen-ownership rule above — it seeds a row
+  and never tracks one, so there is still exactly one screen where a visit is
+  followed, and from the redirect onwards it is the ordinary check-in → log →
+  report → auto-check-out chain with the same photo, gate and guarantee.
+  **An admin's Pending is read-only** (D10): no campus, no field visits, and a
+  launch would put the visit on the admin's own day. `startFollowUp()` refuses
+  them itself rather than trusting the view.
+- **`getUnreportedVisits()` on Pending must not be deleted**, however redundant
+  it looks. Logging and filing are one submit but TWO RPCs, so a visit can exist
+  unreported; overnight the sweep sets `checkout_missing`, `visitStatusOf()`
+  then calls the plan entry "Completed", the Dashboard stops offering "Continue"
+  and only ever showed today anyway. That block is the **only** thing in the app
+  that produces a `/log?plan=` link for such a visit. Remove it and the report is
+  owed for ever with nothing on screen to say so.
 - **The closing report asks four things, plus two the status asks for**
   (Phase 2 stage 1, `docs/phase2-flow-rework-plan.md` §14): a free-text "How did
   it go?", person met as **name (required) + phone (optional)**, and — only when
