@@ -82,6 +82,34 @@ export function ReportView({ report }: { report: VisitReport }) {
   const discussion = discussionOf(report);
   const metPerson = metPersonOf(report);
   const peopleMet = report.people.length + (metPerson ? 1 : 0);
+
+  /**
+   * The school's own contacts, for reports filed since change #17.
+   *
+   * The per-visit "Who did you meet?" pair is withdrawn, so a new report
+   * records nobody of its own and this card would otherwise read "Nobody was
+   * recorded" on every report for ever — which is true of the VISIT and useless
+   * to the admin reading it, who wants to know who to ring.
+   *
+   * Shown only when the visit itself names nobody, and under its own heading:
+   * the institute's standing contacts are a different claim from "this rep met
+   * this person that afternoon", and presenting one as the other would invent a
+   * fact nobody recorded. Older reports that DO name someone are unchanged.
+   */
+  const instituteContacts = [
+    {
+      name: report.institute?.decision_maker_name ?? null,
+      detail: report.institute?.decision_maker_designation ?? "Decision maker",
+      phone: report.institute?.decision_maker_mobile ?? null,
+    },
+    {
+      name: report.institute?.principal_name ?? null,
+      detail: "Principal",
+      phone: report.institute?.principal_mobile ?? null,
+    },
+  ].filter((c): c is { name: string; detail: string; phone: string | null } =>
+    Boolean(c.name),
+  );
   const presentLabel = richEra
     ? hasCampusVisit(done) && !hasSession(done)
       ? "Students who visited"
@@ -218,7 +246,31 @@ export function ReportView({ report }: { report: VisitReport }) {
         </CardHeader>
         <CardContent>
           {peopleMet === 0 ? (
-            <p className="text-muted-foreground text-sm">Nobody was recorded.</p>
+            instituteContacts.length > 0 ? (
+              <>
+                <p className="text-muted-foreground mb-2 text-xs">
+                  This visit recorded nobody. The institute&rsquo;s contacts:
+                </p>
+                <ul className="space-y-2">
+                  {instituteContacts.map((contact) => (
+                    <li
+                      key={contact.detail}
+                      className="border-border flex items-start justify-between gap-3 rounded-md border border-dashed px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{contact.name}</p>
+                        <p className="text-muted-foreground truncate text-xs">
+                          {contact.detail}
+                          {contact.phone ? ` · ${contact.phone}` : ""}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="text-muted-foreground text-sm">Nobody was recorded.</p>
+            )
           ) : (
             <ul className="space-y-2">
               {metPerson && (

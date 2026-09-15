@@ -259,6 +259,23 @@ export interface FollowUp {
   notes: string | null;
   /** Whether the viewer is the one who left it open. */
   mine: boolean;
+  /**
+   * WHO THE INSTITUTE BELONGS TO — `institutes.registered_by`, not the member
+   * above.
+   *
+   * The two are usually the same person and are NOT the same fact. `member` is
+   * whoever logged the visit that left this status; `owner` is whoever can act
+   * on it now. They part company exactly when an institute is reassigned: the
+   * old owner's visit still explains the status, and the new owner is the only
+   * rep who can visit again.
+   *
+   * Stage 5b's admin assignment goes to the OWNER, because that is the only rep
+   * FO023 and FO026 will accept a plan row for. Null means the institute is
+   * unassigned, and nothing can be assigned at it until an admin gives it to
+   * somebody.
+   */
+  owner: string | null;
+  ownerName: string | null;
 }
 
 /**
@@ -312,7 +329,7 @@ export async function getOpenFollowUps(
   const supabase = await createClient();
   const { data: institutes, error } = await supabase
     .from("institutes")
-    .select("id, name, city, status")
+    .select("id, name, city, status, registered_by")
     .in("status", openStatuses)
     .order("name");
 
@@ -360,7 +377,12 @@ export async function getOpenFollowUps(
     }
   }
 
-  const memberIds = [...attribution.values()].map((v) => v.member);
+  // Both sets of names in one lookup: whoever logged the visit, and whoever
+  // owns the institute now. Usually the same person, occasionally not.
+  const memberIds = [
+    ...[...attribution.values()].map((v) => v.member),
+    ...rows.map((r) => r.registered_by).filter((id): id is string => Boolean(id)),
+  ];
   const members = await memberNames(memberIds);
 
   const items: FollowUp[] = rows.map((institute) => {
@@ -378,6 +400,10 @@ export async function getOpenFollowUps(
       expectedDate: visit?.expected_date ?? null,
       notes: visit?.notes ?? null,
       mine: visit?.member === viewerId,
+      owner: institute.registered_by ?? null,
+      ownerName: institute.registered_by
+        ? (members.get(institute.registered_by) ?? null)
+        : null,
     };
   });
 

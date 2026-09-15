@@ -55,6 +55,21 @@ export interface VisitReport {
     city: string | null;
     area: string | null;
     state: string | null;
+    /**
+     * WHO TO ASK FOR AT THIS SCHOOL, carried since change #17.
+     *
+     * The per-visit "Who did you meet?" pair is withdrawn, so a report filed
+     * from now on records no person of its own. These four are the institute's
+     * standing contacts, captured once at registration, and they are what the
+     * report's People card shows instead — clearly labelled as the school's
+     * contacts rather than as somebody met on the day, because that is a
+     * different claim and conflating the two would invent a fact.
+     */
+    principal_name: string | null;
+    principal_mobile: string | null;
+    decision_maker_name: string | null;
+    decision_maker_designation: string | null;
+    decision_maker_mobile: string | null;
   } | null;
 
   people: ReportPerson[];
@@ -88,14 +103,17 @@ export interface VisitReport {
   employee_remarks: string | null;
 
   /**
-   * The one person the SHORT form records: a name (mandatory since 0022) and a
-   * number if the rep got one.
+   * The one person the SHORT form recorded, between 0022 and change #17.
+   *
+   * DORMANT NOW, AND STILL READ. The form no longer asks and `close_visit()`
+   * is passed null, so every report filed from now on has both null — but the
+   * months of reports that DO carry a name still render one, which is the whole
+   * reason the columns were left in place rather than dropped.
    *
    * Deliberately not `visit_people`. That table belongs to the retired long
    * report and nothing has written a row to it since; reading only it is why
-   * every report filed by the current form said "Nobody was recorded" while
-   * the name sat in this column. Both are rendered now, so a report filed
-   * under either version still shows who was met.
+   * every report filed by the short form said "Nobody was recorded" while the
+   * name sat in this column.
    */
   met_name: string | null;
   met_phone: string | null;
@@ -140,7 +158,11 @@ export async function getVisitReport(visitId: string): Promise<VisitReport | nul
   const [instituteResult, memberResult, peopleResult, photos] = await Promise.all([
     supabase
       .from("institutes")
-      .select("id, name, type, boards, city, area, state")
+      // ONE LITERAL, not a concatenation: supabase-js infers the row type from
+      // the select string itself, and a built-up string infers as `never`.
+      .select(
+        "id, name, type, boards, city, area, state, principal_name, principal_mobile, decision_maker_name, decision_maker_designation, decision_maker_mobile",
+      )
       .eq("id", row.institute_id)
       .maybeSingle(),
     supabase.from("profiles").select("name").eq("id", row.member).maybeSingle(),

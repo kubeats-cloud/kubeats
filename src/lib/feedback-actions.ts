@@ -95,19 +95,21 @@ export async function submitFeedback(
     p_visit_id: input.visit_id,
     p_daily_plan_id: input.daily_plan_id,
     p_notes: input.notes,
-    // DORMANT, not forgotten. Phase 2 stage 1 withdrew these five questions
-    // from the form; their columns and their vocabulary CHECKs are untouched,
-    // so every report filed under an older shape still renders and bringing one
-    // back is a control rather than a migration. Passed explicitly as null so a
-    // reader sees a decision here instead of an omission — the RPC's signature
-    // is unchanged and still carries all of them.
+    // DORMANT, not forgotten. Phase 2 stage 1 withdrew five of these questions
+    // from the form and change #17 withdrew the two met_* ones; their columns
+    // and their CHECKs are untouched, so every report filed under an older
+    // shape still renders and bringing one back is a control rather than a
+    // migration. Passed explicitly as null so a reader sees a decision here
+    // instead of an omission — the RPC's signature is unchanged and still
+    // carries all of them.
     p_institute_interested: null,
     p_visit_outcome: null,
     p_management_response: null,
     p_student_response: null,
     p_students_reached: null,
-    p_met_name: input.met_name,
-    p_met_phone: input.met_phone,
+    // #17: the decision-maker lives on the institute, not on the visit.
+    p_met_name: null,
+    p_met_phone: null,
     // The one student count that survives: everybody who was there.
     p_students_attended: input.students_attended,
     p_session_topic: input.session_topic,
@@ -243,15 +245,14 @@ export async function logAndFileVisit(
     p_visit_id: newVisitId,
     p_daily_plan_id: visit.daily_plan_id,
     p_notes: feedback.notes,
-    // Dormant since Phase 2 stage 1 — see the note on the same five in
-    // submitFeedback above.
+    // Dormant — see the note on the same fields in submitFeedback above.
     p_institute_interested: null,
     p_visit_outcome: null,
     p_management_response: null,
     p_student_response: null,
     p_students_reached: null,
-    p_met_name: feedback.met_name,
-    p_met_phone: feedback.met_phone,
+    p_met_name: null,
+    p_met_phone: null,
     p_students_attended: feedback.students_attended,
     p_session_topic: feedback.session_topic,
     p_session_taken_by: feedback.session_taken_by,

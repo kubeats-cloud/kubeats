@@ -98,9 +98,13 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
 
     return (
       <PageColumn>
+        {/* "Finish this visit", not "How did it go?" — the box below is
+            labelled Notes now, and a screen titled with a question the form no
+            longer asks reads like a leftover. Imperative and institute name is
+            also what the other three branches of this page already do, so the
+            recovery path stops being the odd one out. */}
         <PageHeader
-          eyebrow="Finish this visit"
-          title="How did it go?"
+          title="Finish this visit"
           description={target.instituteName}
         />
         <FeedbackOnlyForm

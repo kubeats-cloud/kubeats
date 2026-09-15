@@ -18,7 +18,7 @@ import { EmptyState } from "@/components/states";
 import { FormNotice } from "@/components/form-notice";
 import { cn } from "@/lib/utils";
 import { formatDate, todayISO } from "@/lib/dates";
-import { startFollowUp } from "@/lib/visit-actions";
+import { assignVisit, startFollowUp } from "@/lib/visit-actions";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { statusRow, type StatusCatalogue } from "@/lib/validation/institute";
 import type { FollowUp, PurposeOption } from "@/lib/visits";
@@ -149,11 +149,47 @@ export function FollowUpList({
               )}
 
               {readOnly ? (
-                <p className="text-muted-foreground mt-3 text-xs">
-                  {item.memberName
-                    ? `${item.memberName} closes this by visiting again.`
-                    : "This status was set directly rather than by a visit."}
-                </p>
+                /* STAGE 5b — an admin can hand the chase back to the rep.
+                   Still read-only in the sense that matters: nothing here puts
+                   a visit on the ADMIN's day. It writes a plan row for the
+                   institute's OWNER, who sees it on their dashboard badged as
+                   assigned. */
+                open === item.instituteId ? (
+                  <AssignFollowUp
+                    item={item}
+                    purposes={purposes}
+                    today={today}
+                    onCancel={() => setOpen(null)}
+                  />
+                ) : (
+                  <>
+                    <p className="text-muted-foreground mt-3 text-xs">
+                      {item.memberName
+                        ? `${item.memberName} closes this by visiting again.`
+                        : "This status was set directly rather than by a visit."}
+                    </p>
+                    {item.owner ? (
+                      <div className="mt-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-11 w-full"
+                          onClick={() => setOpen(item.instituteId)}
+                        >
+                          Assign this follow-up
+                        </Button>
+                      </div>
+                    ) : (
+                      /* No owner, nothing to assign to — and FO026 would refuse
+                         the plan row anyway. Says so rather than offering a
+                         button that cannot work. */
+                      <p className="text-danger mt-3 text-xs">
+                        Unassigned — give this institute to a rep before
+                        assigning a follow-up.
+                      </p>
+                    )}
+                  </>
+                )
               ) : open === item.instituteId ? (
                 <StartFollowUp
                   item={item}
@@ -269,6 +305,131 @@ function StartFollowUp({
         you arrive.
       </p>
 
+      {state.error && <FormNotice message={state.error} />}
+    </form>
+  );
+}
+
+/**
+ * Stage 5b — an admin hands an open institute's follow-up back to its owner.
+ *
+ * REUSES `assignVisit`, WHICH IS THE POINT. This writes no plan row of its own
+ * and knows nothing about `daily_plans`; it posts the same four fields the
+ * Assign screen posts, to the same audited action. So the admin gate, the
+ * purpose lookup that carries `purpose_id`, the `assigned_by` stamp, the
+ * past-date refusal and the upsert's conflict key all apply here exactly as
+ * they do there — and every guard below stays in force:
+ *
+ *   FO023  guard_plan_assignment — since 0028 the institute must BELONG to the
+ *          assigned rep, not merely share their campus. Satisfied here by
+ *          construction: `member` is the institute's own `registered_by`.
+ *   FO026  enforce_plan_institute_owned — the same predicate again on the row
+ *          itself, and again when the rep stamps their arrival. It is what
+ *          catches the gap between this page being rendered and the button
+ *          being pressed: reassign the institute in between and the assignment
+ *          is refused rather than landing on the wrong rep's day.
+ *   FO021/FO022 campus — untouched, and implied by ownership.
+ *
+ * THE REP IS NOT A CHOICE. An open institute has exactly one owner, and any
+ * other rep would be refused by both guards above, so offering a picker would
+ * be offering nine wrong answers and one right one. The owner is shown, not
+ * chosen.
+ *
+ * THE PURPOSE IS a choice, and must be. Stage 3 derives the visit's activity
+ * from `purpose_id`, so the purpose decides which weekly metric the rep's work
+ * lands in — picking one on their behalf would be picking a number they are
+ * measured on. Same reasoning as `StartFollowUp` above.
+ */
+function AssignFollowUp({
+  item,
+  purposes,
+  today,
+  onCancel,
+}: {
+  item: FollowUp;
+  purposes: PurposeOption[];
+  today: string;
+  onCancel: () => void;
+}) {
+  const [state, formAction, isPending] = useActionState(assignVisit, EMPTY_STATE);
+  const [purpose, setPurpose] = useState("");
+  const [date, setDate] = useState(today);
+
+  return (
+    <form action={formAction} className="mt-4 space-y-3">
+      <input type="hidden" name="institute_id" value={item.instituteId} />
+      {/* The owner, never a picked rep — see the note above. */}
+      <input type="hidden" name="member" value={item.owner ?? ""} />
+      <input type="hidden" name="purpose" value={purpose} />
+      <input type="hidden" name="date" value={date} />
+
+      <p className="text-muted-foreground text-xs">
+        Assigning to{" "}
+        <span className="text-foreground font-medium">
+          {item.ownerName ?? "this institute's rep"}
+        </span>
+        , who this institute belongs to.
+      </p>
+
+      <div className="space-y-1.5">
+        <Label>What is this visit for?</Label>
+        <Select value={purpose} onValueChange={setPurpose}>
+          <SelectTrigger
+            className="h-11 w-full"
+            aria-label="Purpose"
+            aria-invalid={state.fieldErrors.purpose ? true : undefined}
+          >
+            <SelectValue placeholder="Purpose of the visit" />
+          </SelectTrigger>
+          <SelectContent>
+            {purposes.map((option) => (
+              <SelectItem key={option.id} value={option.label}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {state.fieldErrors.purpose && (
+          <p className="text-danger text-xs">{state.fieldErrors.purpose}</p>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor={`assign-when-${item.instituteId}`}>When</Label>
+        <Input
+          id={`assign-when-${item.instituteId}`}
+          type="date"
+          className="h-11"
+          min={today}
+          value={date}
+          onChange={(event) => setDate(event.target.value)}
+        />
+        {state.fieldErrors.date && (
+          <p className="text-danger text-xs">{state.fieldErrors.date}</p>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <Button
+          type="submit"
+          className="h-11 flex-1"
+          disabled={isPending || purpose === ""}
+        >
+          {isPending ? "Assigning…" : "Assign"}
+        </Button>
+        <Button type="button" variant="ghost" className="h-11" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+
+      {state.ok && (
+        <p
+          role="status"
+          className="bg-success-subtle text-success-subtle-foreground rounded-md px-3 py-2 text-sm"
+        >
+          Assigned. It is on their plan for that day.
+        </p>
+      )}
       {state.error && <FormNotice message={state.error} />}
     </form>
   );
