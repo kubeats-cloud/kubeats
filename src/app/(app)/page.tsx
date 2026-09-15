@@ -8,6 +8,7 @@ import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
 import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
+import { ActivityGridTable } from "@/components/report/activity-grid-table";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { listStatusCatalogue } from "@/lib/statuses";
 import {
@@ -17,7 +18,10 @@ import {
 } from "@/lib/visits";
 import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf } from "@/lib/weeks";
+import { formatDate } from "@/lib/dates";
 import { getOverview } from "@/lib/admin-workspace";
+import { getActivityReportModel } from "@/lib/exports/activity-export";
+import { defaultExportRange } from "@/lib/validation/export";
 
 export const metadata = { title: "Dashboard" };
 
@@ -30,7 +34,11 @@ export default async function DashboardPage() {
 
   // An admin loads the supervision view; a rep loads their own day. Neither
   // pays for the other's queries.
-  const [plan, institutes, purposes, week, overview, catalogue] = await Promise.all([
+  // This month, for the admin's activity card. Stated by the export schema so
+  // the card, the full report and the download cannot default differently.
+  const range = defaultExportRange();
+
+  const [plan, institutes, purposes, week, overview, catalogue, report] = await Promise.all([
     admin ? Promise.resolve({ ok: true as const, entries: [] }) : getTodayPlan(user.id),
     admin ? Promise.resolve([]) : listInstitutesForPicker(),
     admin ? Promise.resolve([]) : listPurposes(),
@@ -39,6 +47,7 @@ export default async function DashboardPage() {
     // The status vocabulary. Cheap, and needed by the plan picker to say when an
     // institute is being re-opened after a closed loop.
     listStatusCatalogue(),
+    admin ? getActivityReportModel(range, null) : Promise.resolve(null),
   ]);
 
   const entries = plan.ok ? plan.entries : [];
@@ -79,11 +88,41 @@ export default async function DashboardPage() {
       )}
 
       {admin ? (
-        overview?.ok ? (
-          <AdminOverview data={overview.data} />
-        ) : (
-          <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />
-        )
+        <>
+          {overview?.ok ? (
+            <AdminOverview data={overview.data} />
+          ) : (
+            <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />
+          )}
+
+          {/* THE SAME TABLE THE REPORT PAGE SHOWS, compact. Every column is
+              here — it scrolls sideways rather than dropping the wide end,
+              because a status column invisible on the dashboard is one nobody
+              knows to look for. The card is a summary by SIZE, not by content. */}
+          <SectionTitle className="mt-8">
+            Activity this month
+            <span className="text-muted-foreground ml-2 text-xs font-normal">
+              {formatDate(range.start)} – {formatDate(range.end)}
+            </span>
+          </SectionTitle>
+
+          {report?.ok ? (
+            <>
+              <div className="mt-3">
+                <ActivityGridTable
+                  data={{ reps: report.model.reps, columns: report.model.columns }}
+                  compact
+                  caption="Activity by rep this month"
+                />
+              </div>
+              <Button asChild variant="outline" className="mt-3 h-11 w-full">
+                <Link href="/team/report">View full report</Link>
+              </Button>
+            </>
+          ) : (
+            <ErrorState message="We could not load the activity report just now. Please try again in a moment." />
+          )}
+        </>
       ) : (
         <>
           <SectionTitle className="mt-8">

@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { TableIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { ErrorState } from "@/components/states";
@@ -58,8 +61,16 @@ export default async function TeamPage(props: PageProps<"/team">) {
       {/* The export is a MONTH by default, not this week. It answers a
           different question from the screen above it — "what did the team do
           over a period" rather than "who is on track this week" — so it keeps
-          its own range rather than inheriting the navigator's. */}
-      <div className="mt-4">
+          its own range rather than inheriting the navigator's. The full report
+          is the same numbers as a table; this stays for the admin who only
+          wants the file. */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button asChild variant="outline" className="h-11">
+          <Link href="/team/report">
+            <TableIcon className="size-4" aria-hidden />
+            Full activity report
+          </Link>
+        </Button>
         <ExportExcel {...defaultExportRange()} label="Export to Excel" />
       </div>
 
