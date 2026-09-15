@@ -13,6 +13,7 @@ import {
   statusColumnsFor,
   statusesWithoutColumns,
   type RepRow,
+  type StatusColumns,
 } from "@/lib/exports/activity-grid";
 import { buildWorkbook } from "@/lib/xlsx";
 import type { SheetSpec } from "@/lib/xlsx";
@@ -188,16 +189,27 @@ export function exportFilename(
 }
 
 /**
- * The whole export: read, shape, write.
+ * The report, as data: who the rows are and what the columns are.
  *
- * `memberId` null is the all-reps export; a member id is the per-rep one. They
- * differ by a `.eq()` on three queries and nothing else — same counting, same
- * columns, same layout — so the two buttons cannot drift apart.
+ * THE ONE DEFINITION BOTH RENDERERS USE. The web table and the .xlsx are two
+ * renderings of this, not two reports that happen to agree — `buildActivityGrid`
+ * turns it into rows and merges, and the table and the workbook each draw those
+ * same rows. A column added here appears in both, in the same place, or in
+ * neither; there is no path by which the screen and the download can disagree
+ * about a number, because neither of them counts anything.
  */
-export async function buildActivityExport(
+export interface ActivityReportModel {
+  reps: RepRow[];
+  columns: StatusColumns;
+  range: ExportRange;
+  /** The rep's name for a single-member report; null for all reps. */
+  repName: string | null;
+}
+
+export async function getActivityReportModel(
   range: ExportRange,
   memberId: string | null,
-): Promise<ExportResult> {
+): Promise<{ ok: true; model: ActivityReportModel } | { ok: false; error: string }> {
   const [data, catalogue] = await Promise.all([
     readRows(range, memberId),
     listStatusCatalogue(),
@@ -208,7 +220,7 @@ export async function buildActivityExport(
   const columns = statusColumnsFor(catalogue, data.statusesSeen);
 
   /**
-   * REFUSE RATHER THAN EXPORT A SHEET THAT DOES NOT ADD UP.
+   * REFUSE RATHER THAN SHOW A REPORT THAT DOES NOT ADD UP.
    *
    * Every `visits.status_set_to` is a foreign key into `institute_statuses`
    * (0026), so a counted status with no column is impossible — unless
@@ -216,7 +228,8 @@ export async function buildActivityExport(
    * failed, in which case every status an admin has added would be missing and
    * those visits would vanish from the status bands while still being counted
    * in the activity bands. That is a report whose own rows contradict each
-   * other, which is worse than no report.
+   * other, which is worse than no report — on screen exactly as in a download,
+   * which is why this guard lives here rather than in the route.
    */
   const orphans = statusesWithoutColumns(columns, data.statusesSeen);
   if (orphans.length > 0) {
@@ -227,13 +240,38 @@ export async function buildActivityExport(
     return {
       ok: false,
       error:
-        "We could not read the full status list, so the export would have been missing columns. Please try again in a moment.",
+        "We could not read the full status list, so this report would have been missing columns. Please try again in a moment.",
     };
   }
 
-  const repName = memberId ? (data.reps[0]?.name ?? null) : null;
+  return {
+    ok: true,
+    model: {
+      reps: data.reps,
+      columns,
+      range,
+      repName: memberId ? (data.reps[0]?.name ?? null) : null,
+    },
+  };
+}
+
+/**
+ * The whole export: read, shape, write.
+ *
+ * `memberId` null is the all-reps export; a member id is the per-rep one. They
+ * differ by a `.eq()` on three queries and nothing else — same counting, same
+ * columns, same layout — so the two buttons cannot drift apart.
+ */
+export async function buildActivityExport(
+  range: ExportRange,
+  memberId: string | null,
+): Promise<ExportResult> {
+  const result = await getActivityReportModel(range, memberId);
+  if (!result.ok) return result;
+
+  const { reps, columns, repName } = result.model;
   const sheet: SheetSpec = activitySheet(
-    { reps: data.reps, columns },
+    { reps, columns },
     repName ? "Activity" : "All reps",
   );
 

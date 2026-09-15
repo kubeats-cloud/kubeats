@@ -255,6 +255,63 @@ describe("the grid matches the client's template", () => {
 
 /* ------------------------------------------------------------------ */
 
+describe("the contract the on-screen table depends on", () => {
+  // ActivityGridTable renders THESE rows and derives its <th colSpan> from
+  // THESE merges — that is what makes the screen and the .xlsx incapable of
+  // disagreeing. The invariants below are what that rendering assumes; break
+  // one and the table silently grows or loses a header cell while the
+  // spreadsheet stays correct, which is the exact drift the shared builder
+  // exists to prevent.
+  const reps: RepRow[] = [
+    { name: "Asha", activities: { ...ZERO_COUNTS }, statuses: {} },
+  ];
+
+  for (const [label, seen] of [
+    ["no retired columns", new Set<string>()],
+    ["a retired column", new Set(["Old closed reason"])],
+  ] as const) {
+    it(`every group header starts a merge, with ${label}`, () => {
+      const columns = statusColumnsFor(catalogue, seen);
+      const { rows, merges } = buildActivityGrid({ reps, columns });
+      const starts = new Map(
+        merges.filter((m) => m.row === 0).map((m) => [m.col, m.colSpan]),
+      );
+
+      rows[0].forEach((value, index) => {
+        if (value !== null) {
+          // A visible header must begin a merge, or the table would render it
+          // one cell wide over a band several columns long.
+          expect(starts.has(index), `header at ${index} starts a merge`).toBe(true);
+        }
+      });
+
+      // The merges must tile row 1 exactly: no gap, no overlap, no overrun.
+      let covered = 0;
+      for (const [col, span] of [...starts].sort((a, b) => a[0] - b[0])) {
+        expect(col).toBe(covered);
+        covered += span;
+      }
+      expect(covered).toBe(rows[1].length);
+      expect(covered).toBe(rows[0].length);
+    });
+  }
+
+  it("keeps every body row the same width as the header", () => {
+    const columns = statusColumnsFor(catalogue, new Set(["Old closed reason"]));
+    const { rows } = buildActivityGrid({
+      reps: [
+        { name: "Asha", activities: { ...ZERO_COUNTS }, statuses: { Admitted: 1 } },
+        { name: "Bilal", activities: { ...ZERO_COUNTS }, statuses: {} },
+      ],
+      columns,
+    });
+    const width = rows[1].length;
+    for (const row of rows) expect(row).toHaveLength(width);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
 describe("the workbook writer", () => {
   it("names columns past Z", () => {
     expect(columnName(0)).toBe("A");
