@@ -52,7 +52,10 @@ export async function addPurpose(
   const gate = await requireAdmin();
   if (!gate.ok) return denied(gate.error);
 
-  const parsed = purposeSchema.safeParse({ label: textOf(formData, "label") });
+  const parsed = purposeSchema.safeParse({
+    label: textOf(formData, "label"),
+    activity: textOf(formData, "activity"),
+  });
   if (!parsed.success) {
     return {
       error: CHECK_FIELD,
@@ -60,9 +63,12 @@ export async function addPurpose(
     };
   }
 
+  // The activity travels with the row from stage 2 on. It is what stage 3 reads
+  // instead of the Activity selector, and what decides which weekly metric a
+  // visit planned under this purpose feeds.
   const { error } = await gate.supabase
     .from("purposes")
-    .insert({ label: parsed.data.label });
+    .insert({ label: parsed.data.label, activity: parsed.data.activity });
 
   if (error) {
     logError("admin:purpose-add", error);

@@ -153,6 +153,58 @@ export function healthCheckToken(): string | null {
   return trimmed(process.env.HEALTH_CHECK_TOKEN);
 }
 
+/**
+ * Optional: the commit this bundle was built from.
+ *
+ * WHAT IT IS FOR. Answering "is the new build live?" from outside. Every stage
+ * of the Phase 2 rework changes screens that sit behind auth, so there is
+ * nothing on the public surface that differs between two builds — and verifying
+ * a deploy by comparing content-hashed chunk names does not work either,
+ * because those hashes are not reproducible between a developer's machine and
+ * the client's builder. This is the one-line answer instead.
+ *
+ * DEEP ANSWER ONLY. It is returned by /api/health to a caller that presents
+ * HEALTH_CHECK_TOKEN, and never in the public `{"ok":true}`. That split is the
+ * pen-test F2 finding and it is not weakened here: the anonymous response still
+ * touches nothing and still discloses nothing. A build identifier tells a
+ * stranger which commit to go and read, which is a small thing to give away and
+ * an unnecessary one.
+ *
+ * PORTABLE ON PURPOSE. The name is generic. Nothing in `src/` may read
+ * `CF_PAGES_COMMIT_SHA`, `WORKERS_CI_COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA` or
+ * any other platform's spelling — that is exactly what CLAUDE.md's portability
+ * rule forbids. The platform maps ITS variable onto this one in the build
+ * command, which is config rather than code.
+ *
+ * ⚠ IT MUST GO INTO AN ENV *FILE*, NOT JUST THE SHELL. This was verified rather
+ * than assumed, because the obvious form does not work:
+ *
+ *     APP_COMMIT_SHA=$WORKERS_CI_COMMIT_SHA npm run build      ✗ never arrives
+ *
+ * The OpenNext adapter inlines the environment into
+ * `.open-next/cloudflare/next-env.mjs`, and what it inlines is what **Next
+ * loaded from `.env*` files** — not arbitrary shell variables. A shell-only
+ * value is present while the build runs and absent from the bundle, so the
+ * field would read null in production and nowhere would say why. Write it to a
+ * file Next loads instead:
+ *
+ *     echo "APP_COMMIT_SHA=$WORKERS_CI_COMMIT_SHA" >> .env.production.local
+ *     npm run build                                            ✓ verified
+ *
+ * NOT in wrangler.jsonc. That file says, at length, that it must never grow a
+ * `vars` block, because Workers Builds prints plaintext vars into the build log.
+ *
+ * So it is baked in at BUILD time and needs no runtime binding — the same
+ * mechanism the wrangler comment warns about for the service-role key. A commit
+ * SHA is not a secret, and it is behind the token anyway.
+ *
+ * Optional, like the two above: a deployment must not fail to boot over a
+ * monitoring convenience. Unset simply means the deep answer omits it.
+ */
+export function appCommitSha(): string | null {
+  return trimmed(process.env.APP_COMMIT_SHA);
+}
+
 let cachedServer: ServerEnv | undefined;
 
 /**

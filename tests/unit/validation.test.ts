@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACTIVITY_KEYS,
   expectedDateLabel,
   expectedDateRequired,
   fieldLabel,
   visitSchema,
 } from "@/lib/validation/visit";
-import { newMemberSchema } from "@/lib/validation/admin";
+import { newMemberSchema, purposeSchema } from "@/lib/validation/admin";
 import { targetsSchema } from "@/lib/validation/weekly";
 
 /**
@@ -452,5 +453,59 @@ describe("fieldLabel", () => {
 
   it("degrades to something readable for a field it has not been told about", () => {
     expect(fieldLabel("some_new_field")).toBe("Some new field");
+  });
+});
+
+/**
+ * Stage 2 — a purpose declares which of the six fixed activities it counts as.
+ *
+ * This is the layer that lets stage 3 delete the Activity selector from Log
+ * Visit: the activity is derived from the plan's purpose instead. Which makes
+ * the schema below load-bearing in a way a list of options usually is not —
+ * seven of the eight weekly metrics are counted by `activity`, so an admin
+ * adding a purpose is choosing which number a rep's work lands in.
+ */
+describe("purposeSchema — a purpose is typed", () => {
+  const valid = { label: "Follow up on proposal", activity: "meeting" };
+
+  it("accepts a labelled purpose with an activity", () => {
+    expect(purposeSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("accepts every one of the six activities, and only those", () => {
+    // The same six `visitSchema` validates against and
+    // purposes_activity_valid (migration 0024) mirrors as a CHECK. If a
+    // seventh is ever added to ACTIVITY_KEYS without the migration, this still
+    // passes — which is why 0024 carries its own assertion comparing the two
+    // CHECK constraints. Belt from this end, braces from that one.
+    for (const activity of ACTIVITY_KEYS) {
+      expect(
+        purposeSchema.safeParse({ ...valid, activity }).success,
+        activity,
+      ).toBe(true);
+    }
+    expect(purposeSchema.safeParse({ ...valid, activity: "event" }).success).toBe(
+      false,
+    );
+  });
+
+  it("refuses a purpose with no activity at all", () => {
+    // "" is what an untouched picker posts. Reading it as a default — Meeting,
+    // say — is the failure this guards: a session purpose that silently counts
+    // as a meeting for ever, in a column nobody looks at again.
+    const result = purposeSchema.safeParse({ ...valid, activity: "" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path[0] === "activity");
+      expect(issue?.message).toBe("Choose what this purpose counts as.");
+    }
+  });
+
+  it("still refuses a purpose with no usable label", () => {
+    // Unchanged by stage 2, and worth keeping honest: the activity is a second
+    // requirement, not a replacement for the first.
+    expect(purposeSchema.safeParse({ ...valid, label: "" }).success).toBe(false);
+    expect(purposeSchema.safeParse({ ...valid, label: "   " }).success).toBe(false);
+    expect(purposeSchema.safeParse({ ...valid, label: "!!!" }).success).toBe(false);
   });
 });
