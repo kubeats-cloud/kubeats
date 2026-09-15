@@ -84,10 +84,11 @@ export function FeedbackFields({
 
   return (
     <>
-      <FormSection
-        title="How did it go?"
-        description="A few words. This is the whole report."
-      >
+      {/* NO SECTION TITLE. One field, and its own label asks the question — a
+          heading above it saying "How did it go?" over a box labelled "How did
+          it go?" is one label too many. The description stays, because "this is
+          the whole report" is the thing a rep wants to know. */}
+      <FormSection description="A few words. This is the whole report.">
         <div className="space-y-2">
           <Label htmlFor="notes">How did it go?</Label>
           <Textarea id="notes" name="notes" rows={4} maxLength={2000} />

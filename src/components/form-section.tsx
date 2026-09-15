@@ -23,7 +23,19 @@ export function FormSection({
   children,
   className,
 }: {
-  title: string;
+  /**
+   * Optional, and almost always given.
+   *
+   * A section with ONE self-labelling field is the exception: the closing
+   * report's "How did it go?" is a single textarea whose own label asks the
+   * question, and a heading above it repeating the same five words is one label
+   * too many. Leaving it off keeps the card, the padding and the rhythm — only
+   * the duplicated heading goes.
+   *
+   * Everything else names its section. Reaching for this because a title is
+   * hard to write usually means the section is really two.
+   */
+  title?: string;
   /** One line, in plain words, on why this is being asked. */
   description?: string;
   /** Sits opposite the title — a count, a badge, a small action. */
@@ -31,21 +43,27 @@ export function FormSection({
   children: ReactNode;
   className?: string;
 }) {
+  const hasHeader = Boolean(title || description || aside);
+
   return (
     <Card className={cn("gap-0 p-5 md:p-6", className)}>
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-[15px] leading-tight font-semibold tracking-tight">
-            {title}
-          </h2>
-          {description && (
-            <p className="text-muted-foreground mt-1 max-w-prose text-xs leading-relaxed">
-              {description}
-            </p>
-          )}
+      {hasHeader && (
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            {title && (
+              <h2 className="text-[15px] leading-tight font-semibold tracking-tight">
+                {title}
+              </h2>
+            )}
+            {description && (
+              <p className="text-muted-foreground mt-1 max-w-prose text-xs leading-relaxed">
+                {description}
+              </p>
+            )}
+          </div>
+          {aside && <div className="shrink-0">{aside}</div>}
         </div>
-        {aside && <div className="shrink-0">{aside}</div>}
-      </div>
+      )}
       <div className="space-y-4">{children}</div>
     </Card>
   );

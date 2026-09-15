@@ -34,7 +34,7 @@ Everything in sections 3 and 4 follows from that sentence.
 
 | | Decision | Answer |
 | --- | --- | --- |
-| **D1** | What produces a `meeting`? | No new "Meeting" purpose. Existing purposes declare their activity; **"First meeting" and "Other" → `meeting`**. Probe P3 answered — §3.3 |
+| **D1** | What produces a `meeting`? | No new "Meeting" purpose. Existing purposes declare their activity; **"First meeting" and "Other" → `meeting`**. 0025 seeds Follow-up, Olympiad, Application and Admissions — §3.3 |
 | **D2** | Follow-up: date, or date and time? | **Both**, with the time **pre-filled** |
 | **D3** | Save the date on a Done session / campus visit? | **Yes** — fix `log_visit()`, one `case` expression, same signature |
 | **D4** | Who owns that date field? | **One field.** Strictness from the purpose: Set → required "Tentative…"; Done → optional, pre-filled, "Session date" |
@@ -148,7 +148,7 @@ the seed for `purposes.activity` / `purposes.lifecycle`:
 | **Olympiad registration** | **0025 seeds** | `olympiad` | — | no | Olympiad Registrations | one-shot, no lifecycle |
 | **Application forms** | **0025 seeds** | `application` | — | no | Application Forms | one-shot, no lifecycle |
 | **Admissions** | **0025 seeds** | `admission` | — | no | Admissions | one-shot, no lifecycle |
-| **Follow-up** | **open question** | `meeting` | — | no | **Meetings** | as First meeting. Does not exist; confirm whether to seed it |
+| **Follow-up** | **0025 seeds** | `meeting` | — | no | **Meetings** | as First meeting — the second and later visits to a school |
 | *(any admin-added purpose)* | — | admin picks one of the six | per the rule below | admin's choice | whichever the activity feeds | whichever the activity turns on |
 
 `lifecycle` is non-null **iff** the activity is `session` or `campus_visit` —
@@ -176,11 +176,26 @@ Two things the probe also settled, both carried into the table above:
   makes the selector unnecessary. Until then those three metrics are reachable
   only through the selector — which is precisely why the seed and the selector's
   removal ship together.
-* **There is no "Follow-up" purpose.** *First meeting* is the only
-  meeting-shaped one, so a second visit to the same school is currently planned
-  as "First meeting" or as "Other". Worth adding, and it is a wording question
-  rather than a design one. **Open: confirm whether 0025 should seed
-  "Follow-up" → `meeting`.** Nothing is blocked either way.
+* **There is no "Follow-up" purpose either, and 0025 seeds one.** *First
+  meeting* is the only meeting-shaped row, so a second visit to the same school
+  is currently planned as "First meeting" — which is wrong on its face — or as
+  "Other", which buries an ordinary follow-up under the free-text catch-all.
+  Both map to `meeting`, so no metric moves either way; what improves is that
+  the plan says what the visit actually is. **Locked: 0025 seeds
+  "Follow-up" → `meeting`.**
+
+So 0025's purpose seed is exactly four rows:
+
+| Label | `activity` | `lifecycle` | Free text? |
+| --- | --- | --- | --- |
+| Follow-up | `meeting` | — | no |
+| Olympiad registration | `olympiad` | — | no |
+| Application forms | `application` | — | no |
+| Admissions | `admission` | — | no |
+
+Seeded `on conflict (label) do nothing`, like 0001's own purpose seed, so
+re-running the migration cannot duplicate a row or overwrite a label an admin
+has since edited.
 
 ### 3.4 "Other" and its free text
 
@@ -825,9 +840,9 @@ Two statements:
 
 1. `enforce_status_required()` → **FO0xx**, `before insert on public.visits`
    (§4.7 / D9). ⚠ Applied early, every "No change" on the live app fails.
-2. Seed the new purposes — *Olympiad registration*, *Application forms*,
-   *Admissions*, and whatever P3 settles for the meeting purposes — each with its
-   `activity` / `lifecycle` / `requires_note` from §3.2.
+2. Seed the four new purposes — *Follow-up*, *Olympiad registration*,
+   *Application forms*, *Admissions* — each with its `activity` / `lifecycle` /
+   `requires_note` from §3.2, `on conflict (label) do nothing`.
 
 ### 0026 — comment-only retractions *(optional; any time)*
 
@@ -940,10 +955,10 @@ box.
 carries an `activity` — which 0023's `not null` guarantees, with its notice as
 the admin's review list (F6).
 
-The seed adds **Olympiad registration, Application forms and Admissions**, none
-of which exist yet (P3). It ships *with* the selector's removal rather than
-before it, because until the selector goes those three metrics are reachable
-only through it. Optionally also **"Follow-up" → `meeting`** — see §3.3.
+The seed adds four purposes, none of which exist yet (P3): **Follow-up,
+Olympiad registration, Application forms and Admissions** (§3.3 has the table).
+It ships *with* the selector's removal rather than before it, because until the
+selector goes three of those four metrics are reachable only through it.
 
 ### Stage 4a — statuses come from the database *(0024; additive)*
 
@@ -1030,7 +1045,7 @@ Measure at Stage 4b, the one that only adds.
 
 | # | Decision | Answer | What it costs |
 | --- | --- | --- | --- |
-| **D1** | What produces a `meeting` | No new "Meeting" purpose. Existing purposes declare their activity: **"First meeting" and "Other" → `meeting`**; session and campus-visit purposes → their pair; Olympiad / Application / Admissions → theirs, seeded by 0025. Admin-added purposes each declare one of the six | **Resolved** by probe P3 (2026-09-15): six live rows, "First meeting" among them, so Meetings keeps a source. One open wording question — seed "Follow-up"? (§3.3) |
+| **D1** | What produces a `meeting` | No new "Meeting" purpose. Existing purposes declare their activity: **"First meeting" and "Other" → `meeting`**; session and campus-visit purposes → their pair. 0025 seeds four more: **Follow-up → `meeting`**, Olympiad → `olympiad`, Application → `application`, Admissions → `admission`. Admin-added purposes each declare one of the six | **Fully resolved.** Probe P3 (2026-09-15): six live rows, "First meeting" among them, so Meetings keeps a source with or without the seed (§3.3) |
 | **D2** | Follow-up date, or date and time | **Both**, with the time pre-filled to a sensible working hour | Nothing. No trigger change, no migration |
 | **D3** | Save the date on a Done session / campus visit | **Yes.** `log_visit()`'s one `case` expression, same signature | One function body in 0024. A loosening, so safe early |
 | **D4** | Who owns the date field | **One field.** Purpose says Set → required, "Tentative…". Status asks and purpose says Done → optional, pre-filled with today, "Session date" | `expectedDateLabel()` gains the lifecycle as an argument |
