@@ -28,6 +28,14 @@ import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
  * and it closes with the same report. The rep sees who assigned it. Nothing
  * about the self-planning model changes — this is one more way a row gets
  * there.
+ *
+ * THE INSTITUTE PICKER FOLLOWS THE REP, not the registry. An institute belongs
+ * to one rep, and FO023 refuses a plan row pairing a rep with an institute that
+ * is not theirs — so offering the whole registry here would be offering
+ * assignments the database is going to refuse. Choosing the rep first and
+ * narrowing to what they own turns that refusal into a list that is simply
+ * shorter. The refusal still stands behind it; this only stops an admin walking
+ * into it.
  */
 export function AssignVisit({
   reps,
@@ -62,6 +70,19 @@ export function AssignVisit({
     : clientState.fieldErrors;
   const problem = (key: string) =>
     fieldErrors[key] ? <p className="text-danger text-xs">{fieldErrors[key]}</p> : null;
+
+  // Narrowed to the chosen rep. Before one is chosen there is no correct list,
+  // so the picker says so rather than offering a registry-wide guess.
+  const repInstitutes = member
+    ? institutes.filter((institute) => institute.registered_by === member)
+    : [];
+
+  // Changing the rep invalidates the institute underneath it — the previous
+  // choice belongs to the previous rep by construction.
+  function chooseMember(next: string) {
+    setMember(next);
+    setInstituteId("");
+  }
 
   const ready = reps.length > 0 && institutes.length > 0 && purposes.length > 0;
 
@@ -131,7 +152,7 @@ export function AssignVisit({
 
             <div className="space-y-2">
               <Label>Who</Label>
-              <Select value={member} onValueChange={setMember}>
+              <Select value={member} onValueChange={chooseMember}>
                 <SelectTrigger className="h-11 w-full" aria-label="Rep">
                   <SelectValue placeholder="Choose a rep" />
                 </SelectTrigger>
@@ -148,12 +169,22 @@ export function AssignVisit({
 
             <div className="space-y-2">
               <Label>Institute</Label>
-              <Select value={instituteId} onValueChange={setInstituteId}>
+              <Select
+                value={instituteId}
+                onValueChange={setInstituteId}
+                disabled={member === "" || repInstitutes.length === 0}
+              >
                 <SelectTrigger className="h-11 w-full" aria-label="Institute">
-                  <SelectValue placeholder="Choose an institute" />
+                  <SelectValue
+                    placeholder={
+                      member === ""
+                        ? "Choose a rep first"
+                        : "Choose one of their institutes"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {institutes.map((institute) => (
+                  {repInstitutes.map((institute) => (
                     <SelectItem key={institute.id} value={institute.id}>
                       {institute.name}
                       {institute.city ? ` · ${institute.city}` : ""}
@@ -161,6 +192,12 @@ export function AssignVisit({
                   ))}
                 </SelectContent>
               </Select>
+              {member !== "" && repInstitutes.length === 0 && (
+                <p className="text-muted-foreground text-xs">
+                  Nothing is registered to this rep yet. Reassign an institute to
+                  them first, then assign the visit.
+                </p>
+              )}
               {problem("institute_id")}
             </div>
 

@@ -25,18 +25,46 @@ export interface Institute {
   status: string | null;
   status_updated_at: string | null;
   created_at: string;
+  /**
+   * WHO REGISTERED IT — and, once rep-owned institutes ship, who can SEE it.
+   *
+   * Selected for the first time here. It has been an audit stamp since 0001 and
+   * nothing read it; rep-ownership makes it the column the select policy keys
+   * on, so an admin has to be able to see and change it.
+   *
+   * Null is a real state and not an absence: `registered_by` is
+   * `on delete set null`, so removing a departed rep's profile orphans every
+   * institute they registered. An orphan is invisible to every rep at once,
+   * which is why the admin registry shows it in `danger` tone rather than as
+   * a blank.
+   */
+  registered_by: string | null;
+  /** Resolved for an ADMIN only; a rep sees only their own and is not told. */
+  ownerName: string | null;
+  /**
+   * The campus this institute belongs to — the OUTER boundary, unchanged by
+   * rep-ownership. Read here so the reassign picker can offer only the reps who
+   * could actually see it afterwards.
+   */
+  campus_id: string | null;
 }
 
 const COLUMNS = `
   id, name, type, pincode, address, area, city, state, boards,
   principal_name, principal_mobile,
   decision_maker_name, decision_maker_designation, decision_maker_mobile,
-  class11, class12, status, status_updated_at, created_at
+  class11, class12, status, status_updated_at, created_at,
+  registered_by, campus_id
 `;
 
 /**
- * Every institute. The registry is shared — the RLS select policy is `true` —
- * so reps and admins see the same list.
+ * Every institute the caller may see.
+ *
+ * NOT a shared registry, whatever this comment used to say. `institutes_select`
+ * was `using (true)` until 0020b scoped it by campus, and rep-owned institutes
+ * narrow it again to the rep who registered it. An admin sees everything; a rep
+ * sees their own. Nothing here filters — the policy does, which is why adding
+ * ownership touched no query.
  *
  * Loaded whole and filtered in the browser. At this scale that is the right
  * trade: a few hundred rows is a small payload, and search and filters respond
@@ -56,7 +84,48 @@ export async function listInstitutes(): Promise<
     logError("institutes:list", error);
     return { ok: false };
   }
-  return { ok: true, institutes: (data ?? []) as unknown as Institute[] };
+
+  const rows = (data ?? []) as unknown as Institute[];
+  return { ok: true, institutes: await withOwnerNames(rows) };
+}
+
+/**
+ * Put a name against each owner.
+ *
+ * ONE QUERY FOR THE WHOLE LIST, not one per row. `profiles` is readable by any
+ * signed-in user for names, so this needs no elevated client — and a rep gets
+ * back only their own name, which is why the registry shows the owner line to
+ * admins alone: on a rep's list every row would say the same thing.
+ *
+ * A null name where there IS an owner means the profile is unreadable rather
+ * than absent; both render as "Unassigned", because from an admin's point of
+ * view the institute is equally out of circulation either way.
+ */
+async function withOwnerNames(rows: Institute[]): Promise<Institute[]> {
+  const ids = [
+    ...new Set(rows.map((r) => r.registered_by).filter((id): id is string => Boolean(id))),
+  ];
+  if (ids.length === 0) {
+    return rows.map((row) => ({ ...row, ownerName: null }));
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, name")
+    .in("id", ids);
+
+  if (error) {
+    // A missing name is decoration; the registry still reads without it.
+    logError("institutes:owner-names", error);
+    return rows.map((row) => ({ ...row, ownerName: null }));
+  }
+
+  const names = new Map((data ?? []).map((p) => [p.id, p.name]));
+  return rows.map((row) => ({
+    ...row,
+    ownerName: row.registered_by ? (names.get(row.registered_by) ?? null) : null,
+  }));
 }
 
 export async function getInstitute(id: string): Promise<Institute | null> {
@@ -71,7 +140,10 @@ export async function getInstitute(id: string): Promise<Institute | null> {
     logError("institutes:get", error);
     return null;
   }
-  return (data as unknown as Institute) ?? null;
+  if (!data) return null;
+
+  const [withOwner] = await withOwnerNames([data as unknown as Institute]);
+  return withOwner;
 }
 
 export interface VisitSummary {

@@ -25,13 +25,22 @@ export interface PickerInstitute {
    * than starting a new one by mistake.
    */
   status: string | null;
+  /**
+   * Who it belongs to.
+   *
+   * A REP NEVER NEEDS THIS — once rep-owned institutes ship, RLS has already
+   * narrowed their picker to their own. It is here for the ADMIN's assign
+   * picker, where RLS narrows nothing and the list has to be filtered to the
+   * rep being assigned to, or every assignment would be refused by FO023.
+   */
+  registered_by: string | null;
 }
 
 export async function listInstitutesForPicker(): Promise<PickerInstitute[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("institutes")
-    .select("id, name, city, status")
+    .select("id, name, city, status, registered_by")
     .order("name");
 
   if (error) {

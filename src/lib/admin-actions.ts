@@ -17,6 +17,7 @@ import {
   flushSchema,
   newMemberSchema,
   purposeSchema,
+  reassignSchema,
   removeSchema,
   statusRenameSchema,
   statusSchema,
@@ -42,6 +43,78 @@ const FOREIGN_KEY_VIOLATION = "23503";
 
 function denied(error: string): AdminState {
   return { error, fieldErrors: {} };
+}
+
+/* ------------------------------------------------------------------ */
+/* Institute ownership                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Move an institute to another rep.
+ *
+ * THIS IS A PERMISSIONS CHANGE, not bookkeeping, and it is worth being blunt
+ * about that here because the column it writes has spent its whole life being
+ * the opposite. `registered_by` was an audit stamp from 0001; rep-owned
+ * institutes make it the column `institutes_select` keys on, so moving it grants
+ * one rep sight of an institute's whole pipeline — its detail, its status
+ * journey, its row in Pending — and takes it from another.
+ *
+ * `guard_institute_owner()` (FO010) has always allowed an admin to do this and
+ * always refused a rep, so nothing needed unlocking. What the migration adds is
+ * where it may point: FO025 refuses a rep on another campus, and refuses the
+ * move at all while the current owner is mid-visit at that institute.
+ *
+ * The same-campus rule is enforced twice on purpose — the picker only offers
+ * reps on the institute's campus, and FO025 refuses anything else. The picker
+ * is the courtesy; the trigger is the control.
+ */
+export async function reassignInstitute(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = reassignSchema.safeParse({
+    institute_id: textOf(formData, "institute_id"),
+    member: textOf(formData, "member"),
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELD, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+
+  const { error } = await gate.supabase
+    .from("institutes")
+    .update({ registered_by: parsed.data.member })
+    .eq("id", parsed.data.institute_id);
+
+  if (error) {
+    logError("admin:reassign-institute", error);
+    // FO025 arrives with migration 0028. Mapped by CODE rather than message, so
+    // the wording lives here and no database text reaches a screen.
+    if (error.code === "FO025") {
+      return denied(
+        "That cannot be moved right now — either the rep is not on this " +
+          "institute's campus, or its current owner is part-way through a " +
+          "visit there. Try again once they have finished.",
+      );
+    }
+    if (error.code === "FO010") {
+      return denied("Only an admin can change who an institute belongs to.");
+    }
+    return denied(toFriendlyMessage(error, "We could not reassign that institute."));
+  }
+
+  // The registry, the detail page and — once the policy narrows — both reps'
+  // Pending all read this.
+  revalidatePath("/institutes", "layout");
+  revalidatePath("/pending");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: "Reassigned. It now belongs to that rep.",
+  };
 }
 
 /* ------------------------------------------------------------------ */
