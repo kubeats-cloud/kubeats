@@ -9,6 +9,7 @@ import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
 import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { listStatusCatalogue } from "@/lib/statuses";
 import {
   getTodayPlan,
   listInstitutesForPicker,
@@ -30,13 +31,16 @@ export default async function DashboardPage() {
 
   // An admin loads the supervision view; a rep loads their own day. Neither
   // pays for the other's queries.
-  const [plan, institutes, purposes, openLoops, week, overview] = await Promise.all([
+  const [plan, institutes, purposes, openLoops, week, overview, catalogue] = await Promise.all([
     admin ? Promise.resolve({ ok: true as const, entries: [] }) : getTodayPlan(user.id),
     admin ? Promise.resolve([]) : listInstitutesForPicker(),
     admin ? Promise.resolve([]) : listPurposes(),
     admin ? Promise.resolve(new Map<string, number>()) : openLoopsByMember(),
     admin ? Promise.resolve(null) : getWeekSummary(user.id, weekStart),
     admin ? getOverview() : Promise.resolve(null),
+    // The status vocabulary. Cheap, and needed by the plan picker to say when an
+    // institute is being re-opened after a closed loop.
+    listStatusCatalogue(),
   ]);
 
   const entries = plan.ok ? plan.entries : [];
@@ -69,6 +73,7 @@ export default async function DashboardPage() {
               institutes={institutes}
               purposes={purposes}
               entries={plan.entries}
+              catalogue={catalogue}
             />
           ) : (
             <ErrorState message="We could not load today's plan. Please try again in a moment." />

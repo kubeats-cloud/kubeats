@@ -41,63 +41,164 @@ export const BOARD_OPTIONS = [
 export const STATUS_CATEGORIES = ["open", "closed"] as const;
 export type StatusCategory = (typeof STATUS_CATEGORIES)[number];
 
+/** The badge colours a status may take. Mirrors institute_statuses_tone_valid. */
+export const STATUS_TONES = ["success", "warning", "danger", "neutral"] as const;
+export type StatusTone = (typeof STATUS_TONES)[number];
+
 /**
- * Rule 4: the nine fixed values, mirroring the institutes_status_valid CHECK,
- * each paired with its open/closed category.
+ * One status, as `public.institute_statuses` holds it.
  *
- * **This is the single source of truth for the mapping.** Its counterpart in
- * the database is the `public.institute_statuses` lookup table and
- * `public.institute_status_category()` (migration 0010), and the two are held
- * together by the `institute_status_category` suite in
- * tests/integration/rules.test.ts, which fails if either side moves alone.
- * Nothing else may decide whether a status is open or closed — ask
- * `statusCategory()` here or the SQL function there.
- *
- * Order is display order: it drives the dropdown and the lookup table's
- * sort_order, so the list a rep reads and the list a query returns agree.
+ * `tone` is a stored column and not a derivation, because colour tracks the
+ * OUTCOME rather than the open/closed category — "First meeting done" is green
+ * and still open. The `asks*` flags are the closed vocabulary of extra question
+ * groups a status can turn on; the follow-up is deliberately not among them,
+ * because it IS the category and `enforce_follow_up_when_open()` (FO016)
+ * enforces it from the database.
  */
-export const INSTITUTE_STATUS_CATALOGUE = [
-  { status: "First meeting done", category: "open" },
-  { status: "Session scheduled", category: "open" },
-  { status: "Session done", category: "closed" },
-  { status: "Campus visit scheduled", category: "open" },
-  { status: "Campus visit done", category: "closed" },
-  { status: "Pending for management approval", category: "open" },
-  { status: "Invited principal for event", category: "open" },
-  { status: "RSVP received", category: "closed" },
-  { status: "Will not come", category: "closed" },
-] as const;
+export interface StatusRow {
+  status: string;
+  category: StatusCategory;
+  tone: StatusTone;
+  sortOrder: number;
+  isActive: boolean;
+  asksExpectedDate: boolean;
+  asksSessionDetail: boolean;
+  asksHeadCount: boolean;
+}
 
-export type InstituteStatus =
-  (typeof INSTITUTE_STATUS_CATALOGUE)[number]["status"];
+/** The vocabulary, in display order. Loaded from the database at read time. */
+export type StatusCatalogue = readonly StatusRow[];
 
-export const INSTITUTE_STATUSES: readonly InstituteStatus[] =
-  INSTITUTE_STATUS_CATALOGUE.map((entry) => entry.status);
+/**
+ * THE NINE, AS A SEED AND A FALLBACK — no longer as the source of truth.
+ *
+ * This was `INSTITUTE_STATUS_CATALOGUE`, and it WAS the app's single source of
+ * truth for the open/closed mapping. Migration 0026 ends that: the two CHECK
+ * constraints became foreign keys to `public.institute_statuses`, so the
+ * database states the vocabulary once and an admin can extend it. A constant in
+ * here cannot know about a status added last week.
+ *
+ * So it keeps two jobs and loses the important one:
+ *
+ *   SEED      what a fresh database is created with. 0010 inserted exactly
+ *             these nine with these categories; 0026 gave them these tones and
+ *             flags, lifted from the hard-coded behaviour they replaced.
+ *   FALLBACK  what the app renders with if the status read fails. Nine correct
+ *             statuses beat an empty dropdown on a screen a rep is standing in
+ *             front of.
+ *
+ * It must still agree with the database for these nine — the
+ * `institute_status_category` suite in tests/integration/rules.test.ts checks
+ * that — but it is no longer the whole list, and nothing may assume it is.
+ */
+export const SEED_STATUS_CATALOGUE: StatusCatalogue = [
+  row("First meeting done", "open", "success"),
+  row("Session scheduled", "open", "warning", { asksExpectedDate: true }),
+  row("Session done", "closed", "success", {
+    asksExpectedDate: true,
+    asksSessionDetail: true,
+    asksHeadCount: true,
+  }),
+  row("Campus visit scheduled", "open", "warning", { asksExpectedDate: true }),
+  row("Campus visit done", "closed", "success", {
+    asksExpectedDate: true,
+    asksHeadCount: true,
+  }),
+  row("Pending for management approval", "open", "danger"),
+  row("Invited principal for event", "open", "warning"),
+  row("RSVP received", "closed", "success"),
+  row("Will not come", "closed", "neutral"),
+].map((entry, index) => ({ ...entry, sortOrder: index + 1 }));
 
-const CATEGORY_BY_STATUS = new Map<string, StatusCategory>(
-  INSTITUTE_STATUS_CATALOGUE.map((entry) => [entry.status, entry.category] as const),
+function row(
+  status: string,
+  category: StatusCategory,
+  tone: StatusTone,
+  asks: Partial<
+    Pick<StatusRow, "asksExpectedDate" | "asksSessionDetail" | "asksHeadCount">
+  > = {},
+): StatusRow {
+  return {
+    status,
+    category,
+    tone,
+    sortOrder: 0,
+    isActive: true,
+    asksExpectedDate: false,
+    asksSessionDetail: false,
+    asksHeadCount: false,
+    ...asks,
+  };
+}
+
+/** The seeded status names. A seed, not the vocabulary — see above. */
+export const SEED_STATUSES: readonly string[] = SEED_STATUS_CATALOGUE.map(
+  (entry) => entry.status,
 );
 
+/**
+ * Look one status up.
+ *
+ * Every question below goes through here, so there is one place that decides
+ * what "unknown" means: null, for a status the catalogue does not have and for
+ * no status at all. An unknown status is NOT closed — treating it as closed
+ * would quietly finish a loop nobody finished.
+ */
+export function statusRow(
+  catalogue: StatusCatalogue,
+  status: string | null,
+): StatusRow | null {
+  if (status === null) return null;
+  return catalogue.find((entry) => entry.status === status) ?? null;
+}
+
 /** The category of a status, or null for an unknown one and for no status. */
-export function statusCategory(status: string | null): StatusCategory | null {
-  return status === null ? null : (CATEGORY_BY_STATUS.get(status) ?? null);
+export function statusCategory(
+  catalogue: StatusCatalogue,
+  status: string | null,
+): StatusCategory | null {
+  return statusRow(catalogue, status)?.category ?? null;
 }
 
-export function isOpenStatus(status: string | null): boolean {
-  return statusCategory(status) === "open";
+export function isOpenStatus(
+  catalogue: StatusCatalogue,
+  status: string | null,
+): boolean {
+  return statusCategory(catalogue, status) === "open";
 }
 
-export function isClosedStatus(status: string | null): boolean {
-  return statusCategory(status) === "closed";
+export function isClosedStatus(
+  catalogue: StatusCatalogue,
+  status: string | null,
+): boolean {
+  return statusCategory(catalogue, status) === "closed";
 }
 
-/** The statuses in one category, in catalogue order. Drives the dropdown. */
+/**
+ * The statuses a rep may CHOOSE, in one category.
+ *
+ * Retired statuses are filtered out here and nowhere else: they must stay
+ * readable for every institute and visit that already carries one, and simply
+ * stop being offered. Ordered by `sortOrder` then name, because 0026 drops the
+ * UNIQUE on sort_order and ties have to resolve the same way every render.
+ */
 export function statusesInCategory(
+  catalogue: StatusCatalogue,
   category: StatusCategory,
-): readonly InstituteStatus[] {
-  return INSTITUTE_STATUS_CATALOGUE.filter(
-    (entry) => entry.category === category,
-  ).map((entry) => entry.status);
+): readonly string[] {
+  return catalogue
+    .filter((entry) => entry.isActive && entry.category === category)
+    .toSorted(
+      (a, b) => a.sortOrder - b.sortOrder || a.status.localeCompare(b.status),
+    )
+    .map((entry) => entry.status);
+}
+
+/** Every status a rep may choose, both categories, in display order. */
+export function selectableStatuses(catalogue: StatusCatalogue): readonly string[] {
+  return STATUS_CATEGORIES.flatMap((category) =>
+    statusesInCategory(catalogue, category),
+  );
 }
 
 /** What a person is told each category means. */
@@ -119,13 +220,16 @@ export const CATEGORY_LABELS: Record<StatusCategory, string> = {
  * every row of a long list and bury the one distinction that changes what the
  * rep is about to do.
  */
-export function institutePickerLabel(institute: {
-  name: string;
-  city: string | null;
-  status: string | null;
-}): string {
+export function institutePickerLabel(
+  catalogue: StatusCatalogue,
+  institute: {
+    name: string;
+    city: string | null;
+    status: string | null;
+  },
+): string {
   const place = institute.city ? ` · ${institute.city}` : "";
-  return isClosedStatus(institute.status)
+  return isClosedStatus(catalogue, institute.status)
     ? `${institute.name}${place} (closed: ${institute.status})`
     : `${institute.name}${place}`;
 }
@@ -144,10 +248,14 @@ export function institutePickerLabel(institute: {
  */
 export function reopeningInstitute<
   T extends { id: string; status: string | null },
->(institutes: readonly T[], selectedId: string): T | null {
+>(
+  catalogue: StatusCatalogue,
+  institutes: readonly T[],
+  selectedId: string,
+): T | null {
   if (!selectedId) return null;
   const selected = institutes.find((institute) => institute.id === selectedId);
-  return selected && isClosedStatus(selected.status) ? selected : null;
+  return selected && isClosedStatus(catalogue, selected.status) ? selected : null;
 }
 
 /** Blank optional fields arrive from a form as "", which we store as null. */

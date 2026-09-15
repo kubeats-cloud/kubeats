@@ -18,6 +18,7 @@ import {
   getInstituteVisits,
 } from "@/lib/institutes";
 import { activityLabel } from "@/lib/activities";
+import { listStatusCatalogue } from "@/lib/statuses";
 import { class12Total, STREAMS, TYPE_LABELS } from "@/lib/validation/institute";
 
 export const metadata = { title: "Institute" };
@@ -49,9 +50,10 @@ export default async function InstituteDetailPage(
   if (!institute) notFound();
 
   // Two independent reads, so the slower one does not hold up the other.
-  const [history, statusHistory] = await Promise.all([
+  const [history, statusHistory, catalogue] = await Promise.all([
     getInstituteVisits(id),
     getInstituteStatusHistory(id),
+    listStatusCatalogue(),
   ]);
   const total = class12Total(institute.class12);
 
@@ -73,7 +75,7 @@ export default async function InstituteDetailPage(
       />
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
-        <InstituteStatusBadge status={institute.status} />
+        <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
         <Badge variant="secondary">{TYPE_LABELS[institute.type]}</Badge>
         {institute.status_updated_at && (
           <span className="text-muted-foreground text-xs">
@@ -189,6 +191,7 @@ export default async function InstituteDetailPage(
           <StatusTimeline
             changes={statusHistory.changes}
             currentStatus={institute.status}
+            catalogue={catalogue}
           />
         )}
       </div>

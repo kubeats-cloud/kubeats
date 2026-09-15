@@ -27,7 +27,9 @@ import type { OpenLoop, PlanEntry } from "@/lib/visits";
 import {
   CATEGORY_LABELS,
   STATUS_CATEGORIES,
+  statusRow,
   statusesInCategory,
+  type StatusCatalogue,
 } from "@/lib/validation/institute";
 import {
   type ActivityKey,
@@ -62,11 +64,20 @@ export function LogVisitForm({
   userId,
   plan,
   openLoops,
+  catalogue,
 }: {
   userId: string;
   /** The checked-in plan entry this visit belongs to. */
   plan: PlanEntry;
   openLoops: OpenLoop[];
+  /**
+   * The status vocabulary, read from the database by the page.
+   *
+   * Handed down rather than imported so the browser judges a submission by the
+   * same list the server will — including a status an admin added this morning,
+   * which a constant in the bundle could not know about.
+   */
+  catalogue: StatusCatalogue;
 }) {
   const [serverState, formAction, isPending] = useActionState(
     logAndFileVisit,
@@ -105,7 +116,8 @@ export function LogVisitForm({
   // from: a "Set" session or campus visit is a promise about a future day, so
   // it must name one. The purpose is what says Set now.
   const needsDate = expectedDateRequired(activity, lifecycleStatus || null);
-  const needsFollowUp = followUpRequired(status);
+  const needsFollowUp = followUpRequired(catalogue, status);
+  const chosenStatus = statusRow(catalogue, status);
 
   /*
    * handleFollowUpDate() stood here — it pre-filled the time to 11:00 the
@@ -287,7 +299,7 @@ export function LogVisitForm({
               {STATUS_CATEGORIES.map((category) => (
                 <SelectGroup key={category}>
                   <SelectLabel>{CATEGORY_LABELS[category]}</SelectLabel>
-                  {statusesInCategory(category).map((option) => (
+                  {statusesInCategory(catalogue, category).map((option) => (
                     <SelectItem key={option} value={option}>
                       {option}
                     </SelectItem>
@@ -353,7 +365,10 @@ export function LogVisitForm({
       </FormSection>
 
       <FeedbackFields
-        status={status}
+        asks={{
+          sessionDetail: chosenStatus?.asksSessionDetail ?? false,
+          headCount: chosenStatus?.asksHeadCount ?? false,
+        }}
         value={feedback}
         // Functional, so two changes in one tick both survive: the second
         // merges against the first's result rather than against the render it

@@ -2,7 +2,8 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { tallyVisitMetrics } from "@/lib/validation/weekly";
 import {
-  INSTITUTE_STATUSES,
+  SEED_STATUSES,
+  SEED_STATUS_CATALOGUE,
   isOpenStatus,
   statusCategory,
 } from "@/lib/validation/institute";
@@ -28,6 +29,16 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const configured = Boolean(url && anon && serviceKey);
 
 const CHECK_VIOLATION = "23514";
+/**
+ * A value that is not in the table it references.
+ *
+ * Needed from migration 0026 on, which converts the status vocabulary from two
+ * CHECK constraints listing nine literals into foreign keys to
+ * public.institute_statuses. The refusal is the same refusal; only its code
+ * moves, because the vocabulary moved from the constraint into a table an admin
+ * can extend.
+ */
+const FOREIGN_KEY_VIOLATION = "23503";
 const INSUFFICIENT_PRIVILEGE = "42501";
 
 /** Every row these tests create carries this, so cleanup can find them. */
@@ -1550,7 +1561,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .order("sort_order");
 
         expect(error).toBeNull();
-        expect(data?.map((row) => row.status)).toEqual([...INSTITUTE_STATUSES]);
+        expect(data?.map((row) => row.status)).toEqual([...SEED_STATUSES]);
       });
 
       it("gives every status the same category the app does", async () => {
@@ -1559,26 +1570,26 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .select("status, category");
 
         for (const row of data ?? []) {
-          expect(row.category, row.status).toBe(statusCategory(row.status));
+          expect(row.category, row.status).toBe(statusCategory(SEED_STATUS_CATALOGUE, row.status));
         }
       });
 
       it("answers institute_status_category() the way the app does", async () => {
-        for (const status of INSTITUTE_STATUSES) {
+        for (const status of SEED_STATUSES) {
           const { data, error } = await admin.rpc("institute_status_category", {
             p_status: status,
           });
           expect(error, status).toBeNull();
-          expect(data, status).toBe(statusCategory(status));
+          expect(data, status).toBe(statusCategory(SEED_STATUS_CATALOGUE, status));
         }
       });
 
       it("answers institute_status_is_open() the way the app does", async () => {
-        for (const status of INSTITUTE_STATUSES) {
+        for (const status of SEED_STATUSES) {
           const { data } = await admin.rpc("institute_status_is_open", {
             p_status: status,
           });
-          expect(data, status).toBe(isOpenStatus(status));
+          expect(data, status).toBe(isOpenStatus(SEED_STATUS_CATALOGUE, status));
         }
       });
 
@@ -1610,13 +1621,39 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         }
       });
 
-      it("still refuses a status outside the nine", async () => {
+      it("still refuses a status the vocabulary does not have", async () => {
         const { error } = await admin
           .from("institutes")
           .update({ status: "Principal said maybe" })
           .eq("id", instituteId);
 
-        expect(error?.code).toBe(CHECK_VIOLATION);
+        // 23514 (CHECK) before migration 0026, 23503 (foreign key) after it.
+        // The RULE is identical — a status outside the vocabulary is refused —
+        // and what changed is where the vocabulary is written down: a CHECK
+        // listing nine literals became an FK to public.institute_statuses, so
+        // that an admin can extend it in stage 4b without every visit being
+        // rejected by a constraint that has never heard of the new value.
+        //
+        // Both codes are accepted rather than the test being flipped, for the
+        // same reason the 0018 and 0023 cases are gated: this suite has to be
+        // honest on both sides of a migration instead of red on one.
+        expect([CHECK_VIOLATION, FOREIGN_KEY_VIOLATION]).toContain(error?.code);
+      });
+
+      it("refuses a status the vocabulary does not have on a VISIT too", async () => {
+        // The other half of the same conversion, and the one that matters more:
+        // institutes.status is set through log_visit(), but visits.status_set_to
+        // is what Pending, FO016 and every rollup read.
+        await ensureArrival(repA.id, instituteId, iso());
+        const { error } = await admin.from("visits").insert({
+          institute_id: instituteId,
+          member: repA.id,
+          activity: "olympiad",
+          date: iso(),
+          photo_url: photoFor(repA.id),
+          status_set_to: "Principal said maybe",
+        });
+        expect([CHECK_VIOLATION, FOREIGN_KEY_VIOLATION]).toContain(error?.code);
       });
 
       it("records each new status on a visit", async () => {
@@ -1695,14 +1732,14 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           // them. enforce_follow_up_when_open() only ever sees new rows.
           //
           // It asks institute_status_is_open() rather than keeping its own
-          // list, and followUpRequired() asks isOpenStatus(), so this compares
+          // list, and followUpRequired(SEED_STATUS_CATALOGUE, ) asks isOpenStatus(SEED_STATUS_CATALOGUE, ), so this compares
           // two answers to one question rather than two copies of a list.
-          for (const status of INSTITUTE_STATUSES) {
+          for (const status of SEED_STATUSES) {
             const { error } = await admin
               .from("visits")
               .insert(visitWith(status, null));
             expect(Boolean(error), `${status} without a follow-up`).toBe(
-              followUpRequired(status),
+              followUpRequired(SEED_STATUS_CATALOGUE, status),
             );
           }
         },

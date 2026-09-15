@@ -6,6 +6,7 @@ import { FeedbackFields } from "@/components/visits/feedback-fields";
 import {
   EMPTY_FEEDBACK,
   applyFeedbackPatch,
+  type FeedbackAsks,
   type FeedbackState,
 } from "@/lib/validation/feedback";
 import { submitFeedback } from "@/lib/feedback-actions";
@@ -31,15 +32,15 @@ import { FormNotice } from "@/components/form-notice";
 export function FeedbackOnlyForm({
   visitId,
   planId,
-  status,
+  asks,
   openLoops,
   alreadyClosed = false,
 }: {
   visitId: string;
   /** Null when the check-in is already closed and there is no check-out left. */
   planId: string | null;
-  /** The status recorded when the visit was logged. */
-  status: string | null;
+  /** Which extra questions the recorded status turns on (migration 0026). */
+  asks: FeedbackAsks;
   openLoops: OpenLoop[];
   /** Swept overnight, or cleared by an admin, before the report was filed. */
   alreadyClosed?: boolean;
@@ -59,7 +60,7 @@ export function FeedbackOnlyForm({
       </p>
 
       <FeedbackFields
-        status={status}
+        asks={asks}
         value={feedback}
         // Functional, so two changes in one tick both survive: the second
         // merges against the first's result rather than against the render it

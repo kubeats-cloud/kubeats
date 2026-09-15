@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
+import type { StatusCatalogue } from "@/lib/validation/institute";
 import type { Institute } from "@/lib/institutes";
 import {
   class12Total,
@@ -35,7 +36,14 @@ const ALL = "__all__";
  * Filter options are derived from the institutes actually present, so the
  * dropdowns never offer a state with nothing in it.
  */
-export function InstitutesBrowser({ institutes }: { institutes: Institute[] }) {
+export function InstitutesBrowser({
+  institutes,
+  catalogue,
+}: {
+  institutes: Institute[];
+  /** The status vocabulary, loaded by the page that renders this. */
+  catalogue: StatusCatalogue;
+}) {
   const [search, setSearch] = useState("");
   const [state, setState] = useState(ALL);
   const [city, setCity] = useState(ALL);
@@ -205,7 +213,7 @@ export function InstitutesBrowser({ institutes }: { institutes: Institute[] }) {
           <ul className="space-y-3 md:hidden">
             {filtered.map((institute) => (
               <li key={institute.id}>
-                <InstituteCard institute={institute} />
+                <InstituteCard institute={institute} catalogue={catalogue} />
               </li>
             ))}
           </ul>
@@ -274,7 +282,7 @@ export function InstitutesBrowser({ institutes }: { institutes: Institute[] }) {
                             .join(", ") || "—"}
                         </td>
                         <td className="px-5 py-3">
-                          <InstituteStatusBadge status={institute.status} />
+                          <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
                         </td>
                         <td className="px-5 py-3">{keyContact(institute)}</td>
                         <td className="px-5 py-3 text-right tabular-nums">{streams}</td>
@@ -313,7 +321,13 @@ function keyContact(institute: Institute): string {
   return institute.principal_name ?? "—";
 }
 
-function InstituteCard({ institute }: { institute: Institute }) {
+function InstituteCard({
+  institute,
+  catalogue,
+}: {
+  institute: Institute;
+  catalogue: StatusCatalogue;
+}) {
   const streams = streamCount(institute.class11, institute.class12);
   const students = class12Total(institute.class12);
 
@@ -339,7 +353,7 @@ function InstituteCard({ institute }: { institute: Institute }) {
         </div>
 
         <div className="mt-3">
-          <InstituteStatusBadge status={institute.status} />
+          <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
         </div>
 
         <p className="text-muted-foreground mt-3 truncate text-xs">

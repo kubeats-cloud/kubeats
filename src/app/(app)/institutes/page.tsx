@@ -5,11 +5,15 @@ import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
 import { InstitutesBrowser } from "@/components/institutes/institutes-browser";
 import { listInstitutes } from "@/lib/institutes";
+import { listStatusCatalogue } from "@/lib/statuses";
 
 export const metadata = { title: "Institutes" };
 
 export default async function InstitutesPage() {
-  const result = await listInstitutes();
+  const [result, catalogue] = await Promise.all([
+    listInstitutes(),
+    listStatusCatalogue(),
+  ]);
 
   return (
     <>
@@ -27,7 +31,7 @@ export default async function InstitutesPage() {
       />
 
       {result.ok ? (
-        <InstitutesBrowser institutes={result.institutes} />
+        <InstitutesBrowser institutes={result.institutes} catalogue={catalogue} />
       ) : (
         <ErrorState message="We could not load the registry just now. Please try again in a moment." />
       )}

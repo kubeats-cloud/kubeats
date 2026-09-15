@@ -28,6 +28,7 @@ import {
 import {
   institutePickerLabel,
   reopeningInstitute,
+  type StatusCatalogue,
 } from "@/lib/validation/institute";
 import {
   formatDuration,
@@ -47,10 +48,13 @@ export function DailyPlan({
   institutes,
   purposes,
   entries,
+  catalogue,
 }: {
   institutes: PickerInstitute[];
   purposes: PurposeOption[];
   entries: PlanEntry[];
+  /** The status vocabulary, for the closed-institute warning and its label. */
+  catalogue: StatusCatalogue;
 }) {
   const [state, formAction, isPending] = useActionState(
     addToDailyPlan,
@@ -178,7 +182,7 @@ export function DailyPlan({
 
   // Non-null only when the selected institute's loop is already finished —
   // the one case worth saying something about before the rep hits Add.
-  const reopening = reopeningInstitute(institutes, instituteId);
+  const reopening = reopeningInstitute(catalogue, institutes, instituteId);
 
   return (
     <Card>
@@ -209,7 +213,7 @@ export function DailyPlan({
                 <SelectContent>
                   {institutes.map((institute) => (
                     <SelectItem key={institute.id} value={institute.id}>
-                      {institutePickerLabel(institute)}
+                      {institutePickerLabel(catalogue, institute)}
                     </SelectItem>
                   ))}
                 </SelectContent>

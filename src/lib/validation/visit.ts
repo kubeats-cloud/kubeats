@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { INSTITUTE_STATUSES, isOpenStatus } from "@/lib/validation/institute";
+import {
+  SEED_STATUS_CATALOGUE,
+  isOpenStatus,
+  selectableStatuses,
+  type StatusCatalogue,
+} from "@/lib/validation/institute";
 
 /**
  * The visit workflow's rules, in one place, shared by the browser and the
@@ -59,8 +64,11 @@ export function activityLabelFor(activity: string): string {
  * A CLOSED status may still CARRY a follow-up — "they said no, ask again next
  * intake" is a real note to leave, and 0010 kept it permitted on purpose.
  */
-export function followUpRequired(status: string | null): boolean {
-  return isOpenStatus(status);
+export function followUpRequired(
+  catalogue: StatusCatalogue,
+  status: string | null,
+): boolean {
+  return isOpenStatus(catalogue, status);
 }
 
 /*
@@ -227,7 +235,36 @@ const optionalCoord = (limit: number) =>
       message: "Invalid coordinate.",
     });
 
-export const visitSchema = z
+/**
+ * The visit form's rules — built against a catalogue rather than a constant.
+ *
+ * A FACTORY as of stage 4a, and it has to be. The status vocabulary lives in
+ * `public.institute_statuses` now (migration 0026 made both columns foreign
+ * keys to it), so an admin can add one — and a schema holding a hard-coded list
+ * would refuse the very status the database just accepted. Two of the rules
+ * here read the catalogue: which statuses are allowed at all, and whether the
+ * chosen one leaves the institute open and therefore owes a follow-up date.
+ *
+ * Built once per request on the server from the loaded catalogue, and once in
+ * the browser from the same list handed down as props, so both ends judge the
+ * same submission by the same rules. That is the arrangement `feedback.ts`
+ * already uses for its two schemas.
+ */
+export function makeVisitSchema(catalogue: StatusCatalogue) {
+  return baseVisitSchema(catalogue);
+}
+
+/**
+ * The seeded nine, for callers that genuinely have no catalogue to hand.
+ *
+ * Tests, and nothing else. A server action MUST use `makeVisitSchema()` with
+ * the loaded catalogue — using this one would quietly refuse any status an
+ * admin has added, which is the whole failure stage 4a exists to prevent.
+ */
+export const visitSchema = baseVisitSchema(SEED_STATUS_CATALOGUE);
+
+function baseVisitSchema(catalogue: StatusCatalogue) {
+  return z
   .object({
     activity: z.enum(ACTIVITY_KEYS),
     institute_id: z.uuid("Select an institute."),
@@ -283,7 +320,7 @@ export const visitSchema = z
       .transform((v) => (v === "" ? null : v))
       .nullable()
       .refine(
-        (v) => v === null || (INSTITUTE_STATUSES as readonly string[]).includes(v),
+        (v) => v === null || selectableStatuses(catalogue).includes(v),
         { message: "Choose one of the listed statuses." },
       ),
     follow_up_date: optionalDate,
@@ -359,7 +396,7 @@ export const visitSchema = z
     //
     // `follow_up_time` is still ACCEPTED below — see the field — but nothing
     // renders it and nothing requires it.
-    if (followUpRequired(value.status_set_to) && !value.follow_up_date) {
+    if (followUpRequired(catalogue, value.status_set_to) && !value.follow_up_date) {
       ctx.addIssue({
         code: "custom",
         path: ["follow_up_date"],
@@ -367,8 +404,9 @@ export const visitSchema = z
       });
     }
   });
+}
 
-export type VisitInput = z.infer<typeof visitSchema>;
+export type VisitInput = z.infer<ReturnType<typeof makeVisitSchema>>;
 
 /** Shared so the browser and the server action read the form identically. */
 export function visitFormDataToInput(formData: FormData) {
