@@ -1643,9 +1643,11 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         }
       });
 
-      // A follow-up TIME rides along with the date from stage 3 on: an open
-      // status needs both (FO016). Before 0018 the extra column is simply
-      // stored and changes nothing, so one fixture serves both databases.
+      // The fixture carries a follow-up TIME on purpose, even though nothing
+      // requires one any more. From 0018 to 0023 an open status needed a date
+      // AND a time; 0023 drops the time and leaves the COLUMN, so a row that
+      // supplies one must still be accepted. Sending it here keeps that true
+      // on every database this suite can meet.
       const visitWith = (status: string, followUp: string | null) => ({
         institute_id: instituteId,
         member: repA.id,
@@ -1710,7 +1712,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         "no longer forbids a follow-up on the two scheduled statuses",
         async () => {
           // The reversal itself. Before 0018 these were refused outright;
-          // now they are the statuses that most need a date and a time.
+          // now they are the statuses that most need a date.
           for (const status of ["Session scheduled", "Campus visit scheduled"]) {
             const { error } = await admin
               .from("visits")
@@ -1720,13 +1722,39 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         },
       );
 
-      it.skipIf(!has0018)("wants a TIME as well as a date", async () => {
-        // The half that is genuinely new. A date alone puts a loop in a day
-        // rather than in a diary, which is how it goes quiet.
+      /**
+       * 0023 — the follow-up TIME stops being required.
+       *
+       * GATED BEHAVIOURALLY, not by a column probe, and that is the only thing
+       * unusual here. 0018 could be detected by asking PostgREST for a column
+       * it added; 0023 adds nothing and drops nothing — it replaces a trigger
+       * function's body — so there is no schema to look at through the API.
+       *
+       * The probe is therefore the insert itself, run once. Accepted means 0023
+       * is applied; FO016 means it is not, and the other branch asserts the
+       * 0018-to-0023 rule instead. Same bargain as has0018: describe both
+       * databases honestly rather than be red on one.
+       *
+       * 0023 only ever LOOSENS, so unlike 0018 it is safe to apply to a
+       * database well ahead of the code that needs it.
+       */
+      it.skipIf(!has0018)("asks for a DATE, and a time only before 0023", async () => {
         const { error } = await admin
           .from("visits")
           .insert({ ...visitWith("Session scheduled", iso(7)), follow_up_time: null });
-        expect(error?.code).toBe("FO016");
+
+        if (error === null) {
+          // 0023 applied: a date alone is the whole rule.
+          expect(error).toBeNull();
+        } else {
+          // Pre-0023: the time was required beside the date, and the message
+          // said so. Anything else is a real failure.
+          expect(
+            error.code,
+            `unexpected refusal of a dated follow-up: ${error.message}`,
+          ).toBe("FO016");
+          expect(error.message).toMatch(/time/i);
+        }
       });
 
       it.skipIf(has0018)(

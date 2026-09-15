@@ -235,14 +235,22 @@ faster. See README for both.
   disagree. Nothing may decide open-vs-closed for itself; ask one of those two.
   Note that null is neither open nor closed: "no status yet" is its own thing.
 - **Rule 5 IS the open category now**, which is the reverse of what this said
-  through stage 2. An OPEN status needs a follow-up date **and time**; a CLOSED
-  one does not (though it may still carry one — "they said no, ask again next
-  intake" is a real note). `followUpRequired()` asks `isOpenStatus()` and
-  `enforce_follow_up_when_open()` (0018) asks
-  `public.institute_status_is_open()`, so neither side keeps its own list and
-  they cannot drift. It is a TRIGGER rather than a CHECK because two of the
-  three live visits carried an open status with no follow-up time and a
-  constraint would have refused to build.
+  through stage 2. An OPEN status needs a follow-up **date**; a CLOSED one does
+  not (though it may still carry one — "they said no, ask again next intake" is
+  a real note). `followUpRequired()` asks `isOpenStatus()` and
+  `enforce_follow_up_when_open()` asks `public.institute_status_is_open()`, so
+  neither side keeps its own list and they cannot drift. It is a TRIGGER rather
+  than a CHECK because two of the three live visits carried an open status with
+  no follow-up at all and a constraint would have refused to build.
+  **A DATE, and no longer a time.** 0018 required both and the form pre-filled
+  the time to 11:00 so a rep only really answered once; the client settled on
+  the date alone, so **migration 0023** rewrites the trigger to ask for the date
+  and the Time control is deleted. `visits.follow_up_time` is **dormant, not
+  dropped** — it keeps every value recorded between 0018 and 0023 — and
+  `visitSchema` still ACCEPTS one, so a page cached from before 0023 that posts
+  a time has it stored rather than silently discarded. 0023 only loosens, so
+  unlike 0018/0019/0022 it can be applied at any time, before or after its
+  deploy.
   0001's `visits_follow_up_hidden_when_scheduled` — which FORBADE a follow-up
   on the two "scheduled" statuses — is **dropped** by 0018. "Next session set"
   *is* "Session scheduled", so the old rule and the new one were opposites.
@@ -410,9 +418,9 @@ faster. See README for both.
   recovery path the rep typed a date into a box that discarded it. The pair now
   lives in `visitSchema` alone, rendered on Log Visit beside the status that
   decides it, and stored by `log_visit()`. The rule is the status: OPEN requires
-  a date **and** a time (`enforce_follow_up_when_open`, FO016; the time is
-  pre-filled from `DEFAULT_FOLLOW_UP_TIME` so it is a tap, not a decision),
-  CLOSED merely permits one. The "Is a next session set?" yes/no that used to
+  a **date** (`enforce_follow_up_when_open`, FO016 — see Rule 5 above for why
+  the time it also demanded from 0018 to 0023 is gone), CLOSED merely permits
+  one. The "Is a next session set?" yes/no that used to
   gate them is gone — it was a second answer to the same question, and choosing
   an open status while answering "No" hid fields the schema still required, so
   the error named a box that was not on the screen.

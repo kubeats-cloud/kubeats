@@ -152,7 +152,7 @@ describe("visitSchema", () => {
     ).toBe(true);
   });
 
-  it("requires a date AND a time for an open status (Rule 5, restated)", () => {
+  it("requires a DATE for an open status, and no longer a time (Rule 5)", () => {
     // Nothing at all — refused.
     expect(
       visitSchema.safeParse({
@@ -161,25 +161,29 @@ describe("visitSchema", () => {
       }).success,
     ).toBe(false);
 
-    // A date but no time — still refused. This is the half that is new: a
-    // date alone puts a loop in a day rather than in a diary.
+    // A DATE ALONE IS ENOUGH, and this is the half that changed. From 0018 to
+    // 0023 a time was required beside it and this case was refused; the
+    // client's spec settled on the date alone, so migration 0023 drops the time
+    // from enforce_follow_up_when_open() and the schema drops it here.
     expect(
       visitSchema.safeParse({
         ...baseVisit,
         status_set_to: "Pending for management approval",
         follow_up_date: "2026-09-30",
-      }).success,
-    ).toBe(false);
-
-    // Both — accepted.
-    expect(
-      visitSchema.safeParse({
-        ...baseVisit,
-        status_set_to: "Pending for management approval",
-        follow_up_date: "2026-09-30",
-        follow_up_time: "10:30",
       }).success,
     ).toBe(true);
+
+    // A time is still ACCEPTED if one somehow arrives — a page cached from
+    // before 0023 still has the picker on it, and what a rep typed should be
+    // stored rather than dropped. It is simply never asked for.
+    const withTime = visitSchema.safeParse({
+      ...baseVisit,
+      status_set_to: "Pending for management approval",
+      follow_up_date: "2026-09-30",
+      follow_up_time: "10:30",
+    });
+    expect(withTime.success).toBe(true);
+    if (withTime.success) expect(withTime.data.follow_up_time).toBe("10:30");
   });
 
   it("no longer FORBIDS a follow-up on a scheduled status", () => {
@@ -191,7 +195,6 @@ describe("visitSchema", () => {
         ...baseVisit,
         status_set_to: "Session scheduled",
         follow_up_date: "2026-09-30",
-        follow_up_time: "10:30",
       }).success,
     ).toBe(true);
   });

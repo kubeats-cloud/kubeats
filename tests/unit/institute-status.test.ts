@@ -214,10 +214,10 @@ describe("visitSchema accepts the widened vocabulary", () => {
       const result = visitSchema.safeParse({
         ...baseVisit,
         status_set_to: status,
-        // The open statuses demand a date AND a time; supplying both here
-        // keeps this test about the vocabulary rather than about Rule 5.
+        // The open statuses demand a date; supplying one here keeps this test
+        // about the vocabulary rather than about Rule 5. No time — 0023 took
+        // that half of the rule away.
         follow_up_date: followUpRequired(status) ? "2026-09-30" : "",
-        follow_up_time: followUpRequired(status) ? "10:30" : "",
       });
       expect(result.success, `${status}: ${result.error?.message}`).toBe(true);
     }
@@ -242,7 +242,6 @@ describe("visitSchema accepts the widened vocabulary", () => {
       ...baseVisit,
       status_set_to: "Invited principal for event",
       follow_up_date: "2026-09-20",
-      follow_up_time: "11:00",
     });
     expect(result.success).toBe(true);
   });
