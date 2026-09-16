@@ -9,8 +9,10 @@ import { LocationsPanel } from "@/components/settings/locations-panel";
 import { PurposesPanel } from "@/components/settings/purposes-panel";
 import { StatusesPanel } from "@/components/settings/statuses-panel";
 import { TeamPanel } from "@/components/settings/team-panel";
+import { SignInSecurityPanel } from "@/components/settings/sign-in-security-panel";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { listPurposeRows, listStatusRows, listTeamMembers } from "@/lib/admin";
+import { listAdminFactorStates, viewerHasFactor } from "@/lib/mfa-admin";
 import { getLocationTree } from "@/lib/locations";
 import { listCampuses } from "@/lib/campuses";
 
@@ -35,13 +37,23 @@ export default async function SettingsPage() {
   // The photo counts moved to /data with the flush that needed them; querying
   // storage on every Settings load for a number nothing shows would be a
   // request nobody asked for.
-  const [purposes, statuses, tree, members, campuses] = await Promise.all([
+  const [purposes, statuses, tree, members, campuses, enrolled] = await Promise.all([
     listPurposeRows(),
     listStatusRows(),
     getLocationTree(),
     listTeamMembers(),
     listCampuses(),
+    viewerHasFactor(),
   ]);
+
+  // Sequenced after `members` because it needs the admin rows. Only admins are
+  // listed: a rep cannot enrol, so a reset row for one could only ever read
+  // "nothing set up".
+  const adminFactors = await listAdminFactorStates(
+    members
+      .filter((member) => member.role === "admin")
+      .map((member) => ({ id: member.id, name: member.name })),
+  );
 
   return (
     <>
@@ -53,6 +65,13 @@ export default async function SettingsPage() {
 
       <SectionTitle>Team</SectionTitle>
       <TeamPanel members={members} campuses={campuses} />
+
+      <SectionTitle className="mt-8">Sign-in security</SectionTitle>
+      <SignInSecurityPanel
+        enrolled={enrolled}
+        viewerId={user.id}
+        admins={adminFactors}
+      />
 
       <SectionTitle className="mt-8">Shared lists</SectionTitle>
       {/* Side by side once there is room: two independent lists an admin edits

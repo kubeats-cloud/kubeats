@@ -2,11 +2,13 @@ import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/proxy";
 import { publicEnv } from "@/lib/env";
 import {
+  MFA_VERIFY_PATH,
   isAdminOnlyPath,
   isAuthPath,
   isPublicPath,
   isRepOnlyPath,
 } from "@/lib/nav";
+import { challengeRequiredFor } from "@/lib/mfa";
 
 /**
  * The role split, turned away here so each refusal is a real HTTP redirect.
@@ -102,6 +104,49 @@ export async function proxy(request: NextRequest) {
 
   if (user && isAuthPath(pathname)) {
     return redirectTo("/");
+  }
+
+  /*
+   * THE SECOND FACTOR, AND THIS IS WHERE IT IS ACTUALLY ENFORCED.
+   *
+   * `signInWithPassword()` hands back a REAL session before any code is typed.
+   * It is AAL1, and it can read and write everything that user can. So the code
+   * screen is not what stops an enrolled admin getting in — this is. Without
+   * these few lines, closing the code screen and typing "/" in the address bar
+   * walks around the whole feature, and MFA is decoration.
+   *
+   * It sits ABOVE the role gates deliberately. Those redirect to "/", so an
+   * admin owing a code who asked for an admin path would be sent to "/" and
+   * only then here — a second hop for no reason, and an ordering that would
+   * quietly start mattering the day either rule grows a special case.
+   *
+   * COSTS NOTHING FOR THE PEOPLE IT DOES NOT APPLY TO. `challengeRequiredFor()`
+   * asks about verified factors first, off the `getUser()` result the refresh
+   * above already fetched, and returns false before reading any claims. A rep
+   * and an un-enrolled admin therefore pay one boolean on an array that is
+   * almost always empty.
+   */
+  if (user) {
+    const owesCode = await challengeRequiredFor(supabase, user);
+    const onVerify = pathname === MFA_VERIFY_PATH;
+
+    // Owing a code: the code screen is the only page there is. Sign-out is a
+    // server action posted to whatever page is open, so it keeps working from
+    // there — which is the escape hatch for "wrong account" and for a lost
+    // authenticator.
+    if (owesCode && !onVerify) {
+      const intended = `${pathname}${search}`;
+      const params =
+        intended === "/" ? undefined : new URLSearchParams({ next: intended });
+      return redirectTo(MFA_VERIFY_PATH, params);
+    }
+
+    // Nothing to verify: either they finished, or they never had a factor. Not
+    // an error, just a page with no purpose, so it behaves like /login does for
+    // someone already signed in.
+    if (!owesCode && onVerify) {
+      return redirectTo("/");
+    }
   }
 
   // /weekly became /targets when the screen grew daily and monthly periods.

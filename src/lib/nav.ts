@@ -99,6 +99,23 @@ export const PUBLIC_PATHS = ["/login", "/privacy"] as const;
 export const AUTH_PATHS = ["/login"] as const;
 
 /**
+ * The second-factor code screen, and the reason it is not at /login/verify.
+ *
+ * `matches()` below is PREFIX-based — `pathname.startsWith(`${path}/`)` — so
+ * "/login/verify" would be an AUTH_PATH, and the proxy bounces signed-in users
+ * off those. An admin who had just given their password would be redirected to
+ * "/", the MFA gate would redirect them back to the code screen, and the auth
+ * rule would bounce them again: a loop, out of two rules that are each correct
+ * on their own. Same shape as the robots.txt matcher trap documented in
+ * proxy.ts's matcher.
+ *
+ * Top-level, therefore. It is NOT public — a signed-out visitor is sent to
+ * /login like anywhere else — and NOT an auth path, because being signed in is
+ * the whole precondition for being here. `nav.test.ts` pins all three.
+ */
+export const MFA_VERIFY_PATH = "/verify";
+
+/**
  * The routes a rep may reach and an admin may not.
  *
  * Hiding a tab is a convenience, never a boundary — `proxy.ts` turns an admin
