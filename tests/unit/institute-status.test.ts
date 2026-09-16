@@ -11,7 +11,7 @@ import {
   statusCategory,
   statusesInCategory,
 } from "@/lib/validation/institute";
-import { followUpRequired, visitSchema } from "@/lib/validation/visit";
+import { eventDateRequired, followUpRequired, visitSchema } from "@/lib/validation/visit";
 
 /**
  * Rule 4's vocabulary and the open/closed category that features C and D will
@@ -221,6 +221,10 @@ describe("visitSchema accepts the widened vocabulary", () => {
         // about the vocabulary rather than about Rule 5. No time — 0023 took
         // that half of the rule away.
         follow_up_date: followUpRequired(SEED_STATUS_CATALOGUE, status) ? "2026-09-30" : "",
+        // Four of the nine now ask for the event date too — it was rewired off
+        // the purpose's lifecycle and onto the status's asks_expected_date, so
+        // this loop has to satisfy both rules to stay about the vocabulary.
+        expected_date: eventDateRequired(SEED_STATUS_CATALOGUE, status) ? "2026-10-05" : "",
       });
       expect(result.success, `${status}: ${result.error?.message}`).toBe(true);
     }

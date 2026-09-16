@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { FormSection } from "@/components/form-section";
+import { RequiredMark } from "@/components/required-mark";
 import {
   type FeedbackAsks,
   type FeedbackPatch,
@@ -46,6 +47,7 @@ import { activityLabelFor } from "@/lib/validation/visit";
 
 export function FeedbackFields({
   asks,
+  notesRequired,
   value,
   onChange,
   fieldErrors,
@@ -60,6 +62,13 @@ export function FeedbackFields({
    * have students in them, which is what lets an admin add one that does.
    */
   asks: FeedbackAsks;
+  /**
+   * Whether Notes must be filled in — decided by the status, not by this
+   * component. `notesRequired()` excuses the instant closes ("RSVP received",
+   * "Will not come"), where the status is the whole answer and a sentence would
+   * only restate the dropdown.
+   */
+  notesRequired: boolean;
   value: FeedbackState;
   /**
    * Emits a PATCH, not a merged object, and that is the whole fix.
@@ -83,27 +92,15 @@ export function FeedbackFields({
     onChange({ [key]: v } as FeedbackPatch);
 
   const err = (key: string) =>
-    fieldErrors[key] ? <p className="text-danger text-xs">{fieldErrors[key]}</p> : null;
+    fieldErrors[key] ? (
+      <p className="text-danger text-xs">{fieldErrors[key]}</p>
+    ) : null;
 
   const wantsSession = asks.sessionDetail;
   const wantsCampusCount = asks.headCount && !asks.sessionDetail;
 
   return (
     <>
-      {/* NO SECTION TITLE. One field, and its own label asks the question — a
-          heading above it saying "Notes" over a box labelled "Notes" is one
-          label too many. The description stays, because "this is the whole
-          report" is the thing a rep wants to know. */}
-      <FormSection description="A few words. This is the whole report.">
-        <div className="space-y-2">
-          {/* "Notes", not "How did it go?" — the label only; same field, same
-              free text, same `notes` column. */}
-          <Label htmlFor="notes">Notes</Label>
-          <Textarea id="notes" name="notes" rows={4} maxLength={2000} />
-          {err("notes")}
-        </div>
-      </FormSection>
-
       {/* "Who did you meet?" STOOD HERE — a required name and an optional
           mobile. Withdrawn (change #17): the decision-maker and the principal
           are captured once at institute registration, where they are a property
@@ -119,15 +116,15 @@ export function FeedbackFields({
           silent. Bringing the question back is these fields restored, not a
           migration. */}
 
+      {/*
+        NO TITLE AND NO DESCRIPTION. These were a card headed "The session" with
+        a line reading "Asked because you marked the session done." — both
+        removed with the rest of the form's prose. Which status turned the
+        fields on is not news to the rep who just chose it, and the labels name
+        the fields perfectly well on their own.
+      */}
       {(wantsSession || wantsCampusCount) && (
-        <FormSection
-          title={wantsSession ? "The session" : "The campus visit"}
-          description={
-            wantsSession
-              ? "Asked because you marked the session done."
-              : "Asked because you marked the campus visit done."
-          }
-        >
+        <>
           {/* ONE COUNT.
               There were two here — present and participated — and the client's
               spec asks one question about students, not two. `students_reached`
@@ -136,7 +133,9 @@ export function FeedbackFields({
               Not required: a rep who did not count heads must still be able to
               file, which is how this number has always behaved. */}
           <div className="space-y-2">
-            <Label htmlFor="students-attended">Number of students</Label>
+            <Label htmlFor="students-attended">
+              Number of Students <RequiredMark />
+            </Label>
             <Input
               id="students-attended"
               name="students_attended"
@@ -144,19 +143,17 @@ export function FeedbackFields({
               className="h-11"
               value={value.studentsAttended}
               onChange={(e) => set("studentsAttended", e.target.value)}
+              aria-required
             />
-            <p className="text-muted-foreground text-xs">
-              {wantsSession
-                ? "Everyone who was in the room."
-                : "Everyone who came to see the campus."}
-            </p>
             {err("students_attended")}
           </div>
 
           {wantsSession && (
             <>
               <div className="space-y-2">
-                <Label htmlFor="session-topic">What was the topic?</Label>
+                <Label htmlFor="session-topic">
+                  Topic Title <RequiredMark />
+                </Label>
                 <Input
                   id="session-topic"
                   name="session_topic"
@@ -164,11 +161,14 @@ export function FeedbackFields({
                   maxLength={300}
                   value={value.sessionTopic}
                   onChange={(e) => set("sessionTopic", e.target.value)}
+                  aria-required
                 />
                 {err("session_topic")}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="session-taken-by">Who took it?</Label>
+                <Label htmlFor="session-taken-by">
+                  Taken By <RequiredMark />
+                </Label>
                 <Input
                   id="session-taken-by"
                   name="session_taken_by"
@@ -176,23 +176,25 @@ export function FeedbackFields({
                   maxLength={120}
                   value={value.sessionTakenBy}
                   onChange={(e) => set("sessionTakenBy", e.target.value)}
+                  aria-required
                 />
                 {err("session_taken_by")}
               </div>
             </>
           )}
-        </FormSection>
+        </>
       )}
 
       {/* Q2 — the offer, never automatic. A rep who set a session here earlier
           is asked whether THIS visit is the one that completed it, and the
           answer names the exact row so nobody is credited with the wrong loop. */}
       {openLoops.length > 0 && (
-        <FormSection
-          title="Does this close an earlier plan?"
-          description="You set these here and they are still open."
-        >
-          <input type="hidden" name="closes_visit_id" value={value.closesVisitId} />
+        <FormSection title="Does this close an earlier plan?">
+          <input
+            type="hidden"
+            name="closes_visit_id"
+            value={value.closesVisitId}
+          />
           <div className="space-y-2">
             {openLoops.map((loop) => {
               const chosen = value.closesVisitId === loop.id;
@@ -228,6 +230,29 @@ export function FeedbackFields({
           {err("closes_visit_id")}
         </FormSection>
       )}
+      {/*
+        NOTES IS LAST, ALWAYS.
+
+        It used to be FIRST, which put the free-text box above the three fields
+        a "Session done" actually needs — so a rep wrote the story, then found
+        out there were numbers to fill in, then scrolled back to check what they
+        had said. Last is also what the client's spec asks for, on all nine
+        statuses.
+
+        Required for seven of the nine and not for the two instant closes; the
+        caller decides, because the rule belongs to the status.
+      */}
+      <div className="space-y-2">
+        <Label htmlFor="notes">Notes {notesRequired && <RequiredMark />}</Label>
+        <Textarea
+          id="notes"
+          name="notes"
+          rows={4}
+          maxLength={2000}
+          aria-required={notesRequired || undefined}
+        />
+        {err("notes")}
+      </div>
     </>
   );
 }

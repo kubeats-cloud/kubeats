@@ -14,7 +14,7 @@ import {
   openLoopsAt,
 } from "@/lib/visits";
 import { visitStatusOf } from "@/lib/validation/checkin";
-import { plannedActivityIsValid } from "@/lib/validation/visit";
+import { notesRequired, plannedActivityIsValid } from "@/lib/validation/visit";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { statusRow } from "@/lib/validation/institute";
 import { todayISO } from "@/lib/dates";
@@ -119,6 +119,9 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
             headCount:
               statusRow(catalogue, existing.status_set_to)?.asksHeadCount ?? false,
           }}
+          // The same rule the Log Visit form applies, read from the status the
+          // visit already recorded rather than from a second copy on the form.
+          notesRequired={notesRequired(catalogue, existing.status_set_to)}
           openLoops={openLoops}
           alreadyClosed={!stillOpen}
         />

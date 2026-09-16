@@ -7,7 +7,7 @@ import { logError, toFriendlyMessage } from "@/lib/errors";
 import { CHECK_FIELDS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
 import {
-  feedbackFieldsSchema,
+  makeReportSchema,
   feedbackFormDataToInput,
   feedbackSchema,
 } from "@/lib/validation/feedback";
@@ -112,9 +112,49 @@ export async function submitFeedback(
   }
   const input = parsed.data;
 
+  /*
+   * THE SAME STATUS-DRIVEN REQUIREMENTS AS LOG VISIT, on the recovery path.
+   *
+   * This screen renders the identical conditional fields — it is handed the
+   * same `asks` flags — so it has to enforce the identical rules, or the one
+   * route that skips the Log Visit form becomes the route that files a blank
+   * session report.
+   *
+   * The status is read off the visit rather than posted, because the visit
+   * already has one: `enforce_status_required` (FO024) has refused an insert
+   * without one since 0027, and a form field would be a second, forgeable copy
+   * of a fact the row already holds.
+   *
+   * A visit from before 0027 can still carry a null status. That refines
+   * nothing, which is deliberate — an old row's report should not be blocked by
+   * a rule its visit never had the chance to satisfy.
+   */
+  const { data: visitRow } = await supabase
+    .from("visits")
+    .select("status_set_to")
+    .eq("id", input.visit_id)
+    .maybeSingle();
+
+  const catalogue = await listStatusCatalogue();
+  const reportParsed = makeReportSchema(
+    catalogue,
+    visitRow?.status_set_to ?? null,
+  ).safeParse(feedbackFormDataToInput(formData));
+
+  if (!reportParsed.success) {
+    return {
+      error: CHECK_FIELDS,
+      fieldErrors: visitFieldErrors(reportParsed.error),
+    };
+  }
+
   // Read straight off the form rather than through feedbackSchema: it is the
   // one thing here that must not be able to make a submission fail, and a field
   // inside that schema would do exactly that.
+  //
+  // AFTER the validation above, not before: if the report is going to be
+  // refused there is nothing to record a departure for, and the value would be
+  // thrown away.
   const checkoutFix = checkoutFixFromFormData(formData);
 
   const { error } = await supabase.rpc("close_visit", {
@@ -203,10 +243,23 @@ export async function logAndFileVisit(
    * visitSchema is the seeded fallback and is for tests.
    */
   const catalogue = await listStatusCatalogue();
-  const visitParsed = makeVisitSchema(catalogue).safeParse(
-    visitFormDataToInput(formData),
-  );
-  const feedbackParsed = feedbackFieldsSchema.safeParse(
+  const visitInput = visitFormDataToInput(formData);
+  const visitParsed = makeVisitSchema(catalogue).safeParse(visitInput);
+
+  /*
+   * THE REPORT'S REQUIREMENTS DEPEND ON THE STATUS, so the status has to be
+   * read before the report is parsed. Taken from the raw input rather than
+   * from `visitParsed.data`, so that a submission failing the visit half still
+   * gets its report half checked against the right status — otherwise a rep
+   * fixes the status error, submits again, and only then discovers the three
+   * fields that status requires.
+   *
+   * An unrecognised status refines nothing (`makeReportSchema` returns early),
+   * which is correct: the visit half is already reporting that as the error.
+   */
+  const chosenStatus =
+    typeof visitInput.status_set_to === "string" ? visitInput.status_set_to : null;
+  const feedbackParsed = makeReportSchema(catalogue, chosenStatus).safeParse(
     feedbackFormDataToInput(formData),
   );
 

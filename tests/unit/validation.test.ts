@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   ACTIVITY_KEYS,
-  expectedDateLabel,
-  expectedDateRequired,
+  eventDateLabel,
+  eventDateRequired,
+  notesRequired,
   fieldLabel,
   visitSchema,
 } from "@/lib/validation/visit";
+import { SEED_STATUS_CATALOGUE } from "@/lib/validation/institute";
 import { newMemberSchema, purposeSchema } from "@/lib/validation/admin";
 import { targetsSchema } from "@/lib/validation/weekly";
 
@@ -138,19 +140,53 @@ describe("visitSchema", () => {
     ).toBe(false);
   });
 
-  it("requires an expected date for a Set", () => {
+  /*
+   * THE DATE FOLLOWS THE STATUS, NOT THE LIFECYCLE.
+   *
+   * This used to assert that a "Set" session demanded a date whatever status it
+   * ended on. It is the opposite way round now: the status asks, so a Set
+   * session closed as "First meeting done" needs none, and a "Session done" —
+   * which has no Set lifecycle at all — needs one. That inversion is the fix.
+   */
+  it("requires the event date when the STATUS asks for it", () => {
+    // Set lifecycle, status that asks nothing: no date needed.
     expect(
       visitSchema.safeParse({
         ...baseVisit,
         activity: "session",
         lifecycle_status: "Set",
       }).success,
+    ).toBe(true);
+
+    // The status asks: refused without it, accepted with it.
+    const asking = {
+      ...baseVisit,
+      activity: "session",
+      lifecycle_status: "Set",
+      status_set_to: "Session scheduled",
+      follow_up_date: "2026-09-30",
+    };
+    expect(visitSchema.safeParse(asking).success).toBe(false);
+    expect(
+      visitSchema.safeParse({ ...asking, expected_date: "2026-09-30" }).success,
+    ).toBe(true);
+
+    // "Session done" carries no Set lifecycle and is exactly the status that
+    // knows when the thing happened — the case the old rule could never reach.
+    expect(
+      visitSchema.safeParse({
+        ...baseVisit,
+        activity: "session",
+        lifecycle_status: "Done",
+        status_set_to: "Session done",
+      }).success,
     ).toBe(false);
     expect(
       visitSchema.safeParse({
         ...baseVisit,
         activity: "session",
-        lifecycle_status: "Set",
+        lifecycle_status: "Done",
+        status_set_to: "Session done",
         expected_date: "2026-09-30",
       }).success,
     ).toBe(true);
@@ -199,6 +235,9 @@ describe("visitSchema", () => {
         ...baseVisit,
         status_set_to: "Session scheduled",
         follow_up_date: "2026-09-30",
+        // Required since the date was rewired onto the status: "Session
+        // scheduled" asks for one, and this case is about the follow-up.
+        expected_date: "2026-10-05",
       }).success,
     ).toBe(true);
   });
@@ -357,68 +396,92 @@ describe("newMemberSchema — the campus rule", () => {
 
 describe("the tentative date a \"Set\" visit promises", () => {
   it("is required for a Set session or campus visit, and only then", () => {
-    // Rule 3. Asserted beside the label because the two together are the
-    // client's ask: required ON the set status, and named for what was set.
-    //
-    // NOTE: this one is app-only. There is no CHECK behind it — log_visit()
-    // stores expected_date when the lifecycle is 'Set' and nulls it otherwise,
-    // but never refuses a missing one. That is survivable rather than a hole:
-    // Pending reads `expected_date ?? date`, so a null degrades to the day it
-    // was logged instead of vanishing. It does mean this test is the only
-    // thing holding the rule.
-    expect(expectedDateRequired("session", "Set")).toBe(true);
-    expect(expectedDateRequired("campus_visit", "Set")).toBe(true);
-    expect(expectedDateRequired("session", "Done")).toBe(false);
-    expect(expectedDateRequired("campus_visit", "Done")).toBe(false);
-    // The four one-shots have no lifecycle, so they never promise a date.
-    for (const a of ["meeting", "olympiad", "application", "admission"]) {
-      expect(expectedDateRequired(a, "Set"), a).toBe(false);
+    /*
+     * RULE 3 IS THE STATUS'S QUESTION NOW.
+     *
+     * It used to read the purpose's lifecycle — `expectedDateRequired(activity,
+     * "Set")` — which meant the two statuses that know when something actually
+     * happened, "Session done" and "Campus visit done", were never asked for a
+     * date at all. `asks_expected_date` has been on institute_statuses since
+     * 0026 and was already correct for all four; it was simply never read.
+     *
+     * Still app-only: there is no CHECK behind it. log_visit() stores the value
+     * for any session or campus visit (0026 D3 dropped its own `= 'Set'` test)
+     * but never refuses a missing one, so these assertions are the rule.
+     */
+    expect(eventDateRequired(SEED_STATUS_CATALOGUE, "Session scheduled")).toBe(true);
+    expect(eventDateRequired(SEED_STATUS_CATALOGUE, "Campus visit scheduled")).toBe(true);
+    expect(eventDateRequired(SEED_STATUS_CATALOGUE, "Session done")).toBe(true);
+    expect(eventDateRequired(SEED_STATUS_CATALOGUE, "Campus visit done")).toBe(true);
+    // The five that carry no date.
+    for (const status of [
+      "First meeting done",
+      "Pending for management approval",
+      "Invited principal for event",
+      "RSVP received",
+      "Will not come",
+    ]) {
+      expect(eventDateRequired(SEED_STATUS_CATALOGUE, status), status).toBe(false);
     }
+    expect(eventDateRequired(SEED_STATUS_CATALOGUE, null)).toBe(false);
   });
 
-  it("names the thing that was set, not just \"it\"", () => {
-    expect(expectedDateLabel("session")).toBe("Tentative session date");
-    expect(expectedDateLabel("campus_visit")).toBe("Tentative campus visit date");
+  it("names the date for the thing it belongs to, and for whether it has happened", () => {
+    // Open reads as a plan, closed as a record. The session/campus half comes
+    // from the status text because no flag separates the two scheduled statuses.
+    expect(eventDateLabel(SEED_STATUS_CATALOGUE, "Session scheduled")).toBe(
+      "Expected Session Date",
+    );
+    expect(eventDateLabel(SEED_STATUS_CATALOGUE, "Campus visit scheduled")).toBe(
+      "Expected Campus Visit Date",
+    );
+    expect(eventDateLabel(SEED_STATUS_CATALOGUE, "Session done")).toBe("Session Date");
+    expect(eventDateLabel(SEED_STATUS_CATALOGUE, "Campus visit done")).toBe(
+      "Campus Visit Date",
+    );
   });
 
-  it("says the same thing in the label, the message and the summary", () => {
+  it("says the same thing in the label and the message", () => {
     // Three names for one box is how a rep hunts for a field already in front
-    // of them. The control said "Tentative session date", the error said "When
-    // is it expected?" and the summary called it "Expected date".
+    // of them, so the control and the error read from one function.
     const result = visitSchema.safeParse({
       ...baseVisit,
       activity: "session",
       lifecycle_status: "Set",
+      status_set_to: "Session scheduled",
+      follow_up_date: "2026-01-05",
       expected_date: "",
     });
     expect(result.success).toBe(false);
     if (!result.success) {
       const issue = result.error.issues.find((i) => i.path[0] === "expected_date");
-      expect(issue?.message).toBe("Pick a tentative session date.");
+      expect(issue?.message).toBe("Pick a Expected Session Date.");
     }
-
-    const campus = visitSchema.safeParse({
-      ...baseVisit,
-      activity: "campus_visit",
-      lifecycle_status: "Set",
-      expected_date: "",
-    });
-    expect(campus.success).toBe(false);
-    if (!campus.success) {
-      const issue = campus.error.issues.find((i) => i.path[0] === "expected_date");
-      expect(issue?.message).toBe("Pick a tentative campus visit date.");
-    }
-
-    // Activity-neutral, because the map is keyed by field name - but the same
-    // "Tentative ... date" family, not a fourth name.
-    expect(fieldLabel("expected_date")).toBe("Tentative date");
   });
 
-  it("falls back to the vague wording for an activity it does not know", () => {
-    // Unreachable through the form — expectedDateRequired() gates it to the two
-    // lifecycle activities — and kept so a third one gets a vague label rather
-    // than a blank one.
-    expect(expectedDateLabel("meeting")).toBe("When is it expected?");
+  /*
+   * NOTES: SEVEN OF NINE.
+   *
+   * Derived rather than listed — a status needs notes unless it is CLOSED and
+   * asks for nothing else. That is exactly "RSVP received" and "Will not come"
+   * today, and naming them here instead would be the hard-coded status list
+   * migration 0026 spent a table removing.
+   */
+  it("requires notes on every status except the two instant closes", () => {
+    for (const status of [
+      "First meeting done",
+      "Session scheduled",
+      "Campus visit scheduled",
+      "Pending for management approval",
+      "Invited principal for event",
+      "Session done",
+      "Campus visit done",
+    ]) {
+      expect(notesRequired(SEED_STATUS_CATALOGUE, status), status).toBe(true);
+    }
+    for (const status of ["RSVP received", "Will not come"]) {
+      expect(notesRequired(SEED_STATUS_CATALOGUE, status), status).toBe(false);
+    }
   });
 });
 

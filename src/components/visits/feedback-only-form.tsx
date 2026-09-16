@@ -35,6 +35,7 @@ export function FeedbackOnlyForm({
   visitId,
   planId,
   asks,
+  notesRequired,
   openLoops,
   alreadyClosed = false,
 }: {
@@ -43,6 +44,8 @@ export function FeedbackOnlyForm({
   planId: string | null;
   /** Which extra questions the recorded status turns on (migration 0026). */
   asks: FeedbackAsks;
+  /** Decided by the recorded status — see notesRequired() in validation/visit. */
+  notesRequired: boolean;
   openLoops: OpenLoop[];
   /** Swept overnight, or cleared by an admin, before the report was filed. */
   alreadyClosed?: boolean;
@@ -100,6 +103,7 @@ export function FeedbackOnlyForm({
 
       <FeedbackFields
         asks={asks}
+        notesRequired={notesRequired}
         value={feedback}
         // Functional, so two changes in one tick both survive: the second
         // merges against the first's result rather than against the render it

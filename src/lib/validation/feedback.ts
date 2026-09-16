@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { statusRow, type StatusCatalogue } from "@/lib/validation/institute";
 
 /**
  * The short closing report — what a rep fills in at the end of a visit.
@@ -176,6 +177,66 @@ const shape = {
 
 /** Used by Log Visit, which files before a visit id exists. */
 export const feedbackFieldsSchema = z.object(shape);
+
+/**
+ * The same fields, with the requirements the CHOSEN STATUS implies.
+ *
+ * Every field in `shape` is nullable, and stays nullable — that is what lets a
+ * report filed under any earlier version of this form still parse, and it is
+ * why nothing here can reject a row that already exists. What this adds is a
+ * refinement applied to NEW submissions only, at the moment the rep presses
+ * save, when the status is known.
+ *
+ * WHICH FIELDS, AND WHY THEY TRACK THE STATUS. `asks_head_count` and
+ * `asks_session_detail` already decide which fields the form SHOWS (0026). A
+ * field that is shown and optional is a field a rep skips, so the same two
+ * flags now decide which are required — shown and required become one
+ * question with one answer, and an admin adding a status gets both behaviours
+ * without a code change.
+ *
+ * Notes is the exception and has its own rule: see `notesRequired()`, which
+ * excuses the instant-close statuses rather than naming them.
+ */
+export function makeReportSchema(
+  catalogue: StatusCatalogue,
+  status: string | null,
+) {
+  return z.object(shape).superRefine((value, ctx) => {
+    const row = statusRow(catalogue, status);
+    if (!row) return;
+
+    const needsNotes =
+      row.category !== "closed" ||
+      row.asksExpectedDate ||
+      row.asksSessionDetail ||
+      row.asksHeadCount;
+
+    if (needsNotes && !value.notes) {
+      ctx.addIssue({ code: "custom", path: ["notes"], message: "Add a note." });
+    }
+    if (row.asksHeadCount && value.students_attended === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["students_attended"],
+        message: "Enter the number of students.",
+      });
+    }
+    if (row.asksSessionDetail && !value.session_topic) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["session_topic"],
+        message: "Enter the topic title.",
+      });
+    }
+    if (row.asksSessionDetail && !value.session_taken_by) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["session_taken_by"],
+        message: "Enter who took it.",
+      });
+    }
+  });
+}
 
 /**
  * Used by the standalone feedback screen, which has both ids.
