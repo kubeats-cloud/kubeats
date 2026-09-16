@@ -32,6 +32,17 @@ export const AREA_UNAVAILABLE = "Area unavailable";
 export const LOCATION_UNAVAILABLE = "Location unavailable";
 
 /**
+ * Shown when there is no accuracy figure to describe.
+ *
+ * Distinct from describeAccuracy's "Accuracy unknown", which answers a narrower
+ * question: that phrase means a position WAS taken and the browser declined to
+ * say how good it was. This one covers that and the commoner case of there
+ * being no position at all, and is the wording the client asked for beside a
+ * check-in or check-out that went unlocated.
+ */
+export const ACCURACY_UNAVAILABLE = "GPS accuracy unavailable";
+
+/**
  * On a screen: about 11 m, which matches the place cache's cell size, so the
  * numbers on screen and the area name beside them describe the same square.
  */

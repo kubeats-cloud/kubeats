@@ -10,6 +10,8 @@ import {
   type FeedbackState,
 } from "@/lib/validation/feedback";
 import { submitFeedback } from "@/lib/feedback-actions";
+import { checkoutFix } from "@/lib/geolocate";
+import { appendCheckoutFix } from "@/lib/validation/checkin";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { fieldLabel } from "@/lib/validation/visit";
 import type { OpenLoop } from "@/lib/visits";
@@ -47,9 +49,46 @@ export function FeedbackOnlyForm({
 }) {
   const [state, formAction, isPending] = useActionState(submitFeedback, EMPTY_STATE);
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
+  const [locating, setLocating] = useState(false);
+
+  /**
+   * There is only a check-out to locate when there is a check-in still open.
+   *
+   * `alreadyClosed` means the sweep or an admin got here first: the plan row
+   * carries no `checkout_at` and never will, so a position taken now would
+   * belong to nothing. `planId` being null says the same thing from the other
+   * side. Asking the device in either case would sit a rep in front of a
+   * spinner to collect a reading with nowhere to go.
+   */
+  const locatable = planId !== null && !alreadyClosed;
 
   return (
-    <form action={formAction} className="space-y-4">
+    /*
+     * Submitted by hand for the same two reasons log-visit-form is. The
+     * departure's position has to be taken BEFORE the action is dispatched,
+     * which `action={formAction}` gives no seam for — and dispatching it
+     * ourselves also keeps React from resetting the form afterwards, which is
+     * what makes a Radix Select revert to its mounted value. FeedbackFields
+     * carries Selects of its own, so that trap was latent here too.
+     */
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        if (!locatable) {
+          formAction(formData);
+          return;
+        }
+        setLocating(true);
+        void checkoutFix()
+          .then((fix) => appendCheckoutFix(formData, fix))
+          .finally(() => {
+            setLocating(false);
+            formAction(formData);
+          });
+      }}
+      className="space-y-4"
+    >
       <input type="hidden" name="visit_id" value={visitId} />
       <input type="hidden" name="daily_plan_id" value={planId ?? ""} />
 
@@ -78,12 +117,18 @@ export function FeedbackOnlyForm({
         />
       )}
 
-      <Button type="submit" className="h-11 w-full" disabled={isPending}>
-        {isPending
-          ? "Saving…"
-          : alreadyClosed
-            ? "Save the report"
-            : "Save and check out"}
+      <Button
+        type="submit"
+        className="h-11 w-full"
+        disabled={isPending || locating}
+      >
+        {locating
+          ? "Checking you out…"
+          : isPending
+            ? "Saving…"
+            : alreadyClosed
+              ? "Save the report"
+              : "Save and check out"}
       </Button>
     </form>
   );
