@@ -11,8 +11,9 @@ document that has the full detail; this page is the index, not a copy of them.
 | **Rotate the service-role key** | It has appeared in a build log; rotating retires it | `docs/PHASE-10-Production-Readiness-Audit.md` (H2) and the rotation steps handed over in session |
 | **Weekly backup + one restore rehearsal** | No automatic backup exists on the free tier; a mistaken delete is otherwise unrecoverable | `docs/BACKUP-RESTORE.md`, "For the client" |
 | **Uptime monitoring** | Nothing polls `/api/health` today, so an outage goes unnoticed. Point a monitor at it for liveness; set `HEALTH_CHECK_TOKEN` if you also want it to check the database | `docs/PHASE-10-Production-Readiness-Audit.md` (M2), and "Security findings & posture" below for F2 |
-| **Deploy size ceiling** | ~123 KiB headroom under the 3072 KiB free-plan limit (measured, noindex/privacy branch); a big feature could still need the $5/mo Workers Paid plan | `docs/PHASE-10-Production-Readiness-Audit.md`, "Known limitations" |
-| **Ola Maps key** *(optional, nothing outstanding)* | Purely an upgrade available if wanted: better area names on the photo stamp in India. Unset — which is how it ships — the app uses free OpenStreetMap exactly as it always has, and nothing degrades | "Place names" below, and `docs/OLA-MAPS-SETUP.md` |
+| **Deploy size ceiling** *(no longer a constraint)* | The account is on the Workers **Paid** plan, so the limit is 10 MiB gzipped. The app measures **~2,972 KiB — about 29%**. Nothing is waiting on this; it is here so nobody re-reads the old free-plan warning and worries | `CLAUDE.md`, "Deployment ceiling" |
+| **Ola Maps key** *(optional — but see the note)* | Better area names on the photo stamp in India. The app runs on free OpenStreetMap without it and nothing degrades. ⚠ **Any key in use today sits on the developer's own Ola account.** Before handover is final the client should either obtain their own key or accept that the feature switches itself off when that account goes | "Place names" below, and `docs/OLA-MAPS-SETUP.md` |
+| **Roll out admin sign-in codes (MFA)** | Built and live, and switched **off for everyone** until an admin turns it on for themselves. Two admins, so one can always unlock the other | "Admin sign-in security" below |
 | **Set the `security.txt` contact** | The file is live but has **no** contact yet, so finding F5 is not closed. Needs the role address the custom domain unlocks | This document, "Security findings & posture" |
 
 None of these is an application code change. They are operational decisions for whoever owns the
@@ -20,9 +21,185 @@ Cloudflare and Supabase accounts after handover.
 
 ---
 
+## What the app does now
+
+A plain description of the current behaviour, for anyone picking this up cold. The detail behind
+each is in `CLAUDE.md`; this is the version you can read to a new admin.
+
+### Logging a visit is driven by one question
+
+A rep never chooses an "activity". They plan the visit on their Dashboard by picking an institute
+and a **purpose** ("First meeting", "Complete a session", "Follow-up"...), and the purpose decides
+what the visit counts towards in the weekly numbers. An admin manages that list in Settings.
+
+At the end of the visit the rep answers one question — **where does this leave the institute?** --
+and that status decides everything else the form asks for:
+
+| Status | What the form then asks |
+| --- | --- |
+| First meeting done | Follow-up date, notes |
+| Session scheduled | Follow-up date, expected session date, notes |
+| Campus visit scheduled | Follow-up date, expected campus visit date, notes |
+| Pending for management approval | Follow-up date, notes |
+| Invited principal for event | Follow-up date, notes |
+| Session done | Session date, number of students, topic title, taken by, notes |
+| Campus visit done | Campus visit date, number of students, notes |
+| RSVP received | Notes only, and notes are optional |
+| Will not come | Notes only, and notes are optional |
+
+Two things follow from this that people ask about:
+
+- **A follow-up date is only requested when the institute is left OPEN.** It used to appear on
+  every status, including "Will not come", which is what made the form feel long.
+- **A photo is always required**, on every status, with no exception. It is taken in the app from
+  the camera — there is no option to attach a picture from the gallery — and the coordinates, time
+  and area name are stamped into the image as it is taken.
+
+The nine statuses above are **not fixed in the code**. An admin can add, rename and retire them in
+Settings, and the form, the reports and the Excel export all follow automatically.
+
+> ⚠ **Known issue, fix pending.** Logging a visit with the status **"Session done"** or **"Campus
+> visit done"** currently fails: the date field is shown and filled in, but the form does not send
+> the value, so it reports the date as missing and will not save. The other seven statuses are
+> unaffected. It is a one-line fix — delete this note once it ships.
+
+### Each institute belongs to one rep
+
+An institute is visible to the rep who registered it and to admins — **not** to other reps, even on
+the same campus. Campus is still the outer boundary; ownership is a tighter one inside it.
+
+If someone leaves, or an institute is with the wrong person, an admin reassigns it from the
+institute's own page ("Who this belongs to"). Only reps on that institute's campus are offered. The
+visits already logged stay with the rep who made them; only the ownership moves.
+
+### Check-in, check-out, and what an admin can see afterwards
+
+A visit is logged from the moment the rep arrives. They check in at the institute — which records
+the time, the GPS position and how accurate it was — then log the visit, then file the short
+report, which stamps the check-out.
+
+**Both ends now record their own position.** The departure used to be a bare timestamp; it carries
+its own coordinates, address and accuracy, so an admin reading a visit can see a rep arrive
+somewhere and leave from somewhere rather than guessing. If the device cannot get a fix on the way
+out, the report still files and the record simply reads "Location unavailable" — **a missing
+location can never block a rep from saving their work.**
+
+A rep cannot check in without a location, or without typing a reason why they have not got one.
+That reason is shown to admins, so the escape is logged rather than silent.
+
+### The activity report and the Excel export
+
+Admin → Team → **Full report** shows one row per rep for any date range, with:
+
+- six fixed activity columns — Meetings, Sessions, Campus Visits, Olympiad Registrations,
+  Applications, Admissions;
+- then a column for every institute status, grouped into CLOSED and OPEN bands.
+
+**Export to Excel** produces exactly the same grid as an `.xlsx`, laid out to match the client's own
+template. The status columns are generated from the live list, so **a status an admin adds today
+gets a column in tomorrow's export with no developer involved** — it appears after the template's
+own columns so that existing formulas and pivots do not shift. A retired status keeps its column
+only while it still has numbers in the range, marked "(retired)".
+
+The Overview screen carries a compact version of the same table, with "View full report" beside it.
+
+### Admin sign-in security (MFA)
+
+Admins can add a **6-digit code from an authenticator app** to their sign-in, in
+Settings → Sign-in security. It is **admin-only** — reps are never asked and are not affected in
+any way.
+
+**It is off until an admin switches it on for themselves.** Nothing is required of an account that
+has not enrolled, so turning this on for one admin changes nothing for anyone else, and there is no
+moment where somebody is locked out waiting for it.
+
+**Recovery — read this before enrolling.** There are no printed backup codes. The recovery path is
+each other:
+
+1. **One admin loses their phone** → the other admin resets their code in Settings. The first admin
+   then signs in with their password alone and sets up a new authenticator.
+2. **Both lose access at once** → the codes can be cleared from the Supabase project itself
+   (Authentication → Users). That is a different login from the app, which is exactly what makes a
+   total lockout impossible.
+
+Two recommendations that make the common case a non-event:
+
+- **Enrol two authenticators each**, on two different devices. A lost or replaced phone then costs
+  nothing.
+- **Rehearse the reset once, deliberately**, before both admins are enrolled: have the second admin
+  reset the first, and confirm the first can sign in and re-enrol. An untested recovery path is not
+  a recovery path.
+
+### Creating team members catches email typos
+
+Accounts are created by an admin; there is no public sign-up. When adding someone, the form checks
+the email address and warns if the domain looks like a slip — "Did you mean gmail.com?" for
+`gamil.con`, and the same for common misspellings of yahoo, hotmail and outlook.
+
+**It is a warning, not a block.** Press Add again and it proceeds, because unusual domains are real.
+There is a one-tap button to accept the correction. This exists because a dead address means that
+person can never reset their own password.
+
+---
+
+## Deploy gotchas
+
+Things that have actually bitten during this project, rather than general advice.
+
+### `NEXT_PUBLIC_*` values are baked in at build time
+
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are inlined into the bundle when it
+is built, not read when it runs. **Changing either one means a rebuild, not a restart.** If you
+point the app at a different Supabase project, trigger a fresh deploy (an empty commit pushed to
+`main` is enough) or the old values keep being used.
+
+Server-side values — `SUPABASE_SERVICE_ROLE_KEY`, `OLA_MAPS_API_KEY`, `HEALTH_CHECK_TOKEN` — are
+read per request, so those take effect without a rebuild.
+
+### A build variable must be written to a file, not just exported
+
+`APP_COMMIT_SHA` is what lets `/api/health` report which commit is live. Exporting it in front of
+the build command does **not** work — the value has to reach an `.env` file for the build to pick
+it up:
+
+```
+echo "APP_COMMIT_SHA=$WORKERS_CI_COMMIT_SHA" >> .env.production.local && npm run build
+```
+
+The symptom of getting this wrong is a null field with nothing to explain it. `.env.example` carries
+the working command.
+
+### The Ola key must be a Secret, and it is on the developer's account today
+
+Add it as a Cloudflare **Secret**, never a plaintext Variable: `wrangler.jsonc` declares no `vars`
+block and `wrangler deploy` reconciles plaintext variables against that file, so **a key added as a
+Variable is wiped by the next deploy.**
+
+And the ownership point, which is a handover item rather than a technical one: **any Ola key in use
+today belongs to the developer's own account.** Area names on the photo stamp will quietly fall back
+to OpenStreetMap if that account goes away. Nothing breaks and no visit fails — the names simply
+get less precise — but the client should obtain their own key if they want to keep the better ones.
+
+### `supabase/.temp/` must stay in `.gitignore`
+
+The Supabase CLI writes a scratch directory there. It contains **`pooler-url`, a live database
+connection string**, alongside the linked project reference. It is listed in `.gitignore` and has
+never been committed — **keep it that way.** If you ever see it appear in `git status` as something
+to be added, the ignore rule has been broken.
+
+### Database migrations are applied in order, by number
+
+Everything the database needs is in `supabase/migrations/`, numbered `0001` upward. Apply them in
+order; the highest is `0029`. If you restore a database from scratch, running the whole folder in
+order rebuilds it — which is why a migration applied to the live database must always also be
+committed to the repository. `docs/BACKUP-RESTORE.md` covers what the migrations cannot carry: the
+auth users, the stored photos, the Vault secret and the scheduled job.
+
+---
+
 ## Custom domain (client decision)
 
-The app is live at `https://kubeats.pavanstudy2012.workers.dev`. Moving it to a domain the client
+The app is live at `https://kubeats.kubeats.workers.dev`. Moving it to a domain the client
 owns — e.g. `app.yourschoolgroup.com` — is optional but recommended, for two reasons:
 
 1. **A professional URL.** A `*.workers.dev` address is fine for a developer preview; a paying
@@ -91,10 +268,10 @@ interim mitigation recorded above and in the pen-test report.*
 
 ---
 
-## Place names: the Ola Maps key is OPTIONAL
+## Place names: the Ola Maps key
 
-**Nothing needs doing here.** This section exists so that the next person to read it knows the
-choice is available, not because anything is outstanding.
+The photo stamp's area name is an optional upgrade — but there **is** one thing outstanding here,
+and it is an ownership question rather than a technical one. See "Whose key is it?" below.
 
 The photo stamp carries an approximate area name under the coordinates, like
 `Bopal, Ahmedabad, Gujarat`. Two services can produce that name, and the app tries them in order:
@@ -103,15 +280,28 @@ The photo stamp carries an approximate area name under the coordinates, like
 | --- | --- | --- |
 | 1 | `place_cache` | A coordinate cell the team has already been to. No API call at all. |
 | 2 | **Ola Maps** | **Only if a key is set.** Better names in India. |
-| 3 | **OpenStreetMap** (Nominatim) | Free, no account. **This is what runs today.** |
+| 3 | **OpenStreetMap** (Nominatim) | Free, no account. What runs whenever no key is set, and the fallback if Ola does not answer. |
 | 4 | — | Nobody could name it: the photo stamps with coordinates and time alone. |
 
-### What is true right now
+### Whose key is it?
 
-**No Ola key is set, and that is a supported, finished state — not a missing step.** With the key
-unset the app skips Ola *without even making a request* and uses free OpenStreetMap, which is what
-it has always done. There is no degraded mode, no warning banner, no feature that is switched off,
-and nothing in the interface mentions it.
+⚠ **Any Ola key in use today sits on the developer's own Ola account, not the client's.** That is
+fine while the developer is still involved and is not fine as a permanent arrangement: if that
+account lapses or the key is withdrawn, the app falls back to OpenStreetMap on the next request.
+
+**What that fallback actually costs is small, and worth being precise about.** Nothing breaks. No
+visit fails, no check-in is blocked, no screen changes. The area name under the coordinates simply
+becomes less precise in India. The coordinates, the time and the photograph — the parts that are
+evidence — are unaffected, because they never came from Ola in the first place.
+
+So this is a "decide before handover is final" item, not an urgent one. The two clean endings are:
+
+1. **The client obtains their own key** and sets it as their own Cloudflare Secret (steps below).
+2. **The client accepts OpenStreetMap**, and the developer's key is removed deliberately rather
+   than being left to expire silently one day.
+
+With no key set at all the app skips Ola *without even making a request* — a supported, finished
+state, with no degraded mode, no warning banner and nothing in the interface that mentions it.
 
 ### If the client wants better India place names later
 
