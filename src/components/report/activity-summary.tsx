@@ -1,5 +1,9 @@
 import { Badge } from "@/components/ui/badge";
-import { LOCATION_UNAVAILABLE, formatArea } from "@/lib/location-display";
+import {
+  ACCURACY_UNAVAILABLE,
+  LOCATION_UNAVAILABLE,
+  formatArea,
+} from "@/lib/location-display";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/states";
 import { SectionTitle } from "@/components/section-title";
@@ -88,6 +92,173 @@ function Bars({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Every check-in and check-out answers these four, in this order. */
+function Fact({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="text-muted-foreground shrink-0 text-xs">{label}</dt>
+      <dd className="min-w-0 text-right text-xs break-words">{value}</dd>
+    </div>
+  );
+}
+
+/** When an event never happened, or happened before anything recorded it. */
+const NOT_RECORDED = "Not recorded";
+
+/**
+ * One end of a visit: arriving, or leaving.
+ *
+ * THE SAME COMPONENT FOR BOTH, and that is the requirement rather than a way of
+ * saving lines. The two used to be hand-written table cells that had drifted
+ * apart — the check-in showed an area name and an accuracy badge, the check-out
+ * showed the same fields against columns the app never wrote, so in practice an
+ * admin saw four facts on the left and a bare timestamp on the right. One
+ * component cannot drift from itself.
+ *
+ * NOTHING HERE HAS A FALLBACK, which is the other requirement. A missing
+ * position prints as missing. It is never filled in from the arrival, from the
+ * institute's registered address, or from another visit — see the note at the
+ * head of location-display.ts for why substituting any of those turns "the rep
+ * was here" into "the rep said they were here".
+ */
+function PresencePanel({
+  title,
+  at,
+  latitude,
+  longitude,
+  accuracy,
+  area,
+  manualReason,
+}: {
+  title: string;
+  at: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
+  area: string | null;
+  /** #6 — set only on an arrival the rep deliberately made without a fix. */
+  manualReason?: string | null;
+}) {
+  const coords = formatCoords(latitude, longitude);
+
+  return (
+    <div className="bg-card px-4 py-3">
+      <p className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+        {title}
+      </p>
+      <dl className="mt-2 space-y-1.5">
+        <Fact label="Date & time" value={at ? formatDateTime(at) : NOT_RECORDED} />
+        <Fact
+          label="GPS coordinates"
+          value={
+            coords ? (
+              <span className="tabular-nums">{coords}</span>
+            ) : (
+              LOCATION_UNAVAILABLE
+            )
+          }
+        />
+        {/* The area name is decoration and says so when it is absent, but only
+            once there is a position for it to describe. "Area unavailable"
+            under no coordinates at all would suggest a lookup that failed,
+            when in fact nothing was ever located. */}
+        <Fact
+          label="Location / address"
+          value={coords ? formatArea(area) : LOCATION_UNAVAILABLE}
+        />
+        <Fact
+          label="GPS accuracy"
+          value={
+            coords && accuracy !== null ? (
+              <Badge variant={ACCURACY_BADGE[accuracyBand(accuracy)]}>
+                {describeAccuracy(accuracy)}
+              </Badge>
+            ) : (
+              ACCURACY_UNAVAILABLE
+            )
+          }
+        />
+      </dl>
+
+      {/* An override nobody can see is a bypass. Kept below the four facts
+          rather than in place of one, so the shape of the two panels stays
+          identical and this reads as what it is: the rep's own account of why
+          the rows above say what they say. */}
+      {manualReason && (
+        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+          <Badge variant="warning">
+            <MapPinOffIcon className="size-3" aria-hidden />
+            No location
+          </Badge>
+          <span className="text-muted-foreground">
+            &ldquo;{manualReason}&rdquo;
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** One planned visit, arrival and departure side by side. */
+function PresenceCard({ visit }: { visit: ActivityReport["plannedVisits"][number] }) {
+  return (
+    <Card className="gap-0 overflow-hidden p-0 shadow-xs">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b px-4 py-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{visit.instituteName}</p>
+          <p className="text-muted-foreground truncate text-xs">
+            {formatDate(visit.date)} · {visit.purpose}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-1.5">
+          <Badge variant={VISIT_STATUS_BADGE[visit.status]}>{visit.status}</Badge>
+          {visit.reportFiled === null ? (
+            <Badge variant="neutral">Not logged</Badge>
+          ) : (
+            <Badge variant={visit.reportFiled ? "success" : "neutral"}>
+              {visit.reportFiled ? "Filed" : "No report"}
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {/* A one-pixel gap filled by the border colour, so the two halves are
+          divided on a wide screen and stacked cleanly on a phone. */}
+      <div className="bg-border grid gap-px sm:grid-cols-2">
+        <PresencePanel
+          title="Checked in"
+          at={visit.checkinAt}
+          latitude={visit.checkinLat}
+          longitude={visit.checkinLng}
+          accuracy={visit.checkinAccuracy}
+          area={visit.checkinArea}
+          manualReason={
+            visit.checkinLocationManual ? (visit.checkinManualReason ?? "No reason given") : null
+          }
+        />
+        <PresencePanel
+          title="Checked out"
+          at={visit.checkoutAt}
+          latitude={visit.checkoutLat}
+          longitude={visit.checkoutLng}
+          accuracy={visit.checkoutAccuracy}
+          area={visit.checkoutArea}
+        />
+      </div>
+
+      {/* Both real timestamps or nothing: visitMinutes returns null unless it
+          has an arrival AND a departure, so a swept or admin-cleared visit
+          reads "Not recorded" rather than being given an invented duration. */}
+      <div className="flex items-center justify-between gap-3 border-t px-4 py-2.5">
+        <span className="text-muted-foreground text-xs">Total duration</span>
+        <span className="text-xs font-semibold tabular-nums">
+          {formatDuration(visit.minutes)}
+        </span>
+      </div>
+    </Card>
   );
 }
 
@@ -239,125 +410,21 @@ export function ActivitySummary({ report }: { report: ActivityReport }) {
             description="Check-in and check-out times, locations and time on site appear here for every planned visit."
           />
         ) : (
-          /* Wide on purpose, and scrolling inside its own box rather than
-             pushing the page sideways. */
-          <div className="border-border overflow-x-auto rounded-md border">
-            <table className="w-full min-w-[46rem] text-sm">
-              <thead className="bg-muted/50 text-muted-foreground text-xs">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium">Scheduled</th>
-                  <th className="px-3 py-2 text-left font-medium">Institute</th>
-                  <th className="px-3 py-2 text-left font-medium">Checked in</th>
-                  <th className="px-3 py-2 text-left font-medium">Checked out</th>
-                  <th className="px-3 py-2 text-left font-medium">On site</th>
-                  <th className="px-3 py-2 text-left font-medium">Status</th>
-                  <th className="px-3 py-2 text-left font-medium">Report</th>
-                </tr>
-              </thead>
-              <tbody className="divide-border divide-y">
-                {plannedVisits.map((visit) => {
-                  const inAt = formatCoords(visit.checkinLat, visit.checkinLng);
-                  const outAt = formatCoords(visit.checkoutLat, visit.checkoutLng);
-                  return (
-                    <tr key={visit.id}>
-                      <td className="px-3 py-2 align-top whitespace-nowrap">
-                        {formatDate(visit.date)}
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <span className="block max-w-48 truncate">
-                          {visit.instituteName}
-                        </span>
-                        <span className="text-muted-foreground block max-w-48 truncate text-xs">
-                          {visit.purpose}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 align-top whitespace-nowrap">
-                        {visit.checkinAt ? formatDateTime(visit.checkinAt) : "—"}
-                        <span className="text-muted-foreground block text-xs tabular-nums">
-                          {visit.checkinAt ? (inAt ?? LOCATION_UNAVAILABLE) : ""}
-                        </span>
-                        {visit.checkinAt && inAt && (
-                          <span className="text-muted-foreground block text-xs">
-                            {formatArea(visit.checkinArea)}
-                          </span>
-                        )}
-                        {/* #6 — an arrival the device could not place, and the
-                            rep's own reason for it. Shown INSTEAD of an
-                            accuracy badge, because there is no accuracy to
-                            describe and a "no location" badge beside a
-                            confident-looking one would read as a measurement. */}
-                        {visit.checkinAt && visit.checkinLocationManual ? (
-                          <>
-                            <span className="block text-xs">
-                              <Badge variant="warning">
-                                <MapPinOffIcon className="size-3" aria-hidden />
-                                No location
-                              </Badge>
-                            </span>
-                            {visit.checkinManualReason && (
-                              <span className="text-muted-foreground mt-0.5 block max-w-56 text-xs">
-                                &ldquo;{visit.checkinManualReason}&rdquo;
-                              </span>
-                            )}
-                          </>
-                        ) : (
-                          visit.checkinAt && (
-                            <span className="block text-xs">
-                              <Badge
-                                variant={ACCURACY_BADGE[accuracyBand(visit.checkinAccuracy)]}
-                              >
-                                {describeAccuracy(visit.checkinAccuracy)}
-                              </Badge>
-                            </span>
-                          )
-                        )}
-                      </td>
-                      <td className="px-3 py-2 align-top whitespace-nowrap">
-                        {visit.checkoutAt ? formatDateTime(visit.checkoutAt) : "—"}
-                        <span className="text-muted-foreground block text-xs tabular-nums">
-                          {visit.checkoutAt ? (outAt ?? LOCATION_UNAVAILABLE) : ""}
-                        </span>
-                        {visit.checkoutAt && outAt && (
-                          <span className="text-muted-foreground block text-xs">
-                            {formatArea(visit.checkoutArea)}
-                          </span>
-                        )}
-                        {visit.checkoutAt && (
-                          <span className="block text-xs">
-                            <Badge
-                              variant={ACCURACY_BADGE[accuracyBand(visit.checkoutAccuracy)]}
-                            >
-                              {describeAccuracy(visit.checkoutAccuracy)}
-                            </Badge>
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 align-top whitespace-nowrap tabular-nums">
-                        {formatDuration(visit.minutes)}
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <Badge variant={VISIT_STATUS_BADGE[visit.status]}>
-                          {visit.status}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        {visit.reportFiled === null ? (
-                          <span className="text-muted-foreground text-xs">
-                            Not logged
-                          </span>
-                        ) : (
-                          <Badge
-                            variant={visit.reportFiled ? "success" : "neutral"}
-                          >
-                            {visit.reportFiled ? "Filed" : "No report"}
-                          </Badge>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          /*
+           * A CARD PER VISIT, NOT A ROW PER VISIT.
+           *
+           * This was a seven-column table scrolling sideways inside its own box,
+           * with the arrival and the departure crammed into one cell each as
+           * four stacked unlabelled lines. Asked to show the same four facts on
+           * both sides, that layout could only get wider — and it was already
+           * past the width of the phone every other screen in this app is built
+           * for. Two labelled panels side by side say more in less room, and
+           * stack rather than scroll when there is none.
+           */
+          <div className="space-y-3">
+            {plannedVisits.map((visit) => (
+              <PresenceCard key={visit.id} visit={visit} />
+            ))}
           </div>
         )}
       </div>

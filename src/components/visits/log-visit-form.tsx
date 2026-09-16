@@ -22,6 +22,8 @@ import {
   type FeedbackState,
 } from "@/lib/validation/feedback";
 import { logAndFileVisit } from "@/lib/feedback-actions";
+import { checkoutFix } from "@/lib/geolocate";
+import { appendCheckoutFix } from "@/lib/validation/checkin";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import type { OpenLoop, PlanEntry } from "@/lib/visits";
 import {
@@ -123,6 +125,15 @@ export function LogVisitForm({
   const activity = planned?.activity ?? "";
   const lifecycleStatus = planned?.lifecycle ?? "";
 
+  /**
+   * True while the device is being asked where the rep is leaving from.
+   *
+   * Its own flag rather than a reuse of `isPending`, because it covers the
+   * moment BEFORE the action is dispatched and the button has to say something
+   * different: "Saving…" while a rep waits for a GPS lock would be a lie about
+   * what is taking the time.
+   */
+  const [locating, setLocating] = useState(false);
   const [expectedDate, setExpectedDate] = useState("");
   const [statusSetTo, setStatusSetTo] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
@@ -226,7 +237,29 @@ export function LogVisitForm({
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        formAction(new FormData(event.currentTarget));
+        /*
+         * THE CHECK-OUT TAKES ITS OWN POSITION, HERE AND NOWHERE ELSE.
+         *
+         * This tap is the departure — one submit files the report, closes any
+         * earlier "Set" and stamps checkout_at — so this is the only moment in
+         * the app when the device can be asked where the rep is as they leave.
+         * Asked at mount it would answer with the arrival all over again; asked
+         * on the server it could not be asked at all.
+         *
+         * It cannot block the save and is not allowed to look like it might:
+         * checkoutFix() resolves with null rather than throwing, the fields go
+         * up empty, and close_visit() writes nulls exactly as it did before any
+         * of this existed. See appendCheckoutFix for what a null means to the
+         * admin reading it afterwards.
+         */
+        const formData = new FormData(event.currentTarget);
+        setLocating(true);
+        void checkoutFix()
+          .then((fix) => appendCheckoutFix(formData, fix))
+          .finally(() => {
+            setLocating(false);
+            formAction(formData);
+          });
       }}
       className="space-y-4"
     >
@@ -411,9 +444,22 @@ export function LogVisitForm({
 
       {/* One tap ends the visit: the report is filed and the check-out is
           stamped in the same transaction. Said on the button, because a rep
-          who does not know that will go looking for a check-out afterwards. */}
-      <Button type="submit" className="h-11 w-full" disabled={isPending}>
-        {isPending ? "Saving…" : "Save and check out"}
+          who does not know that will go looking for a check-out afterwards.
+
+          Three labels, not two. The position is taken before the submit is
+          dispatched, so there is a few-second stretch where the form has not
+          been sent yet — calling that "Saving…" would have the button describe
+          something that is not happening. */}
+      <Button
+        type="submit"
+        className="h-11 w-full"
+        disabled={isPending || locating}
+      >
+        {locating
+          ? "Checking you out…"
+          : isPending
+            ? "Saving…"
+            : "Save and check out"}
       </Button>
     </form>
   );

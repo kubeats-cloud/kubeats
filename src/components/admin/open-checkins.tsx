@@ -5,6 +5,13 @@ import { MapPinOffIcon, TriangleAlertIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { clearStuckCheckIn } from "@/lib/checkin-actions";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { formatTime, formatDate } from "@/lib/dates";
@@ -30,15 +37,23 @@ import type { OpenCheckIn } from "@/lib/admin-workspace";
  * clearing a visit somebody is still standing in would throw away the duration
  * they were about to record.
  */
-function ClearButton({ planId, name }: { planId: string; name: string }) {
+function ClearButton({
+  planId,
+  name,
+  instituteName,
+}: {
+  planId: string;
+  name: string;
+  instituteName: string;
+}) {
   const [state, formAction, isPending] = useActionState(
     clearStuckCheckIn,
     EMPTY_STATE,
   );
   const [confirming, setConfirming] = useState(false);
 
-  if (!confirming) {
-    return (
+  return (
+    <>
       <Button
         type="button"
         variant="ghost"
@@ -47,35 +62,58 @@ function ClearButton({ planId, name }: { planId: string; name: string }) {
       >
         Clear
       </Button>
-    );
-  }
 
-  return (
-    <form action={formAction} className="shrink-0 space-y-1.5 text-right">
-      <input type="hidden" name="plan_id" value={planId} />
-      <p className="text-muted-foreground max-w-48 text-xs">
-        Close this so {name} can check in elsewhere? The time on site will read
-        &ldquo;not recorded&rdquo;, which is the honest answer.
-      </p>
-      <div className="flex justify-end gap-1.5">
-        <Button type="submit" className="h-9" disabled={isPending}>
-          {isPending ? "Closing…" : "Yes, clear it"}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          className="h-9"
-          onClick={() => setConfirming(false)}
-        >
-          Cancel
-        </Button>
-      </div>
-      {state.error && (
-        <p role="alert" className="text-danger-subtle-foreground text-xs">
-          {state.error}
-        </p>
-      )}
-    </form>
+      {/*
+        WHAT THIS DIALOG SAYS IS ALL IT SAYS.
+
+        It used to carry a sentence explaining the consequence — that the time
+        on site would read "not recorded", and that this was the honest answer.
+        The client asked for it to go, and the behaviour it described is
+        unchanged: clearStuckCheckIn still sets checkout_missing alone, still
+        invents no checkout_at, and the record still says it was closed by an
+        admin rather than by the rep. The explanation is gone, not the honesty.
+
+        A real dialog rather than the inline confirm that stood here, because
+        the heading the spec asks for needs something to be the heading of, and
+        a focus-trapped Radix dialog is what every other confirmation in this
+        app already uses.
+      */}
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Clear Check-In?</DialogTitle>
+            <DialogDescription>
+              {name} is currently checked in at {instituteName}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form action={formAction} className="space-y-2">
+            <input type="hidden" name="plan_id" value={planId} />
+            <div className="flex justify-end gap-2">
+              <Button type="submit" className="h-11" disabled={isPending}>
+                {isPending ? "Clearing…" : "Yes, Clear It"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-11"
+                onClick={() => setConfirming(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+            {/* Not an explanation — a failure. The one thing that still has to
+                be able to appear here, or a refused clear looks like a dead
+                button. */}
+            {state.error && (
+              <p role="alert" className="text-danger-subtle-foreground text-xs">
+                {state.error}
+              </p>
+            )}
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -123,7 +161,11 @@ export function OpenCheckIns({ visits }: { visits: OpenCheckIn[] }) {
           {/* Offered on every open visit, because "my phone died an hour ago"
               is a today problem — but only the stale ones are badged, so the
               list says which actually needs a decision. */}
-          <ClearButton planId={visit.planId} name={visit.memberName} />
+          <ClearButton
+            planId={visit.planId}
+            name={visit.memberName}
+            instituteName={visit.instituteName}
+          />
         </div>
       ))}
     </Card>

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { checkIn } from "@/lib/checkin-actions";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
-import { bestFix } from "@/lib/geolocate";
+import { bestFix, nameArea } from "@/lib/geolocate";
 import { NO_LOCATION_GUIDANCE } from "@/lib/validation/checkin";
 import { shouldRetryLocation, type LocationFix } from "@/lib/validation/location";
 
@@ -69,6 +69,24 @@ export function CheckInButton({
     setPhase({ step: "locating" });
     const result = await bestFix();
     setPhase(result.fix ? { step: "located", fix: result.fix } : { step: "failed" });
+
+    /*
+     * NAME THE SQUARE, so the admin's record can say where this was in words.
+     *
+     * The arrival stores coordinates and nothing else. Area names are read back
+     * out of `place_cache`, which only `/api/place` may write to — so until now
+     * a check-in's address line was blank unless a photo happened to be stamped
+     * in the same 11-metre cell later on, which is a coincidence rather than a
+     * rule. The check-out does the same thing for the same reason
+     * (checkoutFix), and between them the two ends of a visit can now answer
+     * the same four questions.
+     *
+     * NOT AWAITED, and nothing waits on it. The coordinates are already in the
+     * hidden fields below and the rep can confirm the moment they appear; this
+     * is decoration catching up in the background. If it loses the race the
+     * record says "Area unavailable", which is what it said before.
+     */
+    if (result.fix) void nameArea(result.fix.latitude, result.fix.longitude);
   }
 
   if (phase.step === "idle") {

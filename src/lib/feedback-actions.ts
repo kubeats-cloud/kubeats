@@ -16,6 +16,7 @@ import {
   visitFieldErrors,
   visitFormDataToInput,
 } from "@/lib/validation/visit";
+import { checkoutFixFromFormData } from "@/lib/validation/checkin";
 import { listStatusCatalogue } from "@/lib/statuses";
 
 /**
@@ -40,6 +41,26 @@ import { listStatusCatalogue } from "@/lib/statuses";
  * on, and re-submitting is safe: the plan update is filtered on
  * `checkout_at is null`, so a second run cannot move a departure that was
  * already recorded.
+ *
+ * THE DEPARTURE NOW CARRIES ITS OWN POSITION, which reverses what stood here.
+ *
+ * Both calls below passed `null` for the three checkout coordinates, on the
+ * reasoning that the arrival is what the presence guarantee rests on and a
+ * second reading taken minutes later "answers no question anyone has". The
+ * client's spec asks the opposite, and names the question: an admin looking at
+ * a visit wants to see a rep arrive somewhere and leave from somewhere, with
+ * the same four facts on each side. A bare departure timestamp cannot show that
+ * a rep checked in at the gate and filed the report from a car two towns away.
+ *
+ * Nothing about the WRITE changed to make this work, which is why there is no
+ * migration with it. `daily_plans` has had `checkout_lat` / `checkout_lng`
+ * since 0014 and `checkout_accuracy` since 0015, and `close_visit()` has taken
+ * all three and written them since 0018. What was missing was anything on the
+ * device side asking; `checkoutFix()` in geolocate.ts is that, taken at the tap
+ * that ends the visit.
+ *
+ * It is best-effort and cannot refuse a report. A device that says nothing
+ * files exactly as it did before — see checkoutFixFromFormData.
  */
 
 /**
@@ -127,6 +148,15 @@ export async function submitFeedback(
     };
   }
 
+  // Read straight off the form rather than through feedbackSchema: it is the
+  // one thing here that must not be able to make a submission fail, and a field
+  // inside that schema would do exactly that.
+  //
+  // AFTER the validation above, not before: if the report is going to be
+  // refused there is nothing to record a departure for, and the value would be
+  // thrown away.
+  const checkoutFix = checkoutFixFromFormData(formData);
+
   const { error } = await supabase.rpc("close_visit", {
     p_visit_id: input.visit_id,
     p_daily_plan_id: input.daily_plan_id,
@@ -151,13 +181,10 @@ export async function submitFeedback(
     p_session_topic: input.session_topic,
     p_session_taken_by: input.session_taken_by,
     p_closes_visit_id: input.closes_visit_id,
-    // The departure carries no coordinates. The arrival is what the presence
-    // guarantee rests on and it is already recorded; asking the device again on
-    // submit would add a second position to the record, a few metres from the
-    // first, that answers no question anyone has.
-    p_checkout_lat: null,
-    p_checkout_lng: null,
-    p_checkout_accuracy: null,
+    // The departure's own position — see the note at the head of this file.
+    p_checkout_lat: checkoutFix.latitude,
+    p_checkout_lng: checkoutFix.longitude,
+    p_checkout_accuracy: checkoutFix.accuracy,
   });
 
   if (error) {
@@ -290,6 +317,12 @@ export async function logAndFileVisit(
   }
 
   // 2. The feedback, the close of any earlier Set, and the check-out.
+  //
+  // Read here rather than beside the other parses above, because it is not part
+  // of either half's validation: this value never decides whether a submission
+  // goes through, only what the departure is recorded as.
+  const checkoutFix = checkoutFixFromFormData(formData);
+
   const { error: closeError } = await supabase.rpc("close_visit", {
     p_visit_id: newVisitId,
     p_daily_plan_id: visit.daily_plan_id,
@@ -306,9 +339,10 @@ export async function logAndFileVisit(
     p_session_topic: feedback.session_topic,
     p_session_taken_by: feedback.session_taken_by,
     p_closes_visit_id: feedback.closes_visit_id,
-    p_checkout_lat: null,
-    p_checkout_lng: null,
-    p_checkout_accuracy: null,
+    // The departure's own position — see the note at the head of this file.
+    p_checkout_lat: checkoutFix.latitude,
+    p_checkout_lng: checkoutFix.longitude,
+    p_checkout_accuracy: checkoutFix.accuracy,
   });
 
   if (closeError) {

@@ -120,6 +120,43 @@ export function bestFix(windowMs: number = FIX_WINDOW_MS): Promise<FixResult> {
 }
 
 /**
+ * How long the DEPARTURE gets, which is deliberately less than the arrival.
+ *
+ * The arrival is the load-bearing reading: the presence guarantee rests on it,
+ * a rep cannot get past the check-in screen without one, and they are standing
+ * still at a gate while it resolves. It keeps the full window.
+ *
+ * The departure is corroboration, and it is taken at the moment a rep taps the
+ * last button on a form they are trying to get away from. Twelve seconds of
+ * spinner there buys a slightly better number for a fact nothing depends on.
+ * bestFix still resolves the moment a reading is good enough, so outdoors this
+ * costs a second or two either way; the window only decides how long a bad spot
+ * is given before we settle for what we have.
+ */
+export const CHECKOUT_FIX_WINDOW_MS = 8_000;
+
+/**
+ * Where the rep is as they leave, and what that place is called.
+ *
+ * NEVER BLOCKS AND NEVER THROWS. A null answer means the device had nothing to
+ * say, the check-out saves with no coordinates, and the admin's record says
+ * "Location unavailable" — which is the honest answer and the one thing it must
+ * never quietly replace with the arrival's position.
+ *
+ * The area name is looked up here rather than left for the screen that displays
+ * it: `/api/place` is the only thing allowed to geocode, and it writes what it
+ * learns into `place_cache`, which is where an admin's report reads area names
+ * from. Without this call the check-out coordinates would land in a square
+ * nobody has ever named and the address line would be blank for ever. The label
+ * itself is discarded — the cache is the point.
+ */
+export async function checkoutFix(): Promise<LocationFix | null> {
+  const { fix } = await bestFix(CHECKOUT_FIX_WINDOW_MS);
+  if (fix) await nameArea(fix.latitude, fix.longitude);
+  return fix;
+}
+
+/**
  * Marks a remembered fix as remembered.
  *
  * The old code fell back to the last known position on timeout and returned it

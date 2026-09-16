@@ -50,7 +50,15 @@ describe("Log Visit is not reset by React after its action", () => {
 
   it("dispatches the action itself, from onSubmit", () => {
     expect(source).toMatch(/onSubmit=\{/);
-    expect(source).toContain("formAction(new FormData(");
+    // The invariant is "this form dispatches the action itself", not one
+    // spelling of it — the same tolerance the other forms below are read with.
+    // It used to insist on the single expression `formAction(new FormData(`;
+    // the check-out's position is taken between building the FormData and
+    // sending it, so the two steps are now separated by an await. Nothing about
+    // the regression this guards has changed: React is still not driving the
+    // submission, so it still never resets the form.
+    expect(source).toMatch(/formAction\(/);
+    expect(source).toContain("new FormData(");
     // preventDefault, or the browser navigates away on submit.
     expect(source).toContain("event.preventDefault()");
   });
