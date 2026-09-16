@@ -1,5 +1,18 @@
 -- =============================================================================
--- 0028 — log_visit() stores the date the STATUS asked for
+-- 0029 — log_visit() stores the date the STATUS asked for
+--
+-- RENUMBERED FROM 0028, and the number that displaced it is worth knowing:
+-- 0028 is `0028_rep_owned_institutes.sql`, which was applied to the client's
+-- database long before its file reached main. This one was written as 0028
+-- while that gap was open, so the two collided the moment it closed.
+--
+-- Nothing inside here depended on the number. This file is a
+-- `create or replace function public.log_visit(...)`, and the ONLY thing that
+-- matters about its position is that it runs after 0026, which holds the
+-- definition it is based on. Neither 0027 nor 0028 touches log_visit() - the
+-- five migrations that have ever defined it are 0002, 0006, 0008, 0015 and
+-- 0026 - so the body below is still the current one with a single expression
+-- changed, and applying this cannot revert anything.
 --
 -- WHAT THIS IS FOR
 --
@@ -141,7 +154,7 @@ begin
     p_activity,
     case when v_lifecycle then p_lifecycle_status else null end,
     v_today,
-    -- 0028: THE DATE FOLLOWS THE STATUS, SO THE ACTIVITY TEST GOES.
+    -- 0029: THE DATE FOLLOWS THE STATUS, SO THE ACTIVITY TEST GOES.
     --
     -- 0026 (D3) removed the `= 'Set'` half of this for exactly the reason the
     -- rest is going now: "a form that collects an answer the RPC discards is
@@ -210,6 +223,6 @@ comment on function public.log_visit(
   uuid, text, text, date, double precision, double precision,
   text, text, text, date, time, uuid, double precision
 ) is
-  'Saves a visit in one transaction. 0028: expected_date is stored whenever it '
+  'Saves a visit in one transaction. 0029: expected_date is stored whenever it '
   'is supplied, because the Log Visit form now asks for it on the status '
   '(institute_statuses.asks_expected_date) rather than on the activity.';
