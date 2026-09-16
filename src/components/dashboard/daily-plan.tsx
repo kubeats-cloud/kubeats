@@ -324,7 +324,21 @@ export function DailyPlan({
             {open.map((entry) => (
               <li
                 key={entry.id}
-                className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                /*
+                  STACKS ON A PHONE, SIDE BY SIDE FROM sm.
+
+                  This was a single `flex ... justify-between` row whose right
+                  half was `shrink-0`. That is fine while the right half is a
+                  button, and it is what broke the moment the right half became
+                  a sentence: CheckInButton renders a guidance box up to 256px
+                  wide, which cannot fit beside anything inside a card that is
+                  itself about 256px wide on a 360px phone. The rail could not
+                  shrink, so the text ran off the right edge and the button
+                  beside it was clipped at the card border.
+
+                  Stacking below sm removes the competition for width entirely.
+                */
+                className="border-border flex flex-col items-stretch gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
@@ -339,7 +353,7 @@ export function DailyPlan({
                     </Badge>
                   )}
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="flex w-full min-w-0 flex-col items-stretch gap-1 sm:w-auto sm:shrink-0 sm:items-end">
                   {/* The presence guarantee, in the order it happens: check in,
                       then log, then check out. Log is not offered before
                       check-in because the database would refuse it anyway
@@ -356,13 +370,13 @@ export function DailyPlan({
                       }
                     />
                   ) : (
-                    <div className="flex flex-col items-end gap-1">
-                      <div className="flex items-center gap-1">
+                    <div className="flex w-full flex-col items-stretch gap-1 sm:items-end">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant="warning">In progress</Badge>
                         {/* The whole recovery path, and the reason there is no
                             "abandon" button: a rep who was interrupted comes
                             back to the same visit and finishes it. */}
-                        <Button asChild className="h-11">
+                        <Button asChild className="h-11 flex-1 sm:flex-none">
                           <Link href={`/log?plan=${entry.id}`}>Continue</Link>
                         </Button>
                       </div>
@@ -383,7 +397,7 @@ export function DailyPlan({
                       type="button"
                       variant="ghost"
                       aria-label={`Remove ${entry.instituteName} from today's plan`}
-                      className="size-11"
+                      className="size-11 self-end"
                       disabled={removing}
                       onClick={() =>
                         startRemoving(async () => {
@@ -401,7 +415,7 @@ export function DailyPlan({
             {done.map((entry) => (
               <li
                 key={entry.id}
-                className="border-border bg-muted/40 flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                className="border-border bg-muted/40 flex flex-col items-stretch gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
@@ -417,7 +431,7 @@ export function DailyPlan({
                 {/* Logged, so the closing report is done. What remains is
                     leaving — or, on a visit left open from an earlier day,
                     admitting the check-out is not coming. */}
-                <div className="flex shrink-0 flex-col items-end gap-1">
+                <div className="flex w-full min-w-0 flex-col items-start gap-1 sm:w-auto sm:shrink-0 sm:items-end">
                   <Badge variant="success">
                     <CheckCircle2Icon className="size-3" aria-hidden />
                     {entry.meetings_actual !== null ? "Held" : "Done"}

@@ -69,7 +69,11 @@ export function BottomNav({ items }: { items: NavItem[] }) {
           const Icon = ICONS[item.icon];
 
           return (
-            <li key={item.href} className="flex-1">
+            // min-w-0 so a long label ellipsises instead of setting the
+            // cell's min-content width. Six single-word labels cannot wrap, so
+            // without this the bar is as wide as its longest word x 6 and the
+            // fixed nav pushes the page sideways on a narrow phone.
+            <li key={item.href} className="min-w-0 flex-1">
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
@@ -91,7 +95,7 @@ export function BottomNav({ items }: { items: NavItem[] }) {
                   )}
                 />
                 <Icon className="size-5 shrink-0" aria-hidden />
-                <span className="text-[11px] leading-none font-medium">
+                <span className="w-full truncate text-center text-[11px] leading-none font-medium">
                   {item.label}
                 </span>
               </Link>
