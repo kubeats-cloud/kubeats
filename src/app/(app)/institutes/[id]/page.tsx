@@ -293,6 +293,15 @@ export default async function InstituteDetailPage(
                       <p className="line-clamp-2 text-sm">{visit.discussionSummary}</p>
                     )}
 
+                    {/*
+                      ONE LINK FOR BOTH ROLES. `/pending/[id]` is the report
+                      reader, and it has always ended its ownership check with
+                      `if (!mine && !isAdmin(user)) notFound()` — an admin was
+                      meant to open it. Until `/pending` left `REP_ONLY_PATHS`
+                      the proxy sent them to `/` instead, which made this button
+                      dead on the one screen where reassignment lives. It is not
+                      branched by role because it does not need to be.
+                    */}
                     <Button asChild variant="outline" className="mt-1 h-9">
                       <Link href={`/pending/${visit.id}`}>Open the full report</Link>
                     </Button>

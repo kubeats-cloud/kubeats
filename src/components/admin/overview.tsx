@@ -169,6 +169,14 @@ export function AdminOverview({ data }: { data: OverviewData }) {
             <SectionTitle>Go to</SectionTitle>
             <div className="grid gap-2">
               <Shortcut href="/assign" icon={SendIcon} label="Assign a visit" />
+              {/*
+                Stage 5b's way in. `/pending` is deliberately NOT a seventh
+                admin tab — the bar is six, and this is the same distance the
+                activity report and the data screen are kept at. ClockIcon is
+                the icon a rep's own Pending tab uses, so the two screens read
+                as one thing seen from two sides.
+              */}
+              <Shortcut href="/pending" icon={ClockIcon} label="Follow-ups owed" />
               <Shortcut href="/team" icon={UsersIcon} label="Team progress" />
               <Shortcut href="/data" icon={DatabaseIcon} label="Data and backups" />
               <Shortcut href="/report" icon={ChartColumnIcon} label="Activity report" />

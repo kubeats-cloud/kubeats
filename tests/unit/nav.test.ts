@@ -34,6 +34,9 @@ describe("navItemsFor", () => {
     expect(hrefs).toContain("/assign");
     expect(hrefs).toContain("/team");
     expect(hrefs).not.toContain("/log");
+    // Out of the BAR, not out of reach: an admin gets to Pending from the
+    // Overview's "Go to" list, the same way they reach /report and /data.
+    // Six tabs is the constraint here, not permission.
     expect(hrefs).not.toContain("/pending");
   });
 
@@ -58,8 +61,26 @@ describe("navItemsFor", () => {
 describe("path guards", () => {
   it("catches the rep-only routes and their children", () => {
     expect(isRepOnlyPath("/log")).toBe(true);
-    expect(isRepOnlyPath("/pending")).toBe(true);
-    expect(isRepOnlyPath("/pending/8b1a9953-4c22-4d1f-9b1a-99534c224d1f")).toBe(true);
+    expect(isRepOnlyPath("/log/anything")).toBe(true);
+  });
+
+  /*
+   * STAGE 5B'S REACHABILITY, PINNED.
+   *
+   * `/pending` was rep-only, and both of its pages were written to serve an
+   * admin — the team-wide read-only list with "Assign this follow-up" on it,
+   * and the report reader that ends its ownership check with
+   * `!mine && !isAdmin(user)`. The gate was the only thing in the way, so the
+   * feature redirected to `/` and could not be used at all. Putting it back on
+   * this list would break it again silently, which is why this is a test and
+   * not a comment.
+   */
+  it("leaves Pending open to an admin, index and report alike", () => {
+    expect(isRepOnlyPath("/pending")).toBe(false);
+    expect(isRepOnlyPath("/pending/8b1a9953-4c22-4d1f-9b1a-99534c224d1f")).toBe(false);
+    // Shared, not handed over: a rep must still reach it.
+    expect(isAdminOnlyPath("/pending")).toBe(false);
+    expect(isAdminOnlyPath("/pending/8b1a9953-4c22-4d1f-9b1a-99534c224d1f")).toBe(false);
   });
 
   it("catches the admin-only routes and their children", () => {
@@ -77,7 +98,7 @@ describe("path guards", () => {
   });
 
   it("leaves the shared screens open to both", () => {
-    for (const path of ["/", "/institutes", "/institutes/new", "/weekly"]) {
+    for (const path of ["/", "/institutes", "/institutes/new", "/weekly", "/pending"]) {
       expect(isAdminOnlyPath(path), path).toBe(false);
       expect(isRepOnlyPath(path), path).toBe(false);
     }
