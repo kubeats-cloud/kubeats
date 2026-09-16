@@ -261,7 +261,7 @@ Concretely, and true as of Phase 9:
 ## Deployment ceiling
 
 **The client is on the Workers Paid plan: 10 MiB gzipped**, and this app is at
-**2984 KiB** — about 29% of the ceiling. The plan change that this file spent
+**2970 KiB** — about 29% of the ceiling. The plan change that this file spent
 several phases recommending has happened, so **size is no longer a constraint on
 what may be added**, and the paragraph that used to sit here — 106 KiB spare,
 measure before adding a dependency, the campus picker costing 17 KiB — no longer
