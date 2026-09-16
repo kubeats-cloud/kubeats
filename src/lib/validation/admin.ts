@@ -145,10 +145,27 @@ export const MIN_PASSWORD = 8;
 export const newMemberSchema = z
   .object({
     name: name(120, "The name"),
+    /*
+     * FORMAT ONLY, AND THAT IS ALL A SCHEMA CAN DO.
+     *
+     * `z.email()` is already strict — it refuses a missing "@", a domain with
+     * no dot, a one-character TLD, spaces, doubled dots, a leading or trailing
+     * dot, an underscore in the domain, and `localhost`. What it cannot refuse
+     * is a well-formed address aimed at the wrong place: `…@gamil.con` passes
+     * every one of those rules, and passed them on the day a rep was created
+     * with it. No stricter pattern would have caught it, because the mistake is
+     * not in the shape. See `email-typos.ts` for the half that can, and for why
+     * that half only ever warns.
+     *
+     * The 254 cap is the practical ceiling on an address (RFC 5321's envelope
+     * limit). Not a real defence — anything that long is a paste accident — but
+     * it keeps an absurd string out of an auth call.
+     */
     email: z
       .string()
       .trim()
       .toLowerCase()
+      .max(254, "That email address is too long.")
       .pipe(z.email("That does not look like an email address.")),
     password: z
       .string()
