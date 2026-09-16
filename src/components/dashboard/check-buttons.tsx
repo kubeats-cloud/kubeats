@@ -58,7 +58,7 @@ export function CheckInButton({
   // both refuse it anyway; this is so the rep is not sent looking for a reason.
   if (blockedBy) {
     return (
-      <p className="text-muted-foreground max-w-56 text-right text-xs">
+      <p className="text-muted-foreground w-full text-xs sm:max-w-56 sm:text-right">
         Finish your visit at <span className="font-medium">{blockedBy}</span>{" "}
         before checking in here.
       </p>
@@ -91,7 +91,7 @@ export function CheckInButton({
 
   if (phase.step === "idle") {
     return (
-      <Button type="button" className="h-11" onClick={locate}>
+      <Button type="button" className="h-11 w-full sm:w-auto" onClick={locate}>
         <LogInIcon className="size-4" aria-hidden />
         Check in
       </Button>
@@ -100,7 +100,7 @@ export function CheckInButton({
 
   if (phase.step === "locating") {
     return (
-      <Button type="button" className="h-11" disabled>
+      <Button type="button" className="h-11 w-full sm:w-auto" disabled>
         <LogInIcon className="size-4" aria-hidden />
         Just a moment…
       </Button>
@@ -113,7 +113,7 @@ export function CheckInButton({
   if (phase.step === "located") {
     const { fix } = phase;
     return (
-      <form action={formAction} className="flex flex-col items-end gap-1">
+      <form className="flex w-full flex-col items-stretch gap-1 sm:items-end" action={formAction}>
         <input type="hidden" name="plan_id" value={planId} />
         <input type="hidden" name="latitude" value={String(fix.latitude)} />
         <input type="hidden" name="longitude" value={String(fix.longitude)} />
@@ -126,7 +126,7 @@ export function CheckInButton({
 
         <Button
           type="submit"
-          className="h-11"
+          className="h-11 w-full sm:w-auto"
           disabled={isPending}
           aria-label={`Confirm check in at ${instituteName}`}
         >
@@ -146,7 +146,7 @@ export function CheckInButton({
             again, exactly as before. It warns and never blocks, which is what
             keeps a rep in a basement staff room from being stranded. */}
         {shouldRetryLocation(fix.accuracy) && (
-          <p className="text-muted-foreground max-w-56 text-right text-xs">
+          <p className="text-muted-foreground w-full text-xs sm:max-w-56 sm:text-right">
             That reading looks approximate.{" "}
             <button
               type="button"
@@ -158,7 +158,7 @@ export function CheckInButton({
           </p>
         )}
         {state.error && (
-          <p role="alert" className="text-danger-subtle-foreground text-xs">
+          <p role="alert" className="text-danger-subtle-foreground text-xs sm:text-right">
             {state.error}
           </p>
         )}
@@ -170,15 +170,25 @@ export function CheckInButton({
   // Failed: retry, or say why and go in flagged.
   // ------------------------------------------------------------------
   return (
-    <div className="flex max-w-64 flex-col items-end gap-2">
+    /*
+      MOBILE: FULL WIDTH, NOT A RIGHT-HAND RAIL.
+
+      This was `max-w-64 items-end` — a 256px right-aligned column. Inside the
+      Dashboard row's `shrink-0` rail that is wider than the card itself on a
+      360px phone, which is what ran the guidance text off the right edge and
+      clipped the button beside it. The rail shrinks now (see daily-plan.tsx)
+      and this fills whatever it is given, staying a right-hand column only
+      from `sm` up where there is room for one.
+    */
+    <div className="flex w-full flex-col items-stretch gap-2 sm:max-w-64 sm:items-end">
       <p
         role="status"
-        className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-right text-xs"
+        className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-xs sm:text-right"
       >
         {NO_LOCATION_GUIDANCE}
       </p>
 
-      <Button type="button" className="h-11" onClick={locate}>
+      <Button type="button" className="h-11 w-full sm:w-auto" onClick={locate}>
         <LogInIcon className="size-4" aria-hidden />
         Try again
       </Button>
@@ -187,7 +197,7 @@ export function CheckInButton({
         <Button
           type="button"
           variant="ghost"
-          className="h-9"
+          className="h-11 w-full sm:w-auto"
           onClick={() => setOverriding(true)}
         >
           <MapPinOffIcon className="size-4" aria-hidden />
@@ -235,7 +245,7 @@ export function CheckInButton({
       )}
 
       {state.error && (
-        <p role="alert" className="text-danger-subtle-foreground text-xs">
+        <p role="alert" className="text-danger-subtle-foreground text-xs sm:text-right">
           {state.error}
         </p>
       )}
