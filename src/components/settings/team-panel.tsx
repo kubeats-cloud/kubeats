@@ -21,6 +21,10 @@ import {
   fieldErrorsFrom,
   newMemberSchema,
 } from "@/lib/validation/admin";
+import {
+  suggestEmailCorrection,
+  suggestedDomainOf,
+} from "@/lib/validation/email-typos";
 import type { TeamMember } from "@/lib/admin";
 import { campusLabel, type Campus } from "@/lib/campus-display";
 import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
@@ -54,6 +58,27 @@ export function TeamPanel({
   const [campusId, setCampusId] = useState("");
   const [values, setValues] = useState({ name: "", email: "", password: "" });
   const [adding, setAdding] = useState(false);
+  /*
+   * The typo the admin has already been shown and chosen to keep.
+   *
+   * Holding the ADDRESS rather than a boolean is what makes "proceed anyway"
+   * survive a correction: dismiss the warning on `…@gamil.con`, then edit the
+   * address to `…@gmial.com`, and the second typo is a different string, so it
+   * warns again instead of riding through on the first dismissal.
+   */
+  const [typoAccepted, setTypoAccepted] = useState<string | null>(null);
+
+  const suggestion = suggestEmailCorrection(values.email);
+  const normalisedEmail = values.email.trim().toLowerCase();
+  /*
+   * SHOWN and CONFIRMED are two questions, and collapsing them into one was a
+   * bug worth naming: if the warning hid itself the moment it was accepted, the
+   * admin's first press of Add would do nothing, say nothing, and leave them
+   * pressing a button that looked broken. So the warning stays up for as long
+   * as the address looks wrong, and acceptance only decides whether the NEXT
+   * press submits.
+   */
+  const typoConfirmed = typoAccepted === normalisedEmail;
 
   const error = serverState.error ?? clientState.error;
   const fieldErrors = serverState.error
@@ -97,8 +122,28 @@ export function TeamPanel({
       });
       return;
     }
+    /*
+     * THE WARNING'S ONE CHANCE TO BE READ, and deliberately not a refusal.
+     *
+     * The first submit on a suspicious address stops here and shows the
+     * suggestion; pressing Add again goes through unchanged. That costs an
+     * admin who meant it one extra tap, and catches the one who did not at the
+     * only moment the mistake is still free to fix — before an auth user exists
+     * on a dead address.
+     *
+     * It sits AFTER the schema parse so a genuinely malformed address is
+     * reported as an error rather than as a suggestion, and BEFORE formAction
+     * so nothing has been created yet.
+     */
+    if (suggestion && !typoConfirmed) {
+      setTypoAccepted(normalisedEmail);
+      setClientState(EMPTY_MEMBER_STATE);
+      return;
+    }
+
     setClientState(EMPTY_MEMBER_STATE);
     setValues({ name: "", email: "", password: "" });
+    setTypoAccepted(null);
     formAction(formData);
   }
 
@@ -246,8 +291,49 @@ export function TeamPanel({
                 value={values.email}
                 onChange={(e) => setValues((v) => ({ ...v, email: e.target.value }))}
                 aria-invalid={fieldErrors.email ? true : undefined}
+                aria-describedby={suggestion ? "member-email-typo" : undefined}
               />
               {field("email")}
+
+              {/*
+                A SUGGESTION, NOT AN ERROR — amber, not red, and it never
+                disables Add. The correction is a button because retyping a
+                domain by hand is how a second typo gets made.
+              */}
+              {suggestion && (
+                <div
+                  id="member-email-typo"
+                  role="status"
+                  className="bg-warning-subtle text-warning-subtle-foreground space-y-2 rounded-md px-3 py-2 text-xs"
+                >
+                  <p>
+                    Did you mean{" "}
+                    <span className="font-semibold">
+                      {suggestedDomainOf(suggestion)}
+                    </span>
+                    ? Check the address before creating the account — a wrong one
+                    cannot be used to reset a password.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9"
+                      onClick={() => {
+                        setValues((v) => ({ ...v, email: suggestion }));
+                        setTypoAccepted(null);
+                      }}
+                    >
+                      Use {suggestedDomainOf(suggestion)}
+                    </Button>
+                    <span className="self-center">
+                      {typoConfirmed
+                        ? "or press Add to create it as typed."
+                        : "or press Add again to keep what you typed."}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
