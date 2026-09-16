@@ -12,7 +12,7 @@ import {
   statusesInCategory,
   type StatusCatalogue,
 } from "@/lib/validation/institute";
-import { makeVisitSchema } from "@/lib/validation/visit";
+import { eventDateRequired, makeVisitSchema } from "@/lib/validation/visit";
 
 /**
  * Stage 4a — the status vocabulary is data, and the app asks rather than knows.
@@ -219,6 +219,11 @@ describe("a status is compulsory on a new visit", () => {
         status_set_to: status,
         // Rule 5 is unchanged and orthogonal: an open status still owes a date.
         follow_up_date: open ? "2026-10-15" : "",
+        // Rule 3 now hangs off the status too — asks_expected_date, rather than
+        // the purpose's lifecycle — so four of the nine want this as well.
+        expected_date: eventDateRequired(SEED_STATUS_CATALOGUE, status)
+          ? "2026-10-20"
+          : "",
       });
       expect(result.success, `${status}: ${result.error?.message}`).toBe(true);
     }

@@ -33,14 +33,16 @@ import {
 } from "@/lib/validation/institute";
 import {
   type ActivityKey,
-  expectedDateLabel,
-  expectedDateRequired,
+  eventDateLabel,
+  eventDateRequired,
   fieldLabel,
   followUpRequired,
+  notesRequired,
   plannedActivityIsValid,
   plannedActivityLabel,
 } from "@/lib/validation/visit";
 import { FormNotice } from "@/components/form-notice";
+import { RequiredMark } from "@/components/required-mark";
 
 /*
  * NO_CHANGE stood here — the sentinel behind a "No change" option at the top of
@@ -127,11 +129,18 @@ export function LogVisitForm({
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
 
   const status = statusSetTo === "" ? null : statusSetTo;
-  // Rule 3's date, unchanged in every respect except where its inputs come
-  // from: a "Set" session or campus visit is a promise about a future day, so
-  // it must name one. The purpose is what says Set now.
-  const needsDate = expectedDateRequired(activity, lifecycleStatus || null);
+  /*
+   * EVERY CONDITIONAL FIELD HANGS OFF THE STATUS NOW.
+   *
+   * The date used to be keyed to the purpose's lifecycle, which meant the two
+   * statuses that actually know when something happened — "Session done" and
+   * "Campus visit done" — were never asked for a date at all. It reads
+   * `asks_expected_date` off the chosen status instead, which 0026 put on
+   * `institute_statuses` and which was already correct for all four.
+   */
+  const needsDate = eventDateRequired(catalogue, status);
   const needsFollowUp = followUpRequired(catalogue, status);
+  const needsNotes = notesRequired(catalogue, status);
   const chosenStatus = statusRow(catalogue, status);
 
   /*
@@ -147,7 +156,9 @@ export function LogVisitForm({
     : clientState.fieldErrors;
 
   const fieldError = (key: string) =>
-    fieldErrors[key] ? <p className="text-danger text-xs">{fieldErrors[key]}</p> : null;
+    fieldErrors[key] ? (
+      <p className="text-danger text-xs">{fieldErrors[key]}</p>
+    ) : null;
 
   return (
     /*
@@ -229,11 +240,7 @@ export function LogVisitForm({
         name="expected_date"
         value={lifecycleStatus === "Set" ? expectedDate : ""}
       />
-      <input
-        type="hidden"
-        name="status_set_to"
-        value={statusSetTo}
-      />
+      <input type="hidden" name="status_set_to" value={statusSetTo} />
 
       {/*
         NOTHING IS ASKED HERE ANY MORE — it is shown.
@@ -249,10 +256,7 @@ export function LogVisitForm({
         one thing still asked for is Rule 3's date, and only when the purpose
         says this is a promise about a future day.
       */}
-      <FormSection
-        title="What happened?"
-        description="Decided by what you planned on the Dashboard."
-      >
+      <FormSection title="What happened?">
         <div className="border-border bg-muted/40 rounded-md border px-3 py-2">
           <p className="text-sm font-medium">{plan.instituteName}</p>
           <p className="text-muted-foreground text-xs">
@@ -272,36 +276,27 @@ export function LogVisitForm({
         {fieldError("activity")}
         {fieldError("lifecycle_status")}
         {fieldError("daily_plan_id")}
-
-        {needsDate && (
-          <div className="space-y-2">
-            <Label htmlFor="expected-date">{expectedDateLabel(activity)}</Label>
-            <Input
-              id="expected-date"
-              type="date"
-              className="h-11"
-              value={expectedDate}
-              onChange={(event) => setExpectedDate(event.target.value)}
-              aria-required
-            />
-            {fieldError("expected_date")}
-          </div>
-        )}
       </FormSection>
 
-      <FormSection
-        title="Photo"
-        description="One photo from the visit itself."
-      >
+      <FormSection title="Photo">
         <CaptureFields userId={userId} />
       </FormSection>
 
-      <FormSection
-        title="Where does this leave the institute?"
-        description="Your call, not ours. Nothing here is guessed from the activity."
-      >
+      {/*
+        STATUS FIRST, AND EVERYTHING ELSE BEHIND IT.
+        The spec's order for all nine statuses is one straight line — Status,
+        follow-up, the event date, the session detail, then Notes — so the
+        fields live in that order in one section rather than in titled cards
+        that each explain themselves. Nothing status-driven renders until a
+        status is chosen: before the pick there is nothing true to show, and a
+        form that fills in as it is answered is shorter to read than one that
+        greys out.
+      */}
+      <FormSection>
         <div className="space-y-2">
-          <Label>Status</Label>
+          <Label>
+            Status <RequiredMark />
+          </Label>
           <Select value={statusSetTo} onValueChange={setStatusSetTo}>
             <SelectTrigger
               className="h-11 w-full"
@@ -312,7 +307,7 @@ export function LogVisitForm({
                   "No change" used to sit here and be pre-selected, which meant
                   a rep could file a visit that moved nothing without ever
                   touching this control. */}
-              <SelectValue placeholder="Choose where this leaves them" />
+              <SelectValue placeholder="Select" />
             </SelectTrigger>
             {/* Grouped so it is obvious which choices leave the institute in
                 play — and an open one is what makes the follow-up mandatory
@@ -332,76 +327,86 @@ export function LogVisitForm({
           </Select>
           {fieldError("status_set_to")}
         </div>
+
+        {/*
+          THE FOLLOW-UP IS GATED ON THE STATUS, not merely labelled by it.
+
+          It used to render for all nine and only CHANGE ITS DESCRIPTION when
+          the status was closed, which is the client's first complaint: a rep
+          closing a visit with "RSVP received" was still shown a box asking when
+          they were going back. Now `followUpRequired()` — which is
+          `isOpenStatus()` — decides whether it exists at all.
+
+          WHAT THIS GIVES UP, DELIBERATELY. 0010 permits a follow-up on a CLOSED
+          status, and "they said no, ask again next intake" was a real use of
+          it. The client asked for the simpler rule and this takes it. Nothing
+          in the database changes: `follow_up_date` stays nullable and every
+          value already recorded is still there, so restoring the case is this
+          condition and nothing else.
+        */}
+        {status && (
+          <>
+            {needsFollowUp && (
+              <div className="space-y-2 sm:max-w-xs">
+                <Label htmlFor="follow-up-date">
+                  Follow-up Date <RequiredMark />
+                </Label>
+                <Input
+                  id="follow-up-date"
+                  name="follow_up_date"
+                  type="date"
+                  className="h-11"
+                  value={followUpDate}
+                  onChange={(event) => setFollowUpDate(event.target.value)}
+                  aria-required
+                />
+                {fieldError("follow_up_date")}
+              </div>
+            )}
+
+            {needsDate && (
+              <div className="space-y-2 sm:max-w-xs">
+                <Label htmlFor="expected-date">
+                  {eventDateLabel(catalogue, status)} <RequiredMark />
+                </Label>
+                <Input
+                  id="expected-date"
+                  type="date"
+                  className="h-11"
+                  value={expectedDate}
+                  onChange={(event) => setExpectedDate(event.target.value)}
+                  aria-required
+                />
+                {fieldError("expected_date")}
+              </div>
+            )}
+
+            <FeedbackFields
+              asks={{
+                sessionDetail: chosenStatus?.asksSessionDetail ?? false,
+                headCount: chosenStatus?.asksHeadCount ?? false,
+              }}
+              notesRequired={needsNotes}
+              value={feedback}
+              // Functional, so two changes in one tick both survive: the second
+              // merges against the first's result rather than against the render it
+              // started from. See applyFeedbackPatch.
+              onChange={(patch) =>
+                setFeedback((prev) => applyFeedbackPatch(prev, patch))
+              }
+              fieldErrors={fieldErrors}
+              openLoops={openLoops}
+            />
+          </>
+        )}
       </FormSection>
-
-      {/*
-        THE FOLLOW-UP LIVES HERE NOW, not in the feedback form, and it is driven
-        by the status rather than by a yes/no.
-
-        It used to sit at the foot of FeedbackFields behind "Is a next session
-        or meeting set?". Two things were wrong with that. The yes/no was a
-        second answer to a question the status had already answered, and the two
-        could disagree: an OPEN status with "No" hid these fields while
-        visitSchema still required them, so the error summary named a box that
-        was not on the screen and there was no way forward but guessing. And on
-        the recovery path the feedback form posts to close_visit(), which does
-        not write follow_up_date or follow_up_time at all — so what the rep
-        typed there was discarded in silence.
-
-        Both are fixed by putting it where the rule already was. visitSchema
-        requires a DATE when followUpRequired(status), mirroring
-        enforce_follow_up_when_open() (FO016); log_visit() is what stores it.
-
-        A DATE AND NOTHING ELSE. From 0018 to 0023 this asked for a time too,
-        pre-filled to 11:00 so the rep only really answered once. The client's
-        spec settled on the date alone, so migration 0023 drops the time from
-        the trigger and the control goes with it. visits.follow_up_time keeps
-        every value it recorded in between and is collected by nothing.
-
-        Shown for every status, not only the open ones: a CLOSED status may
-        still carry a follow-up — "they said no, ask again next intake" is a
-        real note, and 0010 kept it permitted on purpose. Only the requirement
-        changes.
-      */}
-      <FormSection
-        title="What happens next?"
-        description={
-          needsFollowUp
-            ? "That status leaves the institute open, so put the next visit in the diary now."
-            : "Optional. Only if you already know when you are going back."
-        }
-      >
-        <div className="space-y-2 sm:max-w-xs">
-          <Label htmlFor="follow-up-date">Follow-up date</Label>
-          <Input
-            id="follow-up-date"
-            name="follow_up_date"
-            type="date"
-            className="h-11"
-            value={followUpDate}
-            onChange={(event) => setFollowUpDate(event.target.value)}
-            aria-required={needsFollowUp || undefined}
-          />
-          {fieldError("follow_up_date")}
-        </div>
-      </FormSection>
-
-      <FeedbackFields
-        asks={{
-          sessionDetail: chosenStatus?.asksSessionDetail ?? false,
-          headCount: chosenStatus?.asksHeadCount ?? false,
-        }}
-        value={feedback}
-        // Functional, so two changes in one tick both survive: the second
-        // merges against the first's result rather than against the render it
-        // started from. See applyFeedbackPatch.
-        onChange={(patch) => setFeedback((prev) => applyFeedbackPatch(prev, patch))}
-        fieldErrors={fieldErrors}
-        openLoops={openLoops}
-      />
 
       {error && (
-        <FormNotice message={error} fieldErrors={fieldErrors} labelFor={fieldLabel} />
+        <FormNotice
+          message={error}
+          fieldErrors={fieldErrors}
+          labelFor={fieldLabel}
+        />
       )}
 
       {/* One tap ends the visit: the report is filed and the check-out is

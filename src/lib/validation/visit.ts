@@ -3,6 +3,7 @@ import {
   SEED_STATUS_CATALOGUE,
   isOpenStatus,
   selectableStatuses,
+  statusRow,
   type StatusCatalogue,
 } from "@/lib/validation/institute";
 
@@ -100,11 +101,36 @@ export const FOLLOW_UP_REQUIRED_FOR = [
  * Rule 3's dates: a "Set" session or campus visit is a promise about a future
  * day, so it must name one.
  */
-export function expectedDateRequired(
-  activity: string,
-  lifecycle: string | null,
+export function eventDateRequired(
+  catalogue: StatusCatalogue,
+  status: string | null,
 ): boolean {
-  return hasLifecycle(activity) && lifecycle === "Set";
+  return statusRow(catalogue, status)?.asksExpectedDate ?? false;
+}
+
+/**
+ * Does this status require a written report?
+ *
+ * SEVEN OF THE NINE DO. The two that do not are the instant closes — "RSVP
+ * received" and "Will not come" — where the status IS the whole answer and
+ * demanding a sentence would be demanding a restatement of the dropdown.
+ *
+ * DERIVED, NOT LISTED. Naming those two here would be a hard-coded status list
+ * in TypeScript, which is the mistake `PURPOSE_ACTIVITY` made and which
+ * migration 0026 spent a whole table removing: rename one in Settings and the
+ * rule silently stops applying to it. So the question is asked of the row
+ * instead — a status needs notes unless it is CLOSED and asks for nothing else.
+ * That is exactly those two today, and it extends the way an admin would
+ * expect: a new closed status that collects nothing is another instant close.
+ */
+export function notesRequired(
+  catalogue: StatusCatalogue,
+  status: string | null,
+): boolean {
+  const row = statusRow(catalogue, status);
+  if (!row) return false;
+  if (row.category !== "closed") return true;
+  return row.asksExpectedDate || row.asksSessionDetail || row.asksHeadCount;
 }
 
 /**
@@ -124,15 +150,29 @@ export function expectedDateRequired(
  * only ever fires for the two lifecycle activities. It is kept so adding a
  * third lifecycle activity yields a vague label rather than a blank one.
  */
-export function expectedDateLabel(activity: string): string {
-  switch (activity) {
-    case "session":
-      return "Tentative session date";
-    case "campus_visit":
-      return "Tentative campus visit date";
-    default:
-      return "When is it expected?";
-  }
+export function eventDateLabel(
+  catalogue: StatusCatalogue,
+  status: string | null,
+): string {
+  const row = statusRow(catalogue, status);
+  const name = row?.status ?? "";
+
+  // WHAT the date is about comes from the status's own words, because no flag
+  // distinguishes a session from a campus visit: "Session scheduled" and
+  // "Campus visit scheduled" carry an identical set of asks. Reading the name
+  // keeps the two apart without a second hard-coded list.
+  const kind = /campus/i.test(name)
+    ? "Campus Visit"
+    : /session/i.test(name)
+      ? "Session"
+      : "Event";
+
+  // WHETHER it has happened yet comes from the category, which is the same
+  // open/closed split everything else on this form reads. An open status is a
+  // plan ("Expected Session Date"); a closed one is a record ("Session Date").
+  const expected = row?.category === "open" ? "Expected " : "";
+
+  return `${expected}${kind} Date`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -369,16 +409,29 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
         message: "This activity does not have a Set or Done state.",
       });
     }
-    if (lifecycle && value.lifecycle_status === "Set" && !value.expected_date) {
+    /*
+     * THE DATE IS THE STATUS'S QUESTION NOW, not the purpose's.
+     *
+     * This read `lifecycle === "Set"`, which keyed the date to what the rep
+     * PLANNED rather than to what they are recording. Two consequences, and
+     * both were wrong: "Session done" and "Campus visit done" were never asked
+     * for a date at all, even though those are the two statuses that know when
+     * the thing actually happened; and a rep who planned a Set purpose was
+     * asked for one whatever status they ended on.
+     *
+     * `asks_expected_date` has been on `institute_statuses` since 0026 and is
+     * already correct for all four date-bearing statuses — it was simply never
+     * read by this form. Nothing in the database changes; log_visit() has
+     * stored the value for any session or campus visit since 0026 (D3) removed
+     * its own `= 'Set'` test for exactly this reason.
+     */
+    if (eventDateRequired(catalogue, value.status_set_to) && !value.expected_date) {
       ctx.addIssue({
         code: "custom",
         path: ["expected_date"],
-        // Same wording as the control, from the same function. The label said
-        // "Tentative session date" while this said "When is it expected?" and
-        // the error summary called the field "Expected date" - three names for
-        // one box, which is how a rep ends up hunting for a field that is
-        // already in front of them.
-        message: `Pick a ${expectedDateLabel(value.activity).toLowerCase()}.`,
+        // One name for one box: the control, this message and the error summary
+        // all read the label from the same function.
+        message: `Pick a ${eventDateLabel(catalogue, value.status_set_to)}.`,
       });
     }
 
