@@ -61,8 +61,18 @@ export default async function PendingPage() {
     getOpenFollowUps(openStatuses, user.id),
     // An admin has no half-finished visits of their own: they do not log any.
     admin ? Promise.resolve([]) : getUnreportedVisits(user.id),
-    // Only a rep can start a follow-up, so only a rep needs the purposes.
-    admin ? Promise.resolve([]) : listPurposes(),
+    /*
+     * BOTH ROLES NEED THE PURPOSES, and this used to say otherwise — "only a
+     * rep can start a follow-up, so only a rep needs the purposes" — which was
+     * true of `startFollowUp()` and quietly wrong about stage 5b. An admin does
+     * not START a follow-up; they ASSIGN one, and `AssignFollowUp` renders the
+     * same purpose picker for the same reason `StartFollowUp` does: stage 3
+     * derives the visit's activity from `purpose_id`, so the purpose decides
+     * which weekly metric the rep's work lands in. Handed an empty list, the
+     * picker rendered with nothing in it and the Assign button stayed disabled
+     * for ever — the feature looked present and could not be completed.
+     */
+    listPurposes(),
   ]);
 
   return (

@@ -104,8 +104,26 @@ export const AUTH_PATHS = ["/login"] as const;
  * Hiding a tab is a convenience, never a boundary — `proxy.ts` turns an admin
  * away from these with a real redirect, and each page checks again on the
  * server. This list is the single place all three read from.
+ *
+ * `/pending` WAS HERE AND IS NOT ANY MORE, and the reason is worth keeping.
+ * Both pending screens were written for an admin from the start: the index
+ * renders "Every institute across the team still waiting on a follow-up" with
+ * `readOnly`, which is the only branch that offers stage 5b's "Assign this
+ * follow-up", and `/pending/[id]` ends its ownership check with
+ * `if (!mine && !isAdmin(user)) notFound()`. This list was the one thing
+ * standing between an admin and code already written to serve them — so the
+ * whole feature redirected to `/` and could never be used, and the institute
+ * page's "Open the full report" link was dead for the only role that sees it.
+ *
+ * `/log` stays, and for the reason the block above gives: logging a visit
+ * records a person being somewhere, which an admin at a desk was not. Reading
+ * what is still owed across the team is supervision, which is their job.
+ *
+ * Being reachable is not the same as being in the bar. `/pending` is NOT in
+ * `ADMIN_NAV` — it is reached from the Overview's "Go to" list, the same
+ * distance as `/report` and `/data`, and for the same reason: six tabs.
  */
-export const REP_ONLY_PATHS = ["/log", "/pending"] as const;
+export const REP_ONLY_PATHS = ["/log"] as const;
 
 /** The mirror: admin workspace routes a rep may not reach. */
 export const ADMIN_ONLY_PATHS = [

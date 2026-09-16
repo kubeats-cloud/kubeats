@@ -113,15 +113,89 @@ describe("the six activity columns", () => {
 /* ------------------------------------------------------------------ */
 
 describe("the status columns are generated, never hardcoded", () => {
-  it("takes its columns from the catalogue, in sort order", () => {
+  it("takes its columns from the catalogue", () => {
     const columns = statusColumnsFor(catalogue, new Set());
+    // Neither of these is one of the template's nine, so both are additions and
+    // keep catalogue order relative to each other.
     expect(columns.closed.map((c) => c.label)).toEqual([
       "Admitted",
       "Not interested",
     ]);
+    // Both of these ARE the template's, so they take the TEMPLATE's order —
+    // "Session scheduled" before "First meeting done" — even though their
+    // sort_orders (40, 30) say the opposite. That inversion is the point.
     expect(columns.open.map((c) => c.label)).toEqual([
-      "First meeting done",
       "Session scheduled",
+      "First meeting done",
+    ]);
+  });
+
+  /*
+   * THE CLIENT'S TEMPLATE ORDER, BAND BY BAND.
+   *
+   * The sheet is a file they already have formulas and pivots written against,
+   * so the nine statuses it names have to land where it expects them. Asserted
+   * against a catalogue deliberately shuffled out of that order — reverse sort
+   * orders, alphabetically wrong — so passing means the template list is doing
+   * the work rather than the catalogue happening to agree with it.
+   */
+  it("puts the template's statuses in the template's order, not sort order", () => {
+    const shuffled: StatusCatalogue = [
+      row("Will not come", "closed", 1, true),
+      row("RSVP received", "closed", 2, true),
+      row("Session done", "closed", 3, true),
+      row("Campus visit done", "closed", 4, true),
+      row("Invited principal for event", "open", 1, true),
+      row("Pending for management approval", "open", 2, true),
+      row("First meeting done", "open", 3, true),
+      row("Campus visit scheduled", "open", 4, true),
+      row("Session scheduled", "open", 5, true),
+    ];
+    const columns = statusColumnsFor(shuffled, new Set());
+    expect(columns.closed.map((c) => c.status)).toEqual([
+      "Campus visit done",
+      "Session done",
+      "RSVP received",
+      "Will not come",
+    ]);
+    expect(columns.open.map((c) => c.status)).toEqual([
+      "Session scheduled",
+      "Campus visit scheduled",
+      "First meeting done",
+      "Pending for management approval",
+      "Invited principal for event",
+    ]);
+  });
+
+  it("matches the template case-insensitively", () => {
+    // The template's headers are Title Case ("Session Done"); the database
+    // holds sentence case. An admin who re-cases one must not knock it out of
+    // its template slot and down among the additions.
+    const recased: StatusCatalogue = [
+      row("Added later", "closed", 1, true),
+      row("SESSION DONE", "closed", 2, true),
+      row("Campus Visit Done", "closed", 3, true),
+    ];
+    const columns = statusColumnsFor(recased, new Set());
+    expect(columns.closed.map((c) => c.status)).toEqual([
+      "Campus Visit Done",
+      "SESSION DONE",
+      "Added later",
+    ]);
+  });
+
+  it("appends an admin's addition after the whole template set", () => {
+    const extended: StatusCatalogue = [
+      // sort_order 1 would put it first under the old rule.
+      row("Awaiting trustee sign-off", "open", 1, true),
+      row("Session scheduled", "open", 50, true),
+      row("First meeting done", "open", 60, true),
+    ];
+    const columns = statusColumnsFor(extended, new Set());
+    expect(columns.open.map((c) => c.status)).toEqual([
+      "Session scheduled",
+      "First meeting done",
+      "Awaiting trustee sign-off",
     ]);
   });
 
@@ -220,8 +294,9 @@ describe("the grid matches the client's template", () => {
       "Admissions",
       "Admitted",
       "Not interested",
-      "First meeting done",
+      // Template order inside the open band: see the ordering tests above.
       "Session scheduled",
+      "First meeting done",
     ]);
   });
 
@@ -237,7 +312,9 @@ describe("the grid matches the client's template", () => {
   it("writes counts, with zero rather than a blank for nothing", () => {
     // Asha: meetings 4, sessions 2+1, campus 0, olympiad 0, apps 0, admissions 5
     expect(rows[2].slice(1, 7)).toEqual([4, 3, 0, 0, 0, 5]);
-    expect(rows[2].slice(7)).toEqual([3, 0, 0, 2]);
+    // Closed: Admitted 3, Not interested 0. Open, in TEMPLATE order:
+    // Session scheduled 2, then First meeting done 0.
+    expect(rows[2].slice(7)).toEqual([3, 0, 2, 0]);
     // A rep with no activity is a row of zeroes, not a missing row.
     expect(rows[3].slice(1)).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   });

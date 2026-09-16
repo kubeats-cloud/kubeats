@@ -111,9 +111,24 @@ export const RETIRED_SUFFIX = " (retired)";
  * afternoon, in the right band, without a deploy — because the only thing this
  * function knows is what the table said when it was called.
  *
- * ORDERING is `sort_order` then name, which is the order the catalogue arrives
- * in and the same order the status pickers use. So a column's position in the
- * sheet matches its position in the app.
+ * ORDERING follows the CLIENT'S TEMPLATE, not `sort_order`. The nine statuses
+ * the template names get its order, band by band (`TEMPLATE_COLUMN_ORDER`);
+ * anything an admin has ADDED since is appended after them, still inside its
+ * own band and still in catalogue order relative to its peers.
+ *
+ * This reverses the earlier rule, which was `sort_order` then name so that a
+ * column's position in the sheet matched its position in the app's pickers.
+ * The template is a file the client already has formulas and pivots written
+ * against, and a sheet whose columns sit where they expect is worth more than
+ * one that agrees with a picker they never see while reading it. Adding a
+ * status still needs no deploy — it simply lands after the template's set
+ * rather than in the middle of it.
+ *
+ * Matching is case-insensitive because the template writes Title Case and the
+ * seeded rows are sentence case. It is on the STATUS TEXT, so renaming one in
+ * Settings drops it out of the template set and appends it as an addition —
+ * correct, if surprising: a renamed status is not the template's any more, and
+ * guessing otherwise would be guessing.
  *
  * RETIRED STATUSES ARE INCLUDED WHEN, AND ONLY WHEN, THEY HAVE COUNTS IN THE
  * RANGE — and they sort to the END of their own band rather than into their
@@ -144,10 +159,23 @@ export function statusColumnsFor(
   const pick = (category: StatusRow["category"]): StatusColumn[] => {
     const inBand = catalogue.filter((row) => row.category === category);
     const active = inBand.filter((row) => row.isActive);
+
+    // The template's own, in the template's order. `.filter()` already returns
+    // a fresh array, so sorting it does not disturb the catalogue.
+    const templated = active
+      .filter((row) => templateIndexOf(category, row.status) >= 0)
+      .sort(
+        (a, b) =>
+          templateIndexOf(category, a.status) - templateIndexOf(category, b.status),
+      );
+
+    // Everything an admin has added since, in catalogue order, after them.
+    const added = active.filter((row) => templateIndexOf(category, row.status) < 0);
+
     const retired = inBand.filter(
       (row) => !row.isActive && statusesWithCounts.has(row.status),
     );
-    return [...active, ...retired].map((row) => ({
+    return [...templated, ...added, ...retired].map((row) => ({
       status: row.status,
       label: row.isActive ? row.status : row.status + RETIRED_SUFFIX,
       retired: !row.isActive,
@@ -155,6 +183,39 @@ export function statusColumnsFor(
   };
 
   return { closed: pick("closed"), open: pick("open") };
+}
+
+/**
+ * The column order the client's own spreadsheet uses, band by band.
+ *
+ * Written with the SEEDED spellings (`SEED_STATUS_CATALOGUE`), which are what
+ * the database actually holds — the template's headers are the same nine in
+ * Title Case, and its "Invite Principal for Event" is this app's "Invited
+ * principal for event". Matching is case-insensitive, so the two spellings meet
+ * in the middle; the wording difference is why this list is written against the
+ * database rather than copied from the sheet.
+ *
+ * A status NOT named here is not an error — it is an addition, and
+ * `statusColumnsFor()` appends it after these. That is the whole design: the
+ * template's columns hold still, and new ones grow off the end.
+ */
+const TEMPLATE_COLUMN_ORDER: Record<StatusRow["category"], readonly string[]> = {
+  closed: ["Campus visit done", "Session done", "RSVP received", "Will not come"],
+  open: [
+    "Session scheduled",
+    "Campus visit scheduled",
+    "First meeting done",
+    "Pending for management approval",
+    "Invited principal for event",
+  ],
+};
+
+/** Where a status sits in its band's template order, or -1 if it is an addition. */
+function templateIndexOf(category: StatusRow["category"], status: string): number {
+  const needle = status.trim().toLowerCase();
+  return TEMPLATE_COLUMN_ORDER[category].findIndex(
+    (name) => name.toLowerCase() === needle,
+  );
 }
 
 /**
