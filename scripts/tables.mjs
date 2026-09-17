@@ -37,6 +37,40 @@ export const BACKUP_TABLES = [
   // and when, so losing it loses the audit trail outright.
   { name: "institute_status_history", conflict: "id" },
   { name: "targets", conflict: "id" },
+  /*
+   * THE WEEKLY COMMITMENTS, EITHER SIDE OF 0013'S RENAME — and they are ONE
+   * table, listed twice, not two tables.
+   *
+   * Migration 0013 generalised weekly_targets into `targets` and then did
+   * `alter table public.weekly_targets rename to weekly_targets_pre_0013`
+   * rather than dropping it, deliberately: dropping would have been the one
+   * irreversible step in that file. So which of these two names exists depends
+   * entirely on how far a given database has been migrated, and on whether
+   * anybody has since run the optional `drop table public.weekly_targets_pre_0013;`
+   * that 0013 offers at the end.
+   *
+   * EXACTLY ONE OF THEM WILL USUALLY BE "STALE", and that is expected rather
+   * than drift. assertCoverage() warns about a listed table the database does
+   * not have and carries on, and the table loop in backup.mjs skips it for the
+   * reason written there: the gap between merging a migration and applying it
+   * is precisely when somebody wants a backup, and refusing to take one then is
+   * the worst possible moment to refuse.
+   *
+   * BOTH ARE LISTED so neither can HARD-fail a backup. The archive turned up on
+   * the client's database and stopped the backup dead — which is the check
+   * working, and also the last thing anybody wants to discover with a flush
+   * queued up behind it. `weekly_targets` is listed for the same reason one
+   * step earlier: a database part-way between 0001 and 0013 still has it, and
+   * it holds live commitments at that point.
+   *
+   * `conflict: "id"` is correct for both. 0013 RENAMED the table rather than
+   * copying it, so the primary key, the unique (member, week_start) and the
+   * enforce_weekly_lock trigger all came across with it. That trigger only
+   * raises on UPDATE — its INSERT branch just stamps submitted_at — so a
+   * restore into an empty table replays cleanly.
+   */
+  { name: "weekly_targets", conflict: "id" },
+  { name: "weekly_targets_pre_0013", conflict: "id" },
   // The rows that describe the files in the materials bucket. Backed up with
   // the bucket below; a row without its file renders as unavailable, and a file
   // without its row is invisible and permanent.
