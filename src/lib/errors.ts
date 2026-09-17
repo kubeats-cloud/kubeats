@@ -110,3 +110,43 @@ export function logError(context: string, error: unknown): void {
         : "unknown error";
   console.error(`[${context}]`, code ? `${code}: ${message}` : message);
 }
+
+/**
+ * One fetch on a page that gathers several, made unable to take the page down.
+ *
+ * WHAT THIS IS FOR. The two screens a person lands on after signing in — the
+ * Dashboard and Settings — each gather six or seven things in one
+ * `Promise.all`. Every one of those helpers already degrades politely when the
+ * database answers with an ERROR: a seeded catalogue, an empty list, an
+ * `{ ok: false }`. None of them survives a REJECTION, and `Promise.all` rejects
+ * as a whole the moment any single promise does. So one dropped connection
+ * while fetching, say, the campus list would throw away the plan, the
+ * institutes, the purposes and the week's figures along with it, and show the
+ * error boundary instead of the screen.
+ *
+ * Wrapping each one turns that into a panel's worth of loss rather than a
+ * screen's. The caller supplies the same fallback the helper would have
+ * returned by itself, so a rejection and a database error now look identical
+ * to everything downstream — which is what makes this safe to add without
+ * touching how any page reads its data.
+ *
+ * IT CHANGES NOTHING WHEN NOTHING GOES WRONG. On the happy path this is one
+ * `await` and a returned value.
+ *
+ * NOT FOR WRITES. A failed write must reach the person who made it, as a
+ * sentence they can act on; quietly substituting a fallback would tell them
+ * their work was saved when it was not. This is for reads that decorate a
+ * page, and `context` is what makes the log line say which one went missing.
+ */
+export async function settled<T>(
+  work: Promise<T>,
+  fallback: T,
+  context: string,
+): Promise<T> {
+  try {
+    return await work;
+  } catch (error) {
+    logError(context, error);
+    return fallback;
+  }
+}

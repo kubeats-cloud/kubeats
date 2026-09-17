@@ -59,9 +59,41 @@ export async function updateSession(
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  /*
+   * THE ONE AWAIT IN THIS APP THAT RUNS ON EVERY REQUEST, so it is the one
+   * whose failure has nowhere to land.
+   *
+   * `getUser()` normally reports trouble the way the rest of the SDK does — a
+   * value with an `error` on it — and this code has always read it that way.
+   * What it did not do is survive a REJECTION: a fetch that never completes, a
+   * response that is not JSON, a socket dropped mid-flight. That is not a
+   * screen failing, it is `proxy()` throwing, and a middleware that throws is
+   * a hard 500 on EVERY route — including /api/* and including /login, with no
+   * error boundary anywhere in the path to catch it. The whole app is simply
+   * gone until Supabase answers again.
+   *
+   * FAILING CLOSED IS THE CORRECT DIRECTION, and it is worth being explicit
+   * about why, because the alternative looks kinder. Treating an unreadable
+   * session as "no user" sends people to /login — annoying during a blip.
+   * Treating it as "carry on" would let a request through the signed-out gate
+   * on the strength of a network error. One of those costs a sign-in; the
+   * other is an authorisation hole. The `(app)` layout and RLS would still
+   * refuse the actual data, but the gate must not be the thing that gives way.
+   *
+   * The refreshed `response` is returned regardless, so any cookie the refresh
+   * did manage to set still travels.
+   */
+  let user = null;
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch (error) {
+    // Not logError(): this module is the proxy, and lib/errors.ts is for
+    // turning failures into sentences for a screen. There is no screen here.
+    console.error("[proxy] session refresh failed", {
+      message: error instanceof Error ? error.message : "unknown error",
+    });
+  }
 
   // The client comes back too, so a caller can ask one more question — the
   // signed-in user's role, say — on the same refreshed session.

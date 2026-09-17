@@ -236,7 +236,26 @@ export async function clearMemberFactors(
   const userId = String(formData.get("member_id") ?? "");
   if (!userId) return { error: "Choose whose sign-in code to reset." };
 
-  const db = createAdminClient();
+  /*
+   * `createAdminClient()` throws when SUPABASE_SERVICE_ROLE_KEY is missing or
+   * malformed — a deployment fault, but an uncaught one here leaves the form
+   * and lands on the error boundary, which tells the admin nothing and loses
+   * what they typed. Caught so it reads as a refusal like every other failure
+   * on this screen. Same guard as admin.ts and mfa-admin.ts.
+   */
+  let db;
+  try {
+    db = createAdminClient();
+  } catch (clientError) {
+    console.error("[mfa] service-role client unavailable", {
+      message: clientError instanceof Error ? clientError.message : "unknown error",
+    });
+    return {
+      error:
+        "Sign-in codes cannot be reset right now — the server is missing a setting. Please tell whoever set the app up.",
+    };
+  }
+
   const { data, error } = await db.auth.admin.mfa.listFactors({ userId });
   if (error) {
     console.error("[mfa] admin list factors failed", { code: error.code });
