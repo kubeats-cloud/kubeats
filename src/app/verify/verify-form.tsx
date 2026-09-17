@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signOut } from "@/lib/auth-actions";
-import { verifyMfaCode, EMPTY_MFA_STATE } from "@/lib/mfa-actions";
+import { verifyMfaCode } from "@/lib/mfa-actions";
+import { EMPTY_MFA_STATE } from "@/lib/mfa-state";
 
 export function VerifyForm({ next }: { next: string }) {
   const [state, formAction, isPending] = useActionState(

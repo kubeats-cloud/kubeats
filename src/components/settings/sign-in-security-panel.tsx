@@ -12,9 +12,8 @@ import {
   confirmEnrolment,
   removeOwnFactor,
   startEnrolment,
-  EMPTY_MFA_STATE,
-  type MfaState,
 } from "@/lib/mfa-actions";
+import { EMPTY_MFA_STATE, type MfaState } from "@/lib/mfa-state";
 import type { AdminFactorState } from "@/lib/mfa-admin";
 
 /**

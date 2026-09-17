@@ -1,6 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+/*
+ * Same reason as auth-actions.ts: a constant exported from a "use server"
+ * file is a server reference by the time a client component reads it. See
+ * mfa-state.ts.
+ */
+import type { MfaState } from "@/lib/mfa-state";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -18,15 +24,6 @@ import { codeSchema } from "@/lib/validation/mfa-input";
  * the secret come back through the action's return value and are rendered; they
  * are the enrolling admin's own, and are shown once.
  */
-
-export interface MfaState {
-  error: string | null;
-  /** Filled only by `startEnrolment`, and only on the way in. */
-  enrolment?: { factorId: string; qr: string; secret: string } | null;
-  ok?: boolean;
-}
-
-export const EMPTY_MFA_STATE: MfaState = { error: null, enrolment: null };
 
 const GENERIC_CODE_ERROR = "That code was not accepted. Try the next one.";
 

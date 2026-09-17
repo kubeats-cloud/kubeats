@@ -12,7 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { signOutIfFinished, SIGN_OUT_READY } from "@/lib/auth-actions";
+import { signOutIfFinished } from "@/lib/auth-actions";
+import { SIGN_OUT_READY } from "@/lib/sign-out-state";
 
 /**
  * Sign out, and what happens when a visit is still open.
