@@ -89,18 +89,112 @@ async function databaseReachable(): Promise<boolean> {
   }
 }
 
+/**
+ * The two pg_cron jobs this app's rules actually depend on.
+ *
+ * WHY THEY ARE WORTH A MONITOR'S ATTENTION. Neither failure shows up anywhere
+ * else. No screen goes red and no request 500s:
+ *
+ *   purge-visit-photos    photographs outlive the retention promise made in
+ *                         /privacy, and the bucket grows without limit.
+ *   sweep-open-checkins   a rep who forgot to finish a visit is still checked
+ *                         in the next morning, and FO013 then refuses them
+ *                         every other institute for the rest of the day.
+ *
+ * THREE ANSWERS, NOT TWO, and the third is the point:
+ *
+ *   "ok"       both jobs found and active.
+ *   "missing"  the database answered and they are not there. A real fault, and
+ *              the only cron answer that degrades the endpoint.
+ *   "unknown"  the question could not be ASKED — migration 0031 is not applied,
+ *              or pg_cron is not installed. That is a gap in monitoring, not an
+ *              outage, and paging somebody at 3am because a helper function is
+ *              missing would teach them to ignore this endpoint. It is reported
+ *              so a human notices; it does not raise the alarm.
+ */
+const CRON_JOBS = ["purge-visit-photos", "sweep-open-checkins"] as const;
+
+type CronStatus = "ok" | "missing" | "unknown";
+
+async function cronScheduled(): Promise<{
+  status: CronStatus;
+  jobs?: Record<string, boolean>;
+}> {
+  try {
+    const db = createAdminClient();
+    const call = db.rpc("health_cron_jobs");
+
+    const { data, error } = (await Promise.race([
+      call,
+      new Promise<{ data: null; error: Error }>((resolve) =>
+        setTimeout(
+          () => resolve({ data: null, error: new Error("timed out") }),
+          TIMEOUT_MS,
+        ),
+      ),
+    ])) as { data: { jobname: string; active: boolean }[] | null; error: unknown };
+
+    if (error) {
+      // Includes PGRST202 — "no function by that name" — which is simply a
+      // database that has not had 0031 applied. Logged at the same level as
+      // any other failure to ask; the caller decides it does not degrade.
+      logError("health:cron", error);
+      return { status: "unknown" };
+    }
+
+    const active = new Set(
+      (data ?? []).filter((row) => row.active).map((row) => row.jobname),
+    );
+    const jobs = Object.fromEntries(
+      CRON_JOBS.map((name) => [name, active.has(name)]),
+    );
+    return {
+      status: CRON_JOBS.every((name) => active.has(name)) ? "ok" : "missing",
+      jobs,
+    };
+  } catch (error) {
+    logError("health:cron", error);
+    return { status: "unknown" };
+  }
+}
+
 export async function GET(request: Request) {
   const expected = healthCheckToken();
 
   // The deep answer, for a caller that proves it is the monitor.
   if (expected && tokenMatches(request.headers.get("x-health-token"), expected)) {
     const startedAt = Date.now();
-    const ok = await databaseReachable();
+
+    /*
+     * BOTH CHECKS AT ONCE, and neither can reject. Each helper catches its own
+     * failures and returns a verdict, so this Promise.all is a way of not
+     * paying for the second round trip rather than a risk: a health endpoint
+     * that can 500 tells a monitor nothing except that it cannot be trusted.
+     */
+    const [databaseOk, cron] = await Promise.all([
+      databaseReachable(),
+      cronScheduled(),
+    ]);
+
+    /*
+     * WHAT MAKES IT "degraded", stated once so the HTTP status and the body
+     * cannot drift apart. An unreachable database is an outage. Jobs that are
+     * genuinely not scheduled are a fault worth waking up for. A cron answer of
+     * "unknown" is neither — see cronScheduled() for why it must not page.
+     */
+    const ok = databaseOk && cron.status !== "missing";
 
     return NextResponse.json(
       {
         status: ok ? "ok" : "degraded",
-        checks: { database: ok ? "ok" : "unreachable" },
+        checks: {
+          database: databaseOk ? "ok" : "unreachable",
+          cron: cron.status,
+        },
+        // Per-job detail, and only when the question could be asked at all.
+        // Omitted rather than filled with guesses, so "absent from the body"
+        // and "false" mean different things.
+        ...(cron.jobs ? { jobs: cron.jobs } : {}),
         latencyMs: Date.now() - startedAt,
         time: new Date().toISOString(),
         // WHICH BUILD IS ANSWERING. Null unless APP_COMMIT_SHA was set when the
