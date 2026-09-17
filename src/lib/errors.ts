@@ -12,6 +12,18 @@ export const GENERIC_ERROR =
   "Something went wrong. Please try again in a moment.";
 
 /**
+ * What a database that is behind its app looks like to whoever hit it.
+ *
+ * Deliberately NOT "please try again": retrying is the one thing that cannot
+ * help, and saying so is what stops an afternoon being spent on the client
+ * instead of on the migration. See the two codes that map to it below.
+ */
+export const DATABASE_BEHIND =
+  "This part of the app is newer than the database it is talking to. " +
+  "A database update has not been applied yet — please tell your admin. " +
+  "Retrying will not help.";
+
+/**
  * Postgres and PostgREST codes we can say something specific and useful about.
  * Everything else falls through to GENERIC_ERROR on purpose.
  */
@@ -21,8 +33,31 @@ const CODE_MESSAGES: Record<string, string> = {
   "23503": "Something this depends on is missing, or it is still in use.",
   "23514": "That is not allowed. Please check the details and try again.",
   "42501": "You do not have permission to do that.",
+  /*
+   * THE APP IS NEWER THAN ITS DATABASE, and this is the one failure that has to
+   * name itself.
+   *
+   * 42703 is "column does not exist" on a READ; PGRST204 is "could not find the
+   * column in the schema cache" on a WRITE. Neither can be caused by anything a
+   * user typed. Both mean exactly one thing: a build has shipped that expects a
+   * migration nobody has applied yet.
+   *
+   * Left to the generic fallback they read as "we could not add that purpose",
+   * which is indistinguishable from a network blip and sent a real pre-go-live
+   * re-test hunting a React bug instead. Several migrations in this repo are
+   * DEPLOY-COUPLED on purpose (CLAUDE.md marks 0027 in particular), so this is a
+   * state the project deliberately allows itself to reach for a few minutes —
+   * and a few minutes is exactly when somebody needs to be told which half is
+   * behind rather than being shown a shrug.
+   *
+   * It names the admin rather than the fix because a rep cannot apply a
+   * migration, and it leaks nothing: the column name stays in the server log
+   * where logError puts it.
+   */
+  "42703": DATABASE_BEHIND,
   // PostgREST
   PGRST116: "We could not find that.",
+  PGRST204: DATABASE_BEHIND,
   PGRST205: "The app is not fully set up yet. Please contact your admin.",
   PGRST301: "Your session has expired. Please sign in again.",
 };

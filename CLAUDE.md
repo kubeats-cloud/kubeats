@@ -285,6 +285,19 @@ faster. See README for both.
 
 ## Engineering notes
 
+- **The app and its schema ship separately, and something has to watch the gap.**
+  `npm run check:schema` asks a database which column-bearing migrations it
+  actually has and exits non-zero when it is behind the code. Read-only, and it
+  takes a URL and key so it can be pointed at any environment.
+  It exists because the gap was real: a build went out expecting 0024–0026
+  against a database still at 0022, and every mutation on Settings failed with
+  a sentence that read like a network blip. `/api/health` answers "has the new
+  BUILD gone out" and is structurally incapable of catching that — this is the
+  other half of the same question, and `PGRST204` / `42703` mapping to
+  `DATABASE_BEHIND` in `errors.ts` is the third.
+  **It cannot see 0023 or 0027–0030**, which add no column. A clean run means
+  the schema is roughly where the code expects, not that it is current; each
+  migration's own assertion block is what proves it landed.
 - Next.js 16: `cookies()` is async-only, and middleware is now `proxy.ts`
   (Node runtime, no edge).
 - `npm run typecheck` runs `next typegen` first — `LayoutProps`/`PageProps` are

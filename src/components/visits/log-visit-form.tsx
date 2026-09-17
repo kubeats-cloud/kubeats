@@ -163,9 +163,49 @@ export function LogVisitForm({
    */
 
   const error = serverState.error ?? clientState.error;
-  const fieldErrors = serverState.error
+  const rawFieldErrors = serverState.error
     ? serverState.fieldErrors
     : clientState.fieldErrors;
+
+  /*
+   * AN ERROR ABOUT A FIELD THAT IS NO LONGER ON SCREEN IS NOT AN ERROR.
+   *
+   * Both of these hang off the STATUS, and the status is the one thing a rep
+   * changes after a failed submit. Picking "Session scheduled", submitting
+   * without a date, then switching to "RSVP received" left the refusal standing
+   * — "Pick the Session Date" — pointing at a control that had just been
+   * unmounted by the same change. There is nothing to fix and nowhere to fix
+   * it, which is the worst shape an error message can take.
+   *
+   * Cleared by asking the SAME questions the fields are rendered by, rather
+   * than by remembering to clear state in each onValueChange: the errors are
+   * then simply a function of the current status, and a third conditional field
+   * added later cannot forget to be handled here.
+   *
+   * The server's copy is filtered too, not just the client's. The rep changes
+   * the status without submitting again, so `serverState` still holds the
+   * refusal from the previous attempt.
+   */
+  const fieldErrors = Object.fromEntries(
+    Object.entries(rawFieldErrors).filter(([key]) => {
+      if (key === "expected_date") return needsDate;
+      if (key === "follow_up_date") return needsFollowUp;
+      return true;
+    }),
+  );
+
+  /*
+   * ONE NAME FOR ONE BOX, in the summary as well as on the control.
+   *
+   * `fieldLabel` is keyed by field name and cannot know which status is
+   * chosen, so it can only answer "Tentative date" — while the control above
+   * it reads "Expected Session Date" and the message inside it says "Pick the
+   * Session Date". Three names for one field. This asks `eventDateLabel()` for
+   * the one field that has a status-dependent name and defers to `fieldLabel`
+   * for the rest.
+   */
+  const labelForField = (key: string) =>
+    key === "expected_date" ? eventDateLabel(catalogue, status) : fieldLabel(key);
 
   const fieldError = (key: string) =>
     fieldErrors[key] ? (
@@ -450,7 +490,7 @@ export function LogVisitForm({
         <FormNotice
           message={error}
           fieldErrors={fieldErrors}
-          labelFor={fieldLabel}
+          labelFor={labelForField}
         />
       )}
 

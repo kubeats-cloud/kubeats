@@ -73,6 +73,18 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
   const [activity, setActivity] = useState("");
   const [lifecycle, setLifecycle] = useState("");
   const [retiring, startRetiring] = useTransition();
+  /*
+   * WHAT RETIRE AND RESTORE SAID, WHICH USED TO BE NOTHING AT ALL.
+   *
+   * `setPurposeActive` returns an AdminState like every other action here, and
+   * the click handler below awaited it and dropped it on the floor. So when the
+   * write failed — which it does on any database missing 0025, with the row
+   * left exactly as it was — the admin got no message, no error and no change:
+   * a button that does nothing, indistinguishable from one that did not
+   * register the tap. Holding the result is what makes "did that work?"
+   * answerable from the screen.
+   */
+  const [retireState, setRetireState] = useState<AdminState | null>(null);
 
   /*
    * Which end of the metric — asked for exactly the activities that have one.
@@ -89,7 +101,41 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
   const activityError = shown.fieldErrors.activity;
   const lifecycleError = shown.fieldErrors.lifecycle;
 
+  /*
+   * THE FORM IS DISPATCHED BY HAND, AND THAT IS WHAT FIXES THE CRASH.
+   *
+   * WHAT IT USED TO DO. `action={formAction}` plus an onSubmit that, on the
+   * SUCCESS path, called setLabel(""), setActivity("") and setLifecycle("")
+   * and then let the submit through. Two things went wrong at once:
+   *
+   *   THE FORM WENT UP EMPTY. `activity` and `lifecycle` are carried by HIDDEN
+   *   INPUTS. Blanking their state queues a re-render that React flushes while
+   *   it is still processing the same submit, so what it built FormData from
+   *   was a form whose hidden fields had just been emptied. The server then
+   *   refused an add that looked complete on screen.
+   *
+   *   AND A MOUNTED COMPONENT WAS TORN DOWN UNDER IT. `activity` also decides
+   *   whether the lifecycle <Select> renders at all, so clearing it unmounted a
+   *   focused Radix Select in the middle of the dispatch that Select belonged
+   *   to — which is how a tap on Add reached the error boundary instead of the
+   *   server.
+   *
+   * THE FIX TAKES THE TRIGGER AWAY RATHER THAN RACING IT. Building the
+   * FormData ourselves fixes the ORDER: what the admin typed is captured off
+   * the DOM before a single setter runs, so clearing afterwards cannot reach
+   * it. Dispatching ourselves means React is not driving the submission, so it
+   * never resets the form and no Radix Select is driven back to its mount
+   * value — the chain log-visit-form.tsx documents in full, which is the same
+   * cure applied for a neighbouring reason.
+   *
+   * WHAT THIS GIVES UP. A form with no `action` cannot be submitted before
+   * JavaScript arrives. This one never could: both pickers are Radix, so
+   * without JavaScript there is no activity to post and `purposeSchema` would
+   * refuse it anyway.
+   */
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
     // Posted exactly as the hidden field posts it: empty unless this activity
     // may carry one. A lifecycle left over from a previous choice of activity
     // would be refused by the CHECK with nothing on screen to explain it.
@@ -99,14 +145,21 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
       lifecycle: needsLifecycle ? lifecycle : "",
     });
     if (!parsed.success) {
-      event.preventDefault();
       setClientState({
         error: CHECK_FIELDS,
         fieldErrors: fieldErrorsFrom(parsed.error),
       });
       return;
     }
+
+    // ORDER IS THE WHOLE FIX: read the form, THEN send it, THEN clear. The
+    // FormData is a snapshot, so the three setters below cannot empty what is
+    // already on its way.
+    const formData = new FormData(event.currentTarget);
     setClientState(EMPTY_ADMIN_STATE);
+    setRetireState(null);
+    formAction(formData);
+
     setLabel("");
     setActivity("");
     setLifecycle("");
@@ -162,7 +215,9 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
                   disabled={retiring}
                   onClick={() =>
                     startRetiring(async () => {
-                      await setPurposeActive(purpose.id, !purpose.isActive);
+                      setRetireState(
+                        await setPurposeActive(purpose.id, !purpose.isActive),
+                      );
                     })
                   }
                 >
@@ -180,27 +235,34 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
           </ul>
         )}
 
+        {/* Retire and restore answer here rather than inside a row: the list
+            re-sorts when a purpose changes state, so a message pinned to the
+            row it came from would move out from under the admin's thumb. */}
+        {retireState?.error && <FormNotice message={retireState.error} />}
+        {retireState?.ok && retireState.message && (
+          <p
+            role="status"
+            className="bg-success-subtle text-success-subtle-foreground rounded-md px-3 py-2 text-sm"
+          >
+            {retireState.message}
+          </p>
+        )}
+
         {/*
-          LEFT ON `action={formAction}` DELIBERATELY, like daily-plan and
-          assign-visit and unlike the five forms that were moved to a manual
-          dispatch. React resets a form after its action runs, and a Radix
-          Select reverts to its MOUNT value when it does — log-visit-form.tsx
-          carries the full chain. What made that dangerous there was reverting
-          to a value that is VALID and WRONG: it submits happily and says
-          nothing.
+          NO `action` PROP. It had one, DELIBERATELY, on the reasoning that both
+          pickers mount EMPTY so a Radix revert lands on nothing and fails
+          loudly rather than filing something valid-but-wrong. That reasoning
+          was sound and is now beside the point: the danger here was never the
+          revert, it was this form's own onSubmit clearing controlled state
+          that hidden fields and a conditional render depend on, WHILE React was
+          submitting. handleSubmit above carries the full chain.
 
-          Both pickers below mount EMPTY, so a revert is a revert to nothing,
-          and `purposeSchema` refuses an empty activity — and an empty lifecycle
-          where one is required — with a sentence. It fails loudly. Clearing
-          every control after a successful add is the wanted behaviour and is
-          done in handleSubmit above.
-
-          Empty is also right on its own merits: these two choices decide which
-          weekly metric the purpose feeds and which END of it, and a picker
-          pre-set to "Meeting" would let an admin add a session purpose that
-          silently counts as a meeting for ever.
+          Mounting EMPTY is still right on its own merits: these two choices
+          decide which weekly metric the purpose feeds and which END of it, and
+          a picker pre-set to "Meeting" would let an admin add a session purpose
+          that silently counts as a meeting for ever.
         */}
-        <form action={formAction} onSubmit={handleSubmit} className="space-y-3">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-2">
             <Label htmlFor="purpose-label">Add a purpose</Label>
             <Input

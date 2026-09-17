@@ -37,6 +37,25 @@ import { describe, expect, it } from "vitest";
 const read = (relative: string) =>
   readFileSync(fileURLToPath(new URL(`../../${relative}`, import.meta.url)), "utf8");
 
+/**
+ * Every `<form …>` opening tag in a file, attributes only.
+ *
+ * Asked of the TAG rather than of the whole file on purpose. These components
+ * carry long comments explaining the bug they were cured of, and those comments
+ * quote the very spelling — `action={formAction}` — that the cure removes. A
+ * bare `not.toContain` cannot tell the cure from the explanation of it, so it
+ * passed happily on a file that had been fixed AND on one that never was. This
+ * reads the markup instead, which is the thing the invariant is actually about.
+ */
+const formTags = (source: string): string[] =>
+  [...source.matchAll(/<form\b([^>]*)>/g)].map((match) => match[1]);
+
+const noFormTakesAnActionProp = (source: string) => {
+  const tags = formTags(source);
+  expect(tags.length, "the file still has a form in it").toBeGreaterThan(0);
+  for (const tag of tags) expect(tag).not.toMatch(/\baction=/);
+};
+
 const FORM = "src/components/visits/log-visit-form.tsx";
 
 describe("Log Visit is not reset by React after its action", () => {
@@ -44,8 +63,7 @@ describe("Log Visit is not reset by React after its action", () => {
 
   it("never hands the form to React's action prop", () => {
     // This is the whole regression. React only resets a form it is driving.
-    expect(source).not.toMatch(/<form\s+action=\{/);
-    expect(source).not.toContain("action={formAction}>");
+    noFormTakesAnActionProp(source);
   });
 
   it("dispatches the action itself, from onSubmit", () => {
@@ -72,11 +90,11 @@ describe("Log Visit is not reset by React after its action", () => {
 });
 
 /**
- * The same guard for the four other forms a Radix Select could corrupt.
+ * The same guard for the other forms that must dispatch their own action.
  *
- * Each was judged on ONE question: when the Select reverts to its mount value,
- * does the form then submit something valid-but-wrong, or does it fail loudly?
- * Only the first kind is here.
+ * FOUR WERE JUDGED ON THE RADIX REVERT: when the Select reverts to its mount
+ * value, does the form then submit something valid-but-wrong, or does it fail
+ * loudly? Only the first kind qualified.
  *
  *   institute-form        type -> "school". A coaching centre filed as a school.
  *   team-panel            role -> "rep". An admin account created as a rep.
@@ -85,11 +103,26 @@ describe("Log Visit is not reset by React after its action", () => {
  *   photo-flush-panel     preset -> "older than a week", the WIDEST preset, in
  *                         front of an irreversible delete.
  *
- * daily-plan and assign-visit are deliberately absent: their Selects mount
- * EMPTY, so a revert is refused with a sentence rather than filed quietly, and
- * clearing after a successful add is wanted. locations-panel is absent because
- * its Selects sit outside every form, so Radix never attaches the listener.
- * Each carries the reasoning in a comment at the point it would be undone.
+ * TWO MORE JOINED THEM FOR A DIFFERENT REASON, and the difference is worth
+ * keeping straight because it is why they were passed over the first time.
+ *
+ *   purposes-panel        Both were left on the action prop DELIBERATELY: their
+ *   statuses-panel        Selects mount EMPTY, so a revert lands on nothing and
+ *                         the schema refuses it with a sentence. That reasoning
+ *                         was right and was never the problem. Their own
+ *                         onSubmit was: it cleared controlled state that hidden
+ *                         inputs read — and, in the purposes panel, that a
+ *                         conditional <Select> depends on — while React was
+ *                         still submitting. The form went up with empty hidden
+ *                         fields and a mounted Radix Select was torn down under
+ *                         the dispatch. Same cure, a different disease.
+ *
+ * daily-plan and assign-visit are still deliberately absent: their Selects
+ * mount EMPTY, clearing after a successful add is wanted, and neither clears
+ * anything a hidden field or a conditional render depends on. locations-panel
+ * is absent because its Selects sit outside every form, so Radix never attaches
+ * the listener. Each carries the reasoning in a comment at the point it would
+ * be undone.
  */
 describe("the other forms a Radix revert could corrupt", () => {
   const FIXED = [
@@ -97,12 +130,14 @@ describe("the other forms a Radix revert could corrupt", () => {
     "src/components/settings/team-panel.tsx",
     "src/components/materials/material-upload-form.tsx",
     "src/components/settings/photo-flush-panel.tsx",
+    // The two Settings panels, moved here from LEFT — see the note above.
+    "src/components/settings/purposes-panel.tsx",
+    "src/components/settings/statuses-panel.tsx",
   ];
 
   it.each(FIXED)("%s submits itself rather than handing React the action", (file) => {
     const source = read(file);
-    expect(source).not.toMatch(/<form\s+action=\{/);
-    expect(source).not.toContain("action={formAction}");
+    noFormTakesAnActionProp(source);
     // The invariant is "this form dispatches the action itself", not one
     // particular spelling of it: two of these capture the FormData into a local
     // first, on purpose, so what is sent is what was typed rather than what the
@@ -115,12 +150,6 @@ describe("the other forms a Radix revert could corrupt", () => {
   const LEFT = [
     "src/components/dashboard/daily-plan.tsx",
     "src/components/dashboard/assign-visit.tsx",
-    // Gained a Radix Select in stage 2 (the purpose's activity) and is left
-    // here for the same reason as the two above: the picker mounts EMPTY, so a
-    // revert is a revert to nothing and purposeSchema refuses it with a
-    // sentence. It fails loudly rather than filing something valid-but-wrong,
-    // which is the only shape that made this bug dangerous.
-    "src/components/settings/purposes-panel.tsx",
   ];
 
   it.each(LEFT)("%s is left on the action prop, and says why", (file) => {
