@@ -3,6 +3,7 @@ import {
   ACTIVITY_KEYS,
   eventDateLabel,
   eventDateRequired,
+  hasLifecycle,
   notesRequired,
   fieldLabel,
   visitSchema,
@@ -544,9 +545,17 @@ describe("purposeSchema — a purpose is typed", () => {
     // seventh is ever added to ACTIVITY_KEYS without the migration, this still
     // passes — which is why 0024 carries its own assertion comparing the two
     // CHECK constraints. Belt from this end, braces from that one.
+    //
+    // The lifecycle rides along because two of the six REQUIRE one — see
+    // purpose-lifecycle.test.ts, which is about that rule rather than this
+    // list. Supplied here so this test stays about the activity vocabulary.
     for (const activity of ACTIVITY_KEYS) {
       expect(
-        purposeSchema.safeParse({ ...valid, activity }).success,
+        purposeSchema.safeParse({
+          ...valid,
+          activity,
+          lifecycle: hasLifecycle(activity) ? "Set" : "",
+        }).success,
         activity,
       ).toBe(true);
     }

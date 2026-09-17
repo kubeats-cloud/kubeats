@@ -42,6 +42,7 @@ import {
   notesRequired,
   plannedActivityIsValid,
   plannedActivityLabel,
+  postedEventDate,
 } from "@/lib/validation/visit";
 import { FormNotice } from "@/components/form-notice";
 import { RequiredMark } from "@/components/required-mark";
@@ -268,10 +269,21 @@ export function LogVisitForm({
       <input type="hidden" name="daily_plan_id" value={plan.id} />
       <input type="hidden" name="activity" value={activity} />
       <input type="hidden" name="lifecycle_status" value={lifecycleStatus} />
+      {/*
+        THE HIDDEN FIELD ASKS THE SAME QUESTION AS THE VISIBLE ONE.
+
+        It read `lifecycleStatus === "Set"` — the PURPOSE's question — while the
+        box above it is shown by `needsDate`, the STATUS's. A rep completing a
+        session (planned "Done", status "Session done") saw the date field,
+        filled it in, and posted an empty string. `visitSchema` then refused the
+        visit for a date that was on their screen, and no amount of retrying
+        helped. postedEventDate() is what keeps the two in step; see its comment
+        in validation/visit.ts for why the empty branch matters too.
+      */}
       <input
         type="hidden"
         name="expected_date"
-        value={lifecycleStatus === "Set" ? expectedDate : ""}
+        value={postedEventDate(catalogue, status, expectedDate)}
       />
       <input type="hidden" name="status_set_to" value={statusSetTo} />
 

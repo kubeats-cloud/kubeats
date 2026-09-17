@@ -175,6 +175,39 @@ export function eventDateLabel(
   return `${expected}${kind} Date`;
 }
 
+/**
+ * What the form actually POSTS as `expected_date`.
+ *
+ * ONE QUESTION, ASKED ONCE, ANSWERED ONCE. Log Visit shows the date box when
+ * `eventDateRequired()` says the chosen STATUS asks for one, and the hidden
+ * input that carries the typed value used to ask a DIFFERENT question — the
+ * planned purpose's `lifecycle === "Set"`. The two disagreed for exactly the
+ * pair of statuses that matter most:
+ *
+ *   Session done / Campus visit done   planned under a "Done" purpose, so the
+ *                                      rep SAW the box, typed a date, and the
+ *                                      hidden input posted "" — `visitSchema`
+ *                                      then refused the visit for a missing
+ *                                      date that was on the screen in front of
+ *                                      them. Unsaveable, with no way out.
+ *
+ * So the posted value is derived here, from the same `eventDateRequired()` the
+ * visible field and the schema both read. Three readers, one rule.
+ *
+ * The empty branch is the smaller half of the same bug and is deliberate: a rep
+ * who picks a date-bearing status, types a date, then changes their mind and
+ * picks one that asks for nothing would otherwise carry the stale date up with
+ * them. `expected_date` is a plan about a future day; attaching one to a status
+ * that has no such day makes the column mean nothing.
+ */
+export function postedEventDate(
+  catalogue: StatusCatalogue,
+  status: string | null,
+  typed: string,
+): string {
+  return eventDateRequired(catalogue, status) ? typed : "";
+}
+
 /* ------------------------------------------------------------------ */
 /* Purpose -> activity                                                 */
 /* ------------------------------------------------------------------ */
