@@ -14,6 +14,7 @@ import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { listPurposeRows, listStatusRows, listTeamMembers } from "@/lib/admin";
 import { listAdminFactorStates, viewerHasFactor } from "@/lib/mfa-admin";
 import { getLocationTree } from "@/lib/locations";
+import { settled } from "@/lib/errors";
 import { listCampuses } from "@/lib/campuses";
 
 export const metadata = { title: "Settings" };
@@ -37,22 +38,36 @@ export default async function SettingsPage() {
   // The photo counts moved to /data with the flush that needed them; querying
   // storage on every Settings load for a number nothing shows would be a
   // request nobody asked for.
+  /*
+   * Each wrapped, for the reason the Dashboard gives at length: every helper
+   * here already degrades on a database error, but `Promise.all` rejects as a
+   * whole if any one of them rejects, and this screen carries six independent
+   * panels. One unreachable list should empty its own card, not replace the
+   * team, the shared lists, the locations and the security panel with an error.
+   */
   const [purposes, statuses, tree, members, campuses, enrolled] = await Promise.all([
-    listPurposeRows(),
-    listStatusRows(),
-    getLocationTree(),
-    listTeamMembers(),
-    listCampuses(),
-    viewerHasFactor(),
+    settled(listPurposeRows(), [], "settings:purposes"),
+    settled(listStatusRows(), [], "settings:statuses"),
+    settled(getLocationTree(), [], "settings:locations"),
+    settled(listTeamMembers(), [], "settings:team"),
+    settled(listCampuses(), [], "settings:campuses"),
+    settled(viewerHasFactor(), false, "settings:viewer-factor"),
   ]);
 
   // Sequenced after `members` because it needs the admin rows. Only admins are
   // listed: a rep cannot enrol, so a reset row for one could only ever read
   // "nothing set up".
-  const adminFactors = await listAdminFactorStates(
-    members
-      .filter((member) => member.role === "admin")
-      .map((member) => ({ id: member.id, name: member.name })),
+  // Wrapped like the six above even though it now guards itself internally —
+  // one bare call among six settled ones reads as an oversight, and the next
+  // await added inside it would silently stop being covered.
+  const adminFactors = await settled(
+    listAdminFactorStates(
+      members
+        .filter((member) => member.role === "admin")
+        .map((member) => ({ id: member.id, name: member.name })),
+    ),
+    [],
+    "settings:admin-factors",
   );
 
   return (

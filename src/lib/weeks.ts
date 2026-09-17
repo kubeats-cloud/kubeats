@@ -127,9 +127,26 @@ export function formatWeekRange(weekStart: string): string {
 
 /** A short relative label for the navigator: "This week", "Last week", … */
 export function weekLabel(weekStart: string): string {
+  /*
+   * GUARDED LIKE formatWeekRange ABOVE, which is the point. This read
+   * `parseISO(weekStart)!` — the only non-null assertion left on any data path
+   * in the app — and `parseISO` returns null for anything that is not a real
+   * YYYY-MM-DD. A malformed value was therefore a TypeError mid-render rather
+   * than a wrong label.
+   *
+   * Nothing reaches it today: `normaliseWeekParam` sanitises `?week=` before
+   * the Targets screen uses it, and periods.ts passes computed dates. So this
+   * is not a bug being fixed, it is an assertion being removed — the next
+   * caller to pass a raw parameter should get the string back, exactly as
+   * formatWeekRange has always done, instead of taking the screen down.
+   */
+  const monday = parseISO(weekStart);
   const current = mondayOf();
+  const currentMonday = parseISO(current);
+  if (!monday || !currentMonday) return weekStart;
+
   const weeks = Math.round(
-    (parseISO(weekStart)!.getTime() - parseISO(current)!.getTime()) / (7 * DAY_MS),
+    (monday.getTime() - currentMonday.getTime()) / (7 * DAY_MS),
   );
   if (weeks === 0) return "This week";
   if (weeks === -1) return "Last week";

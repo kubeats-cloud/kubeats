@@ -645,7 +645,23 @@ export async function createMember(
   }
   const input = parsed.data;
 
-  const db = createAdminClient();
+  /*
+   * `createAdminClient()` throws when SUPABASE_SERVICE_ROLE_KEY is missing or
+   * malformed — a deployment fault, but an uncaught one here leaves the form
+   * and lands on the error boundary, which tells the admin nothing and loses
+   * what they typed. Caught so it reads as a refusal like every other failure
+   * on this screen. Same guard as admin.ts and mfa-admin.ts.
+   */
+  let db;
+  try {
+    db = createAdminClient();
+  } catch (error) {
+    logError("admin:create-user-client", error);
+    return denied(
+      "Accounts cannot be created right now — the server is missing a setting. Please tell whoever set the app up.",
+    );
+  }
+
   const { data, error } = await db.auth.admin.createUser({
     email: input.email,
     password: input.password,

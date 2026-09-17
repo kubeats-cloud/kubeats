@@ -11,6 +11,8 @@ import { AdminOverview } from "@/components/admin/overview";
 import { ActivityGridTable } from "@/components/report/activity-grid-table";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { listStatusCatalogue } from "@/lib/statuses";
+import { SEED_STATUS_CATALOGUE } from "@/lib/validation/institute";
+import { settled } from "@/lib/errors";
 import {
   getTodayPlan,
   listInstitutesForPicker,
@@ -38,16 +40,40 @@ export default async function DashboardPage() {
   // the card, the full report and the download cannot default differently.
   const range = defaultExportRange();
 
+  /*
+   * EVERY FETCH IS WRAPPED, because this is the screen a rep lands on.
+   *
+   * Each helper below already degrades on a database error. `Promise.all`
+   * rejects as a whole the moment ANY of them rejects outright, though — a
+   * dropped connection fetching the campus list would take the plan, the
+   * institutes and the week's figures down with it and show the error
+   * boundary instead of the Dashboard. `settled()` gives each one the same
+   * fallback it would have returned for itself, so a rejection now costs one
+   * panel rather than the screen.
+   *
+   * The fallbacks are deliberately the helpers' OWN: `{ ok: false }` is what
+   * getTodayPlan answers with, SEED_STATUS_CATALOGUE is what listStatusCatalogue
+   * falls back to. Nothing downstream can tell the two routes apart, which is
+   * why this needed no change to how the page reads any of it.
+   */
   const [plan, institutes, purposes, week, overview, catalogue, report] = await Promise.all([
-    admin ? Promise.resolve({ ok: true as const, entries: [] }) : getTodayPlan(user.id),
-    admin ? Promise.resolve([]) : listInstitutesForPicker(),
-    admin ? Promise.resolve([]) : listPurposes(),
-    admin ? Promise.resolve(null) : getWeekSummary(user.id, weekStart),
-    admin ? getOverview() : Promise.resolve(null),
+    admin
+      ? Promise.resolve({ ok: true as const, entries: [] })
+      : settled(getTodayPlan(user.id), { ok: false as const }, "dashboard:plan"),
+    admin
+      ? Promise.resolve([])
+      : settled(listInstitutesForPicker(), [], "dashboard:institutes"),
+    admin ? Promise.resolve([]) : settled(listPurposes(), [], "dashboard:purposes"),
+    admin
+      ? Promise.resolve(null)
+      : settled(getWeekSummary(user.id, weekStart), null, "dashboard:week"),
+    admin ? settled(getOverview(), null, "dashboard:overview") : Promise.resolve(null),
     // The status vocabulary. Cheap, and needed by the plan picker to say when an
     // institute is being re-opened after a closed loop.
-    listStatusCatalogue(),
-    admin ? getActivityReportModel(range, null) : Promise.resolve(null),
+    settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "dashboard:statuses"),
+    admin
+      ? settled(getActivityReportModel(range, null), null, "dashboard:report")
+      : Promise.resolve(null),
   ]);
 
   const entries = plan.ok ? plan.entries : [];

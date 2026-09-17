@@ -39,9 +39,36 @@ export async function viewerHasFactor(): Promise<boolean> {
 export async function listAdminFactorStates(
   admins: { id: string; name: string }[],
 ): Promise<AdminFactorState[]> {
-  const db = createAdminClient();
+  /*
+   * THE CLIENT ITSELF CAN THROW, and this runs while the Settings page renders.
+   *
+   * `createAdminClient()` calls `serverEnv()`, which throws when
+   * SUPABASE_SERVICE_ROLE_KEY is missing or malformed. That is a deployment
+   * fault rather than a user one — but an uncaught throw here takes the whole
+   * Settings screen to the error boundary over a panel that is a convenience,
+   * hiding the team list, the shared lists and the locations behind it. The
+   * same guard already existed at admin.ts's photo count; this makes it
+   * uniform.
+   */
+  let db;
+  try {
+    db = createAdminClient();
+  } catch (error) {
+    console.error("[mfa] service-role client unavailable", {
+      message: error instanceof Error ? error.message : "unknown error",
+    });
+    return admins.map((admin) => ({ ...admin, enrolled: false }));
+  }
 
-  return Promise.all(
+  /*
+   * allSettled, NOT all. Each row already degrades on an `error` value — the
+   * decision below — but `Promise.all` REJECTS on the first promise that
+   * throws, which a dropped connection mid-flight will do. One unreadable row
+   * would then take out the screen, which is exactly what the per-row handling
+   * was written to prevent. Settling keeps that promise for the rejection case
+   * too.
+   */
+  const results = await Promise.allSettled(
     admins.map(async (admin) => {
       const { data, error } = await db.auth.admin.mfa.listFactors({
         userId: admin.id,
@@ -59,5 +86,14 @@ export async function listAdminFactorStates(
         enrolled: hasVerifiedFactor(data?.factors ?? []),
       };
     }),
+  );
+
+  // Mapped back against the input so the list keeps its order and its length:
+  // a rejected row becomes the same "not enrolled" the error branch produces,
+  // rather than vanishing and leaving an admin off their own team's panel.
+  return results.map((result, i) =>
+    result.status === "fulfilled"
+      ? result.value
+      : { ...admins[i], enrolled: false },
   );
 }
