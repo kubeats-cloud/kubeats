@@ -6,6 +6,15 @@ import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { openVisitFor } from "@/lib/visits";
 import { loginSchema, safeNextPath } from "@/lib/validation/auth";
+/*
+ * THE STATE SHAPE LIVES IN A PLAIN MODULE, and it is not a matter of taste.
+ * A "use server" file registers every runtime export as a server function
+ * reference, so `SIGN_OUT_READY` declared here reached the sign-out button as
+ * a callable rather than an object and threw on render — on every
+ * authenticated page, since that button is in the top bar. sign-out-state.ts
+ * has the full account.
+ */
+import { SIGN_OUT_READY, type SignOutState } from "@/lib/sign-out-state";
 
 export interface LoginState {
   error: string | null;
@@ -94,20 +103,6 @@ export async function signOut(): Promise<void> {
  * ceiling this is affordable. It is still a fact worth recording, and the fact
  * is that one confirmation costs 90 KiB on every page load.
  */
-/**
- * What the app's sign-out answers with when it refuses.
- *
- * A plain object rather than a thrown error, because a refusal here is a normal
- * outcome the rep has to be able to act on: the button needs to show the
- * institute's name and offer the way back to it.
- */
-export interface SignOutState {
-  /** The visit still holding them, or null when there is nothing in the way. */
-  blockedBy: { planId: string; instituteName: string } | null;
-}
-
-export const SIGN_OUT_READY: SignOutState = { blockedBy: null };
-
 /**
  * Sign out — unless the rep is still standing in a visit.
  *
