@@ -66,6 +66,17 @@ export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
   const [asksSession, setAsksSession] = useState(false);
   const [asksCount, setAsksCount] = useState(false);
   const [retiring, startRetiring] = useTransition();
+  /*
+   * WHAT RETIRE AND RESTORE SAID, WHICH USED TO BE NOTHING AT ALL.
+   *
+   * `setStatusActive` returns an AdminState and the click handler below awaited
+   * it and dropped it. On any database missing 0026 the UPDATE names a column
+   * that is not there, the action returns that as a sentence, and the sentence
+   * went nowhere: the badge did not change, no message appeared, and the only
+   * evidence left was a row that had not moved. Holding the result is what
+   * turns a button that appears dead into one that explains itself.
+   */
+  const [retireState, setRetireState] = useState<AdminState | null>(null);
 
   const shown = serverState.error ? serverState : clientState;
   const fieldError = (key: string) =>
@@ -73,7 +84,24 @@ export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
       <p className="text-danger text-xs">{shown.fieldErrors[key]}</p>
     ) : null;
 
+  /*
+   * DISPATCHED BY HAND, for the same reason purposes-panel.tsx is.
+   *
+   * WHAT IT USED TO DO. `action={formAction}` plus an onSubmit that reset all
+   * six controls on the SUCCESS path and then let the submit through. Five of
+   * them are carried by HIDDEN INPUTS — category, tone and the three asks_*
+   * flags — so blanking their state queued a re-render that React flushed
+   * while it was still processing the submit, and what went up was a status
+   * with no category and no colour. Two controlled Radix Selects were driven
+   * back to empty inside the dispatch they were part of at the same time.
+   *
+   * Building the FormData ourselves fixes the order; dispatching ourselves
+   * means React never resets the form afterwards either. log-visit-form.tsx
+   * carries the reset half of the chain in full.
+   */
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
     const parsed = statusSchema.safeParse({
       status: label,
       category,
@@ -83,14 +111,19 @@ export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
       asks_head_count: asksCount,
     });
     if (!parsed.success) {
-      event.preventDefault();
       setClientState({
         error: CHECK_FIELDS,
         fieldErrors: fieldErrorsFrom(parsed.error),
       });
       return;
     }
+
+    // Read, send, THEN clear. The snapshot is taken before any setter runs.
+    const formData = new FormData(event.currentTarget);
     setClientState(EMPTY_ADMIN_STATE);
+    setRetireState(null);
+    formAction(formData);
+
     setLabel("");
     setCategory("");
     setTone("");
@@ -148,7 +181,9 @@ export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
                   disabled={retiring}
                   onClick={() =>
                     startRetiring(async () => {
-                      await setStatusActive(row.status, !row.isActive);
+                      setRetireState(
+                        await setStatusActive(row.status, !row.isActive),
+                      );
                     })
                   }
                 >
@@ -166,21 +201,33 @@ export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
           </ul>
         )}
 
+        {/* Retire and restore answer here rather than inside a row: the list is
+            ordered by sort_order, so a message pinned to the row it came from
+            would be easy to miss and easy to mistake for another status's. */}
+        {retireState?.error && <FormNotice message={retireState.error} />}
+        {retireState?.ok && retireState.message && (
+          <p
+            role="status"
+            className="bg-success-subtle text-success-subtle-foreground rounded-md px-3 py-2 text-sm"
+          >
+            {retireState.message}
+          </p>
+        )}
+
         {/*
-          LEFT ON `action={formAction}` DELIBERATELY, like the purposes panel
-          beside it. React resets a form after its action runs and a Radix
-          Select reverts to its MOUNT value when it does — log-visit-form.tsx
-          carries the chain. That is only dangerous when the revert lands on a
-          value that is VALID and WRONG.
+          NO `action` PROP. It had one, DELIBERATELY, on the reasoning that both
+          Selects mount EMPTY so a Radix revert lands on nothing and
+          `statusSchema` refuses it with a sentence. That reasoning was sound
+          and is now beside the point: the danger here was this form's own
+          onSubmit clearing controlled state that five hidden fields depend on,
+          WHILE React was submitting. handleSubmit above carries the chain.
 
-          Both Selects below mount EMPTY, so a revert is a revert to nothing and
-          `statusSchema` refuses it with a sentence. It fails loudly.
-
-          Empty is also right on its own merits. A category pre-set to "open"
-          would silently decide that a status makes a follow-up compulsory; a
-          colour pre-set to neutral would make every new status look finished.
+          Mounting EMPTY is still right on its own merits. A category pre-set to
+          "open" would silently decide that a status makes a follow-up
+          compulsory; a colour pre-set to neutral would make every new status
+          look finished.
         */}
-        <form action={formAction} onSubmit={handleSubmit} className="space-y-3">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-2">
             <Label htmlFor="status-label">Add a status</Label>
             <Input

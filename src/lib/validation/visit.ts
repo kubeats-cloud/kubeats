@@ -462,9 +462,25 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
       ctx.addIssue({
         code: "custom",
         path: ["expected_date"],
-        // One name for one box: the control, this message and the error summary
-        // all read the label from the same function.
-        message: `Pick a ${eventDateLabel(catalogue, value.status_set_to)}.`,
+        /*
+         * "Pick THE", not "pick a", and the article is the reason.
+         *
+         * `eventDateLabel()` returns "Expected Session Date" on an open status
+         * and "Session Date" on a closed one, so a fixed "a" produced "Pick a
+         * Expected Session Date." — wrong for exactly the four statuses that
+         * ask for a date most often. Choosing between "a" and "an" per label
+         * would work, and would put an English article rule in a validation
+         * schema for ever, to be got wrong again the first time a label starts
+         * with a silent h.
+         *
+         * "The" is correct before every label the function can produce, and
+         * correct for what this field IS: there is one date being asked about,
+         * not one of several.
+         *
+         * One name for one box: the control, this message and the error summary
+         * all read the label from the same function.
+         */
+        message: `Pick the ${eventDateLabel(catalogue, value.status_set_to)}.`,
       });
     }
 
@@ -667,9 +683,19 @@ const FIELD_LABELS: Record<string, string> = {
   institute_id: "Institute",
   daily_plan_id: "Today’s plan",
   lifecycle_status: "Set or Done",
-  // Activity-neutral, because this map is keyed by field name and cannot know
-  // which activity is selected. It still belongs to the same "Tentative ...
-  // date" family as the control and the message above.
+  /*
+   * A FALLBACK NOW, not the name this field is usually given.
+   *
+   * This map is keyed by field name and cannot see the chosen status, so it
+   * could only ever be activity-neutral — and "Tentative date" disagreed with
+   * every other place the field is named. The summary said "Tentative date:
+   * Pick the Session Date", which reads as two different fields and sent a
+   * re-test looking for the second one.
+   *
+   * Log Visit passes a labeller that asks `eventDateLabel()` instead, so the
+   * summary, the control's <Label> and the message are one name. This stays for
+   * every other caller of `fieldLabel`, where there is no status to ask.
+   */
   expected_date: "Tentative date",
   photo_path: "Photo",
   notes: "Notes",

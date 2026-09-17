@@ -456,7 +456,10 @@ describe("the tentative date a \"Set\" visit promises", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const issue = result.error.issues.find((i) => i.path[0] === "expected_date");
-      expect(issue?.message).toBe("Pick a Expected Session Date.");
+      // "Pick THE", not "pick a" — see the message in visit.ts. The old
+      // wording read "Pick a Expected Session Date." for exactly the statuses
+      // that ask for a date most often.
+      expect(issue?.message).toBe("Pick the Expected Session Date.");
     }
   });
 
