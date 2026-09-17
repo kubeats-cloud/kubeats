@@ -6,23 +6,18 @@ import { EMPTY_FEEDBACK, type FeedbackState } from "@/lib/validation/feedback";
 /**
  * #9 / #10 — where the drafts are wired in, and when they are cleared.
  *
- * drafts.test.ts covers the store itself. This covers the two forms that use
- * it, and three properties that are easy to get wrong and invisible when they
- * are:
+ * drafts.test.ts covers the store. draft-ordering.test.ts covers the decision
+ * that fixed the soft-navigation bug. This covers the WIRING: that both forms
+ * go through `useDraft` rather than keeping their own copy of a mechanism that
+ * has now been wrong twice, and that the clearing rules are still in place.
  *
- *   RESTORED AFTER MOUNT, NEVER IN A `useState` INITIALISER. Both forms are
- *   server-rendered, and the server has no sessionStorage — reading the draft
- *   during the first render would make the client disagree with the HTML it is
- *   hydrating into, for every field at once. CLAUDE.md treats hydration as a
- *   correctness issue rather than a cosmetic one, and dates.ts records what a
- *   mismatch cost last time.
- *
- *   CLEARED AT DISPATCH. A successful submit ends in `redirect()`, which
- *   unmounts the form — so no "clear on success" could ever run, and the draft
- *   would outlive the visit it belonged to.
- *
- *   SAVED AGAIN IF THE SUBMIT COMES BACK REFUSED. Clearing early is only safe
- *   because the action state is in the save effect's dependencies.
+ * THE ASSERTIONS ABOUT RESTORE ORDER ARE INVERTED FROM WHAT THEY WERE. This
+ * file used to insist the draft was read AFTER mount and never in a `useState`
+ * initialiser — which was right about hydration and wrong about everything
+ * else, and is precisely the shape QA found broken on a soft navigation. The
+ * hydration problem is now solved by `useSyncExternalStore` instead of avoided
+ * by waiting, so the rule is the opposite one: the first render holds the
+ * draft. See the header of use-draft.ts.
  *
  * Read at source level for the usual reason: no DOM environment here, by
  * design. See vitest.config.mts and log-visit-form.test.ts.
@@ -41,31 +36,35 @@ describe("Log Visit keeps a draft of what was typed", () => {
     expect(source).toContain("logVisitDraftKey(plan.id)");
   });
 
-  it("restores after mount rather than during the first render", () => {
-    // THE HYDRATION RULE. A `useState(() => readDraft(...))` would be the
-    // obvious shorthand and would make the first client render disagree with
-    // the server's HTML for every field at once.
-    expect(source).not.toMatch(/useState\([^)]*readDraft/);
-    expect(source).toContain("useEffect(() => {");
-    expect(source).toContain("readDraft<LogVisitDraft>(draftKey)");
+  it("goes through useDraft rather than rolling its own", () => {
+    // The mechanism has been wrong twice. One copy of it, shared with the
+    // Pending panel, is what stops the next fix having to be made in two
+    // places and landing in one.
+    expect(source).toContain("useDraft(draftKey, EMPTY_DRAFT,");
+    expect(source).not.toContain("readDraft<LogVisitDraft>");
+    expect(source).not.toContain("writeDraft(");
   });
 
-  it("restores exactly once, so it cannot overwrite live typing", () => {
-    // Without the guard the effect re-runs and stamps the stored draft back
-    // over whatever the rep has since typed.
-    expect(source).toContain("const restored = useRef(false)");
-    expect(source).toContain("if (restored.current) return;");
-    expect(source).toContain("restored.current = true;");
+  it("holds every typed field in ONE object", () => {
+    // Four separate useStates are what let a restore be PARTIAL, which is how
+    // the stored draft ended up with one field emptied and the rest intact.
+    expect(source).toContain("const { statusSetTo, expectedDate, followUpDate, feedback } = draft;");
+    for (const setter of [
+      "setStatusSetTo",
+      "setExpectedDate",
+      "setFollowUpDate",
+      "setFeedback",
+    ]) {
+      expect(source, `${setter} should be gone`).not.toContain(`${setter}(`);
+    }
   });
 
-  it("does not blank the draft on the way past, during mount", () => {
-    // BOTH EFFECTS RUN IN THE SAME COMMIT. The save effect runs straight after
-    // the restore effect, still closed over the EMPTY first-render values —
-    // so without this guard it writes those empties over the draft the restore
-    // had just read, permanently in the case where the restore changes nothing.
-    expect(source).toContain("const savedOnce = useRef(false)");
-    const save = source.slice(source.indexOf("const savedOnce = useRef(false)"));
-    expect(save.slice(0, 200)).toContain("if (!savedOnce.current)");
+  it("keeps the feedback patch functional, all the way through", () => {
+    // applyFeedbackPatch was made functional after a live bug where two changes
+    // in one tick both merged against the render they started from. Building
+    // the patch from a closed-over `feedback` would put that straight back.
+    expect(source).toContain("patchDraft((current) => ({");
+    expect(source).toContain("applyFeedbackPatch(current.feedback, patch)");
   });
 
   it("clears the draft when the form is dispatched", () => {
@@ -73,15 +72,20 @@ describe("Log Visit keeps a draft of what was typed", () => {
   });
 
   it("re-saves when a submission comes back refused", () => {
-    // What makes clearing at dispatch safe. `serverState` changing is the only
-    // signal available once the draft has been cleared and the React state has
-    // deliberately NOT been.
-    const save = source.slice(source.indexOf("writeDraft(draftKey"));
-    const deps = save.slice(save.indexOf("}, ["), save.indexOf("]);") + 3);
-    expect(deps).toContain("serverState");
-    for (const field of ["statusSetTo", "expectedDate", "followUpDate", "feedback"]) {
-      expect(deps, field).toContain(field);
-    }
+    // The draft is cleared at dispatch, so a refusal has to put it back or the
+    // rep is left holding a filled-in form with nothing behind it.
+    expect(source).toContain("resaveOn: serverState");
+  });
+
+  it("starts again when the form is pointed at another visit", () => {
+    // /log?plan=A to /log?plan=B is the same route with different search
+    // params, so React reconciles rather than remounting and the initialiser
+    // does not run again. Without this the form would keep A's answers, show
+    // them against B, and save them under B's key.
+    const hook = read("src/lib/use-draft.ts");
+    expect(hook).toContain("const restoredFor = useRef<string | null>(null)");
+    expect(hook).toContain("if (restoredFor.current === key) return;");
+    expect(hook).toContain("const switched = restoredFor.current !== null;");
   });
 
   it("does not persist the photograph", () => {
@@ -136,24 +140,30 @@ describe("the notes field is part of the form's state now", () => {
 describe("the Pending 'Visit again' panel keeps its purpose", () => {
   const source = read(FOLLOW_UP);
 
-  it("stores the institute alongside the purpose", () => {
-    // Without the id there is no way to tell whose answer it was, and the
-    // panel it belongs to could not be reopened.
-    expect(source).toContain("interface FollowUpDraft");
-    expect(source).toContain("instituteId: string;");
+  it("goes through the same hook, so it cannot drift from Log Visit", () => {
+    // It had the identical bug, and worse: a soft navigation is the ONLY way
+    // anyone reaches this panel, so the gap was total rather than intermittent.
+    expect(source).toContain("useDraft(followUpDraftKey(), EMPTY_FOLLOW_UP,");
+    expect(source).not.toContain("writeDraft(");
+  });
+
+  it("wears only its own institute's draft", () => {
+    // One slot is shared by every institute's panel, so the panel that opens
+    // has to check the stored draft is its own.
+    expect(source).toContain("accept: (stored) => stored.instituteId === item.instituteId");
+    // ...and every write says whose it is, or `accept` has nothing to read.
+    expect(source).toContain("patchDraft({ instituteId: item.instituteId, ...fields })");
   });
 
   it("reopens the panel the draft belongs to", () => {
-    // THE HALF THAT MAKES THE OTHER HALF VISIBLE. StartFollowUp only exists
-    // while its panel is open, so restoring the purpose without restoring the
-    // open panel would restore it into something unmounted.
+    // The half that makes the other half visible: StartFollowUp only exists
+    // while its panel is open, so a restored purpose with no open panel would
+    // be restored into something unmounted.
     expect(source).toContain("const restoredOpen = useRef(false)");
     expect(source).toContain("setOpen(!readOnly && draft !== null && stillListed");
   });
 
   it("only reopens a row that is still on the list", () => {
-    // Pending is recomputed per request and a follow-up can be closed by
-    // somebody else in between.
     expect(source).toContain(
       "items.some((item) => item.instituteId === draft.instituteId)",
     );
@@ -163,16 +173,6 @@ describe("the Pending 'Visit again' panel keeps its purpose", () => {
     // An admin's panel is AssignFollowUp, which writes a plan row for somebody
     // else and keeps no draft.
     expect(source).toContain("!readOnly");
-  });
-
-  it("restores after mount, once, like Log Visit", () => {
-    expect(source).not.toMatch(/useState\([^)]*readDraft/);
-    expect(source).toContain("readDraft<FollowUpDraft>(followUpDraftKey())");
-    expect(source).toContain("if (restored.current) return;");
-  });
-
-  it("skips the mount save, like Log Visit", () => {
-    expect(source).toContain("const savedOnce = useRef(false)");
   });
 
   it("clears on submit and on cancel", () => {

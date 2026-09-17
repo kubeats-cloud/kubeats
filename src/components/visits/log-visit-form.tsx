@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FormSection } from "@/components/form-section";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,8 @@ import { logAndFileVisit } from "@/lib/feedback-actions";
 import { checkoutFix } from "@/lib/geolocate";
 import { appendCheckoutFix } from "@/lib/validation/checkin";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
-import { clearDraft, logVisitDraftKey, readDraft, writeDraft } from "@/lib/drafts";
+import { clearDraft, logVisitDraftKey } from "@/lib/drafts";
+import { useDraft } from "@/lib/use-draft";
 import type { OpenLoop, PlanEntry } from "@/lib/visits";
 import {
   CATEGORY_LABELS,
@@ -168,96 +169,35 @@ export function LogVisitForm({
    * what is taking the time.
    */
   const [locating, setLocating] = useState(false);
-  const [expectedDate, setExpectedDate] = useState("");
-  const [statusSetTo, setStatusSetTo] = useState("");
-  const [followUpDate, setFollowUpDate] = useState("");
-  const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
 
   /*
-   * THE DRAFT — what survives a Back and a Forward.
+   * EVERY TYPED FIELD IS ONE DRAFT OBJECT, restored on every mount.
    *
-   * The problem it solves: a rep fills in the status, the dates and a couple of
-   * paragraphs of notes, taps something that navigates, comes back, and the
-   * form is empty. The check-in and the photo are in the database and survive;
-   * the typing was only ever React state and did not.
+   * These were four separate `useState`s with a restore effect writing into all
+   * four, and a save effect racing it. On a SOFT navigation the save won: the
+   * form mounted empty, the save wrote that emptiness over the stored draft
+   * before the restore landed, and the rep came back to a blank form and a
+   * damaged draft. QA saw one field lost — the status — which is what a write
+   * that races a partial restore looks like.
    *
-   * KEYED BY THE PLAN ENTRY, so one visit's draft can never appear on another's
-   * form. `plan.id` is unique per visit and is already the thing `/log?plan=`
-   * addresses, so the key and the screen agree by construction.
+   * One object cannot be partially restored, and `useDraft` reads it during the
+   * first render rather than after it, so no effect ever observes an empty
+   * form. Its header carries the whole account, including how the hydration
+   * problem that made the first version effect-based is handled instead of
+   * traded away.
+   *
+   * KEYED BY THE PLAN ENTRY, so one visit's draft can never appear on
+   * another's form. `plan.id` is unique per visit and is already what
+   * `/log?plan=` addresses, so the key and the screen agree by construction.
+   *
+   * `serverState` is passed as the re-save trigger: the draft is CLEARED when
+   * the form is dispatched, so a submission that comes back REFUSED has to put
+   * it back rather than leave the rep holding a filled-in form with nothing
+   * behind it.
    */
   const draftKey = logVisitDraftKey(plan.id);
-
-  /*
-   * RESTORED AFTER MOUNT, NEVER DURING RENDER, and that is a hydration rule
-   * rather than a style preference. This component is server-rendered, and the
-   * server has no sessionStorage: reading the draft in a `useState` initialiser
-   * would make the first client render disagree with the HTML it is hydrating
-   * into, for every field at once. So the first render matches the server —
-   * empty — and the draft arrives immediately afterwards.
-   *
-   * The ref makes it once-only. Without it this would re-run and stamp the
-   * stored draft back over whatever the rep has since typed.
-   */
-  const restored = useRef(false);
-  useEffect(() => {
-    if (restored.current) return;
-    restored.current = true;
-    // "No draft" is the empty draft rather than an early return, which keeps
-    // every setter below on one path — and each one then writes the value the
-    // field already holds, so the no-draft case costs a render that changes
-    // nothing rather than needing a branch of its own.
-    //
-    // Defaulted field by field rather than spread wholesale: a draft written by
-    // an older build is missing whatever has been added since, and a form is
-    // not the place to discover that as `undefined`.
-    const draft = readDraft<LogVisitDraft>(draftKey) ?? EMPTY_DRAFT;
-    setStatusSetTo(draft.statusSetTo ?? "");
-    setExpectedDate(draft.expectedDate ?? "");
-    setFollowUpDate(draft.followUpDate ?? "");
-    setFeedback({ ...EMPTY_FEEDBACK, ...(draft.feedback ?? {}) });
-  }, [draftKey]);
-
-  /*
-   * SAVED ON EVERY CHANGE. A storage write is exactly what an effect is for —
-   * pushing React's state out to an external system — so there is no setState
-   * here and nothing cascades.
-   *
-   * `serverState` is in the dependencies on purpose, and it is not decoration:
-   * the draft is CLEARED at dispatch (see the submit handler), so a submission
-   * that comes back refused would otherwise leave the rep holding a filled-in
-   * form with no draft behind it. A refusal changes `serverState`, which re-runs
-   * this, which writes it again. On success there is no re-run to worry about,
-   * because the action redirects and this component is gone.
-   *
-   * AND IT SKIPS ITS FIRST RUN, which is a bug fix rather than an optimisation.
-   *
-   * Both effects run in the same commit. The restore effect goes first and
-   * queues its setStates; this one then runs immediately afterwards, still
-   * closed over the EMPTY values of the first render, because the restoring
-   * setState has not re-rendered yet. Without this guard it would write those
-   * empties straight over the draft the effect above had just read — blanking
-   * it for a moment, for no reason, and permanently in the case where the
-   * restore changes nothing.
-   *
-   * Skipping the mount run costs nothing. If there IS a draft, restoring it
-   * changes the state and this runs on the next commit with the right values.
-   * If there is NOT, every setter above wrote the value the field already held,
-   * React bails out of the re-render, and there is correctly nothing to save
-   * until the rep types something.
-   */
-  const savedOnce = useRef(false);
-  useEffect(() => {
-    if (!savedOnce.current) {
-      savedOnce.current = true;
-      return;
-    }
-    writeDraft(draftKey, {
-      statusSetTo,
-      expectedDate,
-      followUpDate,
-      feedback,
-    } satisfies LogVisitDraft);
-  }, [draftKey, statusSetTo, expectedDate, followUpDate, feedback, serverState]);
+  const [draft, patchDraft] = useDraft(draftKey, EMPTY_DRAFT, { resaveOn: serverState });
+  const { statusSetTo, expectedDate, followUpDate, feedback } = draft;
 
   const status = statusSetTo === "" ? null : statusSetTo;
   /*
@@ -516,7 +456,10 @@ export function LogVisitForm({
           <Label>
             Status <RequiredMark />
           </Label>
-          <Select value={statusSetTo} onValueChange={setStatusSetTo}>
+          <Select
+            value={statusSetTo}
+            onValueChange={(value) => patchDraft({ statusSetTo: value })}
+          >
             <SelectTrigger
               className="h-11 w-full"
               aria-label="Institute status"
@@ -576,7 +519,9 @@ export function LogVisitForm({
                   type="date"
                   className="h-11"
                   value={followUpDate}
-                  onChange={(event) => setFollowUpDate(event.target.value)}
+                  onChange={(event) =>
+                    patchDraft({ followUpDate: event.target.value })
+                  }
                   aria-required
                 />
                 {fieldError("follow_up_date")}
@@ -593,7 +538,9 @@ export function LogVisitForm({
                   type="date"
                   className="h-11"
                   value={expectedDate}
-                  onChange={(event) => setExpectedDate(event.target.value)}
+                  onChange={(event) =>
+                    patchDraft({ expectedDate: event.target.value })
+                  }
                   aria-required
                 />
                 {fieldError("expected_date")}
@@ -607,11 +554,15 @@ export function LogVisitForm({
               }}
               notesRequired={needsNotes}
               value={feedback}
-              // Functional, so two changes in one tick both survive: the second
-              // merges against the first's result rather than against the render it
-              // started from. See applyFeedbackPatch.
+              // Functional all the way down, so two changes in one tick both
+              // survive: the second merges against the first's result rather
+              // than against the render it started from. Reading `feedback`
+              // from the closure here instead would put back the bug
+              // applyFeedbackPatch was made functional to fix.
               onChange={(patch) =>
-                setFeedback((prev) => applyFeedbackPatch(prev, patch))
+                patchDraft((current) => ({
+                  feedback: applyFeedbackPatch(current.feedback, patch),
+                }))
               }
               fieldErrors={fieldErrors}
               openLoops={openLoops}

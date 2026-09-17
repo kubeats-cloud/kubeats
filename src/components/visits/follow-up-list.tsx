@@ -19,7 +19,8 @@ import { FormNotice } from "@/components/form-notice";
 import { cn } from "@/lib/utils";
 import { formatDate, todayISO } from "@/lib/dates";
 import { assignVisit, startFollowUp } from "@/lib/visit-actions";
-import { clearDraft, followUpDraftKey, readDraft, writeDraft } from "@/lib/drafts";
+import { clearDraft, followUpDraftKey, readDraft } from "@/lib/drafts";
+import { useDraft } from "@/lib/use-draft";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { statusRow, type StatusCatalogue } from "@/lib/validation/institute";
 import type { FollowUp, PurposeOption } from "@/lib/visits";
@@ -284,64 +285,36 @@ function StartFollowUp({
   onCancel: () => void;
 }) {
   const [state, formAction, isPending] = useActionState(startFollowUp, EMPTY_STATE);
-  const [purpose, setPurpose] = useState("");
-  const [note, setNote] = useState("");
+  /*
+   * THE SAME DRAFT RULE AS LOG VISIT, and it had the same bug.
+   *
+   * This was two `useState`s with a restore effect and a save effect racing it.
+   * On a SOFT navigation — which is the only way anyone reaches this panel, so
+   * the gap was total rather than intermittent — the panel remounted empty and
+   * the save wrote that emptiness over the stored draft before the restore
+   * landed. `useDraft` reads during the first render instead; its header has the
+   * whole account.
+   *
+   * ONE DRAFT SLOT FOR EVERY INSTITUTE, so `accept` is what makes this panel
+   * wear only its own. A key per institute would make that automatic and was
+   * rejected for a worse problem: drafts for panels the rep has closed would
+   * accumulate with nothing to clear them.
+   *
+   * `state` is the re-save trigger. The draft is cleared when the form is
+   * dispatched, so a submission that comes back refused has to put it back.
+   */
+  const [draft, patchDraft] = useDraft(followUpDraftKey(), EMPTY_FOLLOW_UP, {
+    resaveOn: state,
+    accept: (stored) => stored.instituteId === item.instituteId,
+  });
+  const { purpose, note } = draft;
+
+  // Carried on every change so the stored draft always says whose it is — the
+  // `accept` above is what reads it back.
+  const setField = (fields: { purpose?: string; note?: string }) =>
+    patchDraft({ instituteId: item.instituteId, ...fields });
 
   const chosen = purposes.find((option) => option.label === purpose) ?? null;
-
-  /*
-   * THE SAME DRAFT RULE AS LOG VISIT, in miniature — see drafts.ts and the
-   * longer note in log-visit-form.tsx for the hydration reasoning that decides
-   * the shape of both: restore AFTER mount, never in a `useState` initialiser,
-   * because this is server-rendered and the server has no sessionStorage.
-   *
-   * Restored only when the draft belongs to THIS institute. The panel's own id
-   * is the scope; a draft left over from another row is simply not this one's.
-   */
-  const restored = useRef(false);
-  useEffect(() => {
-    if (restored.current) return;
-    restored.current = true;
-    const draft = readDraft<FollowUpDraft>(followUpDraftKey());
-    const mine =
-      draft && draft.instituteId === item.instituteId ? draft : EMPTY_FOLLOW_UP;
-    setPurpose(mine.purpose ?? "");
-    setNote(mine.note ?? "");
-  }, [item.instituteId]);
-
-  /*
-   * Written out on every change, like the Log Visit draft. No setState, so
-   * nothing cascades — an effect pushing state to an external system is what
-   * effects are for.
-   *
-   * AND IT SKIPS ITS FIRST RUN, which is a bug fix rather than an optimisation.
-   *
-   * Both effects run in the same commit. The restore effect goes first and
-   * queues its setStates; this one then runs immediately afterwards, still
-   * closed over the EMPTY values of the first render, because the restoring
-   * setState has not re-rendered yet. Without this guard it would write those
-   * empties straight over the draft the effect above had just read — blanking
-   * it for a moment, for no reason, and permanently in the case where the
-   * restore changes nothing.
-   *
-   * Skipping the mount run costs nothing. If there IS a draft, restoring it
-   * changes the state and this runs on the next commit with the right values.
-   * If there is NOT, every setter above wrote the value the field already held,
-   * React bails out of the re-render, and there is correctly nothing to save
-   * until the rep types something.
-   */
-  const savedOnce = useRef(false);
-  useEffect(() => {
-    if (!savedOnce.current) {
-      savedOnce.current = true;
-      return;
-    }
-    writeDraft(followUpDraftKey(), {
-      instituteId: item.instituteId,
-      purpose,
-      note,
-    } satisfies FollowUpDraft);
-  }, [item.instituteId, purpose, note, state]);
 
   return (
     <form
@@ -367,7 +340,10 @@ function StartFollowUp({
 
       <div className="space-y-1.5">
         <Label>What is this visit for?</Label>
-        <Select value={purpose} onValueChange={setPurpose}>
+        <Select
+          value={purpose}
+          onValueChange={(value) => setField({ purpose: value })}
+        >
           <SelectTrigger
             className="h-11 w-full"
             aria-label="Purpose"
@@ -396,7 +372,7 @@ function StartFollowUp({
             maxLength={300}
             placeholder="What is this visit for?"
             value={note}
-            onChange={(event) => setNote(event.target.value)}
+            onChange={(event) => setField({ note: event.target.value })}
             aria-label="What is this visit for?"
           />
           {state.fieldErrors.purpose_note && (
