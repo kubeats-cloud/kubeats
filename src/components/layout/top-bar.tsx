@@ -1,8 +1,6 @@
 import Image from "next/image";
-import { LogOutIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { DesktopNav } from "@/components/layout/desktop-nav";
-import { signOut } from "@/lib/auth-actions";
+import { SignOutButton } from "@/components/layout/sign-out-button";
 import type { NavItem } from "@/lib/nav";
 
 /**
@@ -20,7 +18,9 @@ import type { NavItem } from "@/lib/nav";
  * what makes the accents read as deliberate.
  *
  * Sign-out lives here because reps have no Settings tab, so it has to be
- * reachable from every screen for everyone.
+ * reachable from every screen for everyone. It is the one control in this bar
+ * that can answer back: a rep with a visit still open is refused and sent to
+ * finish it, which is why it is its own client component.
  */
 export function TopBar({
   name,
@@ -80,18 +80,14 @@ export function TopBar({
             </span>
           )}
 
-          <form action={signOut}>
-            <Button
-              type="submit"
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground hover:text-foreground size-9"
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <LogOutIcon className="size-[18px]" aria-hidden />
-            </Button>
-          </form>
+          {/*
+            A CLIENT COMPONENT, because sign-out can now be REFUSED. A rep still
+            checked in somewhere is told to finish that visit first, and the
+            refusal needs somewhere to appear and a way back to the visit — see
+            sign-out-button.tsx. The check itself is the server action's; this
+            bar only makes room for the answer.
+          */}
+          <SignOutButton />
         </div>
       </div>
     </header>

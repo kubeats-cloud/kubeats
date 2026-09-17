@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FormSection } from "@/components/form-section";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { logAndFileVisit } from "@/lib/feedback-actions";
 import { checkoutFix } from "@/lib/geolocate";
 import { appendCheckoutFix } from "@/lib/validation/checkin";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
+import { clearDraft, logVisitDraftKey, readDraft, writeDraft } from "@/lib/drafts";
 import type { OpenLoop, PlanEntry } from "@/lib/visits";
 import {
   CATEGORY_LABELS,
@@ -63,6 +64,38 @@ import { RequiredMark } from "@/components/required-mark";
  * Radix reset harmless here: a revert lands on nothing and the schema refuses
  * it with a sentence rather than filing a visit that changed no status.
  */
+
+/**
+ * What a half-finished Log Visit is, as far as the draft store is concerned.
+ *
+ * EVERY TYPED FIELD ON THE FORM, and nothing else. The institute, the purpose,
+ * the activity and the plan id are not here because the rep cannot change them
+ * — they come from the plan row and are re-read from the server on every mount,
+ * which is also why a restored draft can never disagree with what the visit
+ * actually is.
+ *
+ * THE PHOTOGRAPH IS DELIBERATELY ABSENT, and it is the one omission worth
+ * stating. `CaptureFields` owns a live capture: the frame comes off the camera
+ * stream, the coordinates are read at the moment of attaching, and what it
+ * leaves behind in the form is a path to an already-uploaded object. Restoring
+ * that path alone would put a hidden field back without the preview beside it,
+ * so the form would claim a photo the rep cannot see and has no way to check.
+ * A rep who navigates away mid-capture retakes the picture, which is a few
+ * seconds; a visit filed against a photo nobody looked at is not recoverable.
+ */
+interface LogVisitDraft {
+  statusSetTo: string;
+  expectedDate: string;
+  followUpDate: string;
+  feedback: FeedbackState;
+}
+
+const EMPTY_DRAFT: LogVisitDraft = {
+  statusSetTo: "",
+  expectedDate: "",
+  followUpDate: "",
+  feedback: EMPTY_FEEDBACK,
+};
 
 /**
  * Log a visit — now the second step of a forced chain, not a screen a rep
@@ -139,6 +172,92 @@ export function LogVisitForm({
   const [statusSetTo, setStatusSetTo] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
+
+  /*
+   * THE DRAFT — what survives a Back and a Forward.
+   *
+   * The problem it solves: a rep fills in the status, the dates and a couple of
+   * paragraphs of notes, taps something that navigates, comes back, and the
+   * form is empty. The check-in and the photo are in the database and survive;
+   * the typing was only ever React state and did not.
+   *
+   * KEYED BY THE PLAN ENTRY, so one visit's draft can never appear on another's
+   * form. `plan.id` is unique per visit and is already the thing `/log?plan=`
+   * addresses, so the key and the screen agree by construction.
+   */
+  const draftKey = logVisitDraftKey(plan.id);
+
+  /*
+   * RESTORED AFTER MOUNT, NEVER DURING RENDER, and that is a hydration rule
+   * rather than a style preference. This component is server-rendered, and the
+   * server has no sessionStorage: reading the draft in a `useState` initialiser
+   * would make the first client render disagree with the HTML it is hydrating
+   * into, for every field at once. So the first render matches the server —
+   * empty — and the draft arrives immediately afterwards.
+   *
+   * The ref makes it once-only. Without it this would re-run and stamp the
+   * stored draft back over whatever the rep has since typed.
+   */
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    // "No draft" is the empty draft rather than an early return, which keeps
+    // every setter below on one path — and each one then writes the value the
+    // field already holds, so the no-draft case costs a render that changes
+    // nothing rather than needing a branch of its own.
+    //
+    // Defaulted field by field rather than spread wholesale: a draft written by
+    // an older build is missing whatever has been added since, and a form is
+    // not the place to discover that as `undefined`.
+    const draft = readDraft<LogVisitDraft>(draftKey) ?? EMPTY_DRAFT;
+    setStatusSetTo(draft.statusSetTo ?? "");
+    setExpectedDate(draft.expectedDate ?? "");
+    setFollowUpDate(draft.followUpDate ?? "");
+    setFeedback({ ...EMPTY_FEEDBACK, ...(draft.feedback ?? {}) });
+  }, [draftKey]);
+
+  /*
+   * SAVED ON EVERY CHANGE. A storage write is exactly what an effect is for —
+   * pushing React's state out to an external system — so there is no setState
+   * here and nothing cascades.
+   *
+   * `serverState` is in the dependencies on purpose, and it is not decoration:
+   * the draft is CLEARED at dispatch (see the submit handler), so a submission
+   * that comes back refused would otherwise leave the rep holding a filled-in
+   * form with no draft behind it. A refusal changes `serverState`, which re-runs
+   * this, which writes it again. On success there is no re-run to worry about,
+   * because the action redirects and this component is gone.
+   *
+   * AND IT SKIPS ITS FIRST RUN, which is a bug fix rather than an optimisation.
+   *
+   * Both effects run in the same commit. The restore effect goes first and
+   * queues its setStates; this one then runs immediately afterwards, still
+   * closed over the EMPTY values of the first render, because the restoring
+   * setState has not re-rendered yet. Without this guard it would write those
+   * empties straight over the draft the effect above had just read — blanking
+   * it for a moment, for no reason, and permanently in the case where the
+   * restore changes nothing.
+   *
+   * Skipping the mount run costs nothing. If there IS a draft, restoring it
+   * changes the state and this runs on the next commit with the right values.
+   * If there is NOT, every setter above wrote the value the field already held,
+   * React bails out of the re-render, and there is correctly nothing to save
+   * until the rep types something.
+   */
+  const savedOnce = useRef(false);
+  useEffect(() => {
+    if (!savedOnce.current) {
+      savedOnce.current = true;
+      return;
+    }
+    writeDraft(draftKey, {
+      statusSetTo,
+      expectedDate,
+      followUpDate,
+      feedback,
+    } satisfies LogVisitDraft);
+  }, [draftKey, statusSetTo, expectedDate, followUpDate, feedback, serverState]);
 
   const status = statusSetTo === "" ? null : statusSetTo;
   /*
@@ -294,6 +413,21 @@ export function LogVisitForm({
          * admin reading it afterwards.
          */
         const formData = new FormData(event.currentTarget);
+
+        /*
+         * CLEARED HERE, because there is no later moment to do it in. A
+         * successful submit ends in `redirect("/?filed=1")`, which unmounts
+         * this component — so no effect and no success state ever runs on this
+         * screen again, and a "clear when it worked" would never fire. The
+         * draft would then outlive the visit it belonged to and be handed back
+         * the next time anything opened `/log?plan=` for the same entry.
+         *
+         * Clearing early is safe because nothing on screen is cleared with it:
+         * the React state is untouched, so a refused submit leaves every field
+         * exactly as the rep left it, and the save effect above writes the
+         * draft back as soon as the refusal lands.
+         */
+        clearDraft(draftKey);
         setLocating(true);
         void checkoutFix()
           .then((fix) => appendCheckoutFix(formData, fix))

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarIcon, ClockIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { FormNotice } from "@/components/form-notice";
 import { cn } from "@/lib/utils";
 import { formatDate, todayISO } from "@/lib/dates";
 import { assignVisit, startFollowUp } from "@/lib/visit-actions";
+import { clearDraft, followUpDraftKey, readDraft, writeDraft } from "@/lib/drafts";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { statusRow, type StatusCatalogue } from "@/lib/validation/institute";
 import type { FollowUp, PurposeOption } from "@/lib/visits";
@@ -63,6 +64,33 @@ export function FollowUpList({
   readOnly: boolean;
 }) {
   const [open, setOpen] = useState<string | null>(null);
+
+  /*
+   * REOPEN THE PANEL THE DRAFT BELONGS TO.
+   *
+   * The purpose a rep chose is kept by StartFollowUp, but that component only
+   * exists while its panel is open — so restoring the answer without restoring
+   * WHICH panel was open would restore it into something that is not mounted.
+   * This is the other half: the draft names its institute, and the panel it
+   * belongs to opens again.
+   *
+   * Only for a row that is STILL HERE. Pending is recomputed on every request
+   * and a follow-up can be closed by somebody else between the rep leaving and
+   * coming back — an institute that has dropped off the list must not reopen a
+   * panel for a row that is no longer on screen.
+   *
+   * Never for an admin: their panel is AssignFollowUp, which writes a plan row
+   * for somebody else and has no draft of its own.
+   */
+  const restoredOpen = useRef(false);
+  useEffect(() => {
+    if (restoredOpen.current) return;
+    restoredOpen.current = true;
+    const draft = readDraft<FollowUpDraft>(followUpDraftKey());
+    const stillListed =
+      draft !== null && items.some((item) => item.instituteId === draft.instituteId);
+    setOpen(!readOnly && draft !== null && stillListed ? draft.instituteId : null);
+  }, [readOnly, items]);
 
   if (items.length === 0) {
     return (
@@ -216,6 +244,28 @@ export function FollowUpList({
 }
 
 /**
+ * A half-answered "Visit again", kept across a Back and a Forward.
+ *
+ * THE OPEN PANEL IS PART OF THE DRAFT, not context around it. Only one panel is
+ * open at a time and it is closed by default, so restoring the chosen purpose
+ * without also restoring WHICH institute it was chosen for would put the answer
+ * somewhere the rep cannot see it. The institute id is therefore stored with
+ * the purpose and the panel reopens with it.
+ *
+ * It is also what scopes the draft: a stored institute that is no longer in the
+ * list — the follow-up was closed by somebody else, or the row has moved — is
+ * ignored on read rather than reopening a panel for a row that is not there.
+ */
+interface FollowUpDraft {
+  instituteId: string;
+  purpose: string;
+  note: string;
+}
+
+/** "Nothing chosen yet", so the restore effect has one path through it. */
+const EMPTY_FOLLOW_UP: FollowUpDraft = { instituteId: "", purpose: "", note: "" };
+
+/**
  * The one question starting a follow-up has to ask.
  *
  * THE PURPOSE, AND NEVER SILENTLY. After stage 3 the purpose decides the visit's
@@ -239,8 +289,74 @@ function StartFollowUp({
 
   const chosen = purposes.find((option) => option.label === purpose) ?? null;
 
+  /*
+   * THE SAME DRAFT RULE AS LOG VISIT, in miniature — see drafts.ts and the
+   * longer note in log-visit-form.tsx for the hydration reasoning that decides
+   * the shape of both: restore AFTER mount, never in a `useState` initialiser,
+   * because this is server-rendered and the server has no sessionStorage.
+   *
+   * Restored only when the draft belongs to THIS institute. The panel's own id
+   * is the scope; a draft left over from another row is simply not this one's.
+   */
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const draft = readDraft<FollowUpDraft>(followUpDraftKey());
+    const mine =
+      draft && draft.instituteId === item.instituteId ? draft : EMPTY_FOLLOW_UP;
+    setPurpose(mine.purpose ?? "");
+    setNote(mine.note ?? "");
+  }, [item.instituteId]);
+
+  /*
+   * Written out on every change, like the Log Visit draft. No setState, so
+   * nothing cascades — an effect pushing state to an external system is what
+   * effects are for.
+   *
+   * AND IT SKIPS ITS FIRST RUN, which is a bug fix rather than an optimisation.
+   *
+   * Both effects run in the same commit. The restore effect goes first and
+   * queues its setStates; this one then runs immediately afterwards, still
+   * closed over the EMPTY values of the first render, because the restoring
+   * setState has not re-rendered yet. Without this guard it would write those
+   * empties straight over the draft the effect above had just read — blanking
+   * it for a moment, for no reason, and permanently in the case where the
+   * restore changes nothing.
+   *
+   * Skipping the mount run costs nothing. If there IS a draft, restoring it
+   * changes the state and this runs on the next commit with the right values.
+   * If there is NOT, every setter above wrote the value the field already held,
+   * React bails out of the re-render, and there is correctly nothing to save
+   * until the rep types something.
+   */
+  const savedOnce = useRef(false);
+  useEffect(() => {
+    if (!savedOnce.current) {
+      savedOnce.current = true;
+      return;
+    }
+    writeDraft(followUpDraftKey(), {
+      instituteId: item.instituteId,
+      purpose,
+      note,
+    } satisfies FollowUpDraft);
+  }, [item.instituteId, purpose, note, state]);
+
   return (
-    <form action={formAction} className="mt-4 space-y-3">
+    <form
+      action={formAction}
+      /*
+       * CLEARED AT DISPATCH, for the reason Log Visit's is: a successful
+       * `startFollowUp` redirects to the Dashboard, so this component is gone
+       * before any success state could be read here. Nothing on screen is
+       * cleared with it — the two setters are untouched — so a refusal leaves
+       * the rep's answer in place, and the save effect above writes the draft
+       * back as soon as `state` changes.
+       */
+      onSubmit={() => clearDraft(followUpDraftKey())}
+      className="mt-4 space-y-3"
+    >
       <input type="hidden" name="institute_id" value={item.instituteId} />
       <input type="hidden" name="purpose" value={purpose} />
       <input
@@ -293,7 +409,19 @@ function StartFollowUp({
         <Button type="submit" className="h-11 flex-1" disabled={isPending}>
           {isPending ? "Starting…" : "Add to today's plan"}
         </Button>
-        <Button type="button" variant="ghost" className="h-11" onClick={onCancel}>
+        {/* Cancel is a decision, not a navigation: the rep has said they are
+            not doing this now, so the draft goes with the panel. Without this
+            it would reopen the next time they tapped "Visit again" on this
+            institute, having been explicitly dismissed. */}
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-11"
+          onClick={() => {
+            clearDraft(followUpDraftKey());
+            onCancel();
+          }}
+        >
           Cancel
         </Button>
       </div>

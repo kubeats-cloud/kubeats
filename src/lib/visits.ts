@@ -572,6 +572,81 @@ export interface OpenLoop {
   expected_date: string | null;
   date: string;
 }
+/**
+ * The visit this rep is standing in the middle of, if there is one.
+ *
+ * IT BELONGS HERE RATHER THAN IN A MODULE OF ITS OWN, and that was tested. The
+ * one caller is a server action reached from the top bar, so `visits.ts` joins
+ * every route's graph — which looked worth splitting for until it was measured
+ * and came out 23 KiB WORSE. See the note above auth-actions.ts's signOutIfFinished.
+ *
+ * ONE DEFINITION OF "OPEN", whichever module it lives in:
+ *
+ *   arrived          checkin_at is not null
+ *   not left         checkout_at is null
+ *   not written off  checkout_missing is false — the nightly sweep and an
+ *                    admin's clear-stuck both set it, and a visit somebody has
+ *                    already closed for the rep is finished, however
+ *                    unsatisfyingly. Miss this condition and a rep whose stuck
+ *                    visit was cleared this morning is still held by it.
+ *
+ * `daily_plans_one_open_visit` (0018) guarantees there is at most one, so
+ * `maybeSingle()` is safe rather than optimistic.
+ *
+ * SCOPED TO THE CALLER BY `member`, not by RLS alone: `daily_plans_select` lets
+ * an admin read everybody's rows, so a query without this would tell an admin
+ * they are mid-visit because some rep somewhere is.
+ *
+ * Returns the institute's NAME as well as the plan id, because every caller
+ * wants to say which one — "Finish your visit at St Xavier's" is a sentence a
+ * rep can act on and "you have an open visit" is not.
+ */
+export interface OpenVisit {
+  /** The plan entry, which is also the `/log?plan=` a rep is sent back to. */
+  planId: string;
+  instituteId: string;
+  instituteName: string;
+}
+
+export async function openVisitFor(memberId: string): Promise<OpenVisit | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("daily_plans")
+    .select("id, institute_id, institutes(name)")
+    .eq("member", memberId)
+    .not("checkin_at", "is", null)
+    .is("checkout_at", null)
+    .eq("checkout_missing", false)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    logError("visits:open-visit", error);
+    return null;
+  }
+  if (!data) return null;
+
+  /*
+   * PostgREST types a one-to-one embed as an ARRAY, because the relationship
+   * direction is not in the select string — the same narrowing visits.ts does
+   * for its joined purpose row, and visit-actions.ts for this very join.
+   */
+  const joined = data.institutes as unknown;
+  const row = (Array.isArray(joined) ? joined[0] : joined) as { name?: string } | null;
+
+  return {
+    planId: data.id,
+    instituteId: data.institute_id,
+    // A null join is a SCOPING answer, not a missing row — institute-scope.ts
+    // explains why those two must not read the same on screen.
+    instituteName: instituteNameFrom(
+      new Map(row?.name ? [[data.institute_id, row.name]] : []),
+      data.institute_id,
+      "visits",
+    ),
+  };
+}
+
 
 /**
  * The rep's own open loops at ONE institute, oldest first.
@@ -702,6 +777,7 @@ export async function getUnreportedVisits(
     planId: r.daily_plan_id,
   }));
 }
+
 
 /**
  * One plan row by id, whatever day it belongs to.
