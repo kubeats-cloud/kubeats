@@ -24,14 +24,33 @@
  *
  * Read-only. It selects and never writes.
  *
- *     node scripts/check-schema.mjs              # uses .env.local
- *     SUPABASE_URL=... SUPABASE_KEY=... node scripts/check-schema.mjs
+ *     node scripts/check-schema.mjs                     # whatever .env.local points at
+ *     SUPABASE_URL=... SUPABASE_KEY=... node scripts/...   # any other project
+ *
+ * IT NEEDS THE SERVICE-ROLE KEY, not the anon one. The probes read tables that
+ * are behind RLS and, in the case of `campuses`, behind a grant the anon role
+ * does not have at all — so an anon key gets four probes in and stops with
+ * `42501 permission denied`. That is checked for by name below and explained,
+ * because "permission denied for table campuses" is a baffling thing to be told
+ * when you asked which migrations are applied.
+ *
+ * BOTH VARIABLES OR NEITHER. `process.loadEnvFile` does not overwrite a value
+ * that is already set, so SUPABASE_URL wins over .env.local's — but passing
+ * only the URL leaves the KEY coming from .env.local, which means one project's
+ * key against another project's URL. That is refused below rather than left to
+ * fail as a confusing 401 twenty lines later.
  *
  * Exits 1 when anything the current code needs is missing, so it can gate a
- * deploy.
+ * deploy. Exits 2 when it could not look.
  */
 
 import { createClient } from "@supabase/supabase-js";
+
+// Read the explicit pair BEFORE the env file, so "was this passed in?" is
+// answerable afterwards. loadEnvFile does not overwrite, but it does fill in,
+// and a filled-in half is the dangerous case.
+const passedUrl = process.env.SUPABASE_URL;
+const passedKey = process.env.SUPABASE_KEY;
 
 try {
   process.loadEnvFile(".env.local");
@@ -39,15 +58,35 @@ try {
   // Fine — the variables may come from the environment instead.
 }
 
-const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-const key =
-  process.env.SUPABASE_KEY ??
-  process.env.SUPABASE_SERVICE_ROLE_KEY ??
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const url = passedUrl ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+// The anon key is deliberately NOT in this chain: it cannot complete the run,
+// so accepting one only buys a confusing failure four probes later.
+const key = passedKey ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!url || !key) {
   console.error(
-    "Need a Supabase URL and key. Put them in .env.local, or pass SUPABASE_URL and SUPABASE_KEY.",
+    [
+      "Need a Supabase URL and a SERVICE-ROLE key.",
+      "",
+      "  from .env.local:  node scripts/check-schema.mjs",
+      "  another project:  SUPABASE_URL=https://<ref>.supabase.co \\",
+      "                    SUPABASE_KEY=<service-role key> \\",
+      "                    node scripts/check-schema.mjs",
+      "",
+      "The anon key will not do: the probes read tables it has no grant on.",
+    ].join("\n"),
+  );
+  process.exit(2);
+}
+
+// ONE PROJECT AT A TIME. Overriding the URL and letting the key fall through to
+// .env.local points the dev project's key at another project's API, which fails
+// as an opaque 401. Say which half is missing instead.
+if (Boolean(passedUrl) !== Boolean(passedKey)) {
+  console.error(
+    `Pass SUPABASE_URL and SUPABASE_KEY together, or neither. Only ${
+      passedUrl ? "SUPABASE_URL" : "SUPABASE_KEY"
+    } was given, so the other half would come from .env.local — a different project.`,
   );
   process.exit(2);
 }
@@ -101,6 +140,16 @@ const present = async ({ table, column }) => {
   if (!error) return true;
   if (error.code === "42703" || error.code === "42P01" || error.code === "PGRST205") {
     return false;
+  }
+  // The anon-key symptom, named rather than passed through. A missing GRANT is
+  // not a missing migration, and "permission denied for table campuses" tells
+  // nobody which of the two they are looking at.
+  if (error.code === "42501" || error.code === "PGRST301") {
+    throw new Error(
+      `${table}.${column}: ${error.code} ${error.message}\n` +
+        "    That is a permissions answer, not a schema one — this needs the\n" +
+        "    SERVICE-ROLE key (Supabase dashboard -> Project Settings -> API).",
+    );
   }
   throw new Error(`${table}.${column}: ${error.code} ${error.message}`);
 };
