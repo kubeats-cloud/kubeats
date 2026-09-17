@@ -35,13 +35,27 @@ import type { CampusRep } from "@/lib/admin";
  * rep on another campus could not see the institute even after being handed it
  * — the move would succeed and change nothing anyone could use. The picker is
  * the courtesy; FO025 in the database is the control, and refuses it outright.
+ *
+ * AND NOT THE CURRENT OWNER. Reassigning to whoever already holds it is a write
+ * that changes nothing and then reports success, which is worse than being
+ * refused. Taking them out of the list also surfaces the case this card used to
+ * render as an empty dropdown: a one-rep campus whose rep already owns the
+ * institute. That gets a sentence of its own below.
  */
 export function ReassignOwner({
   instituteId,
+  ownerId,
   ownerName,
   reps,
 }: {
   instituteId: string;
+  /**
+   * The owner's id, so they can be taken out of the list of candidates.
+   *
+   * Separate from `ownerName` because a name cannot be matched safely: two reps
+   * on one campus may share one, and `registered_by` is what the action writes.
+   */
+  ownerId: string | null;
   /** Null when nobody owns it — see the Unassigned note below. */
   ownerName: string | null;
   /** Reps on THIS institute's campus. Empty if the campus has none. */
@@ -52,6 +66,23 @@ export function ReassignOwner({
     EMPTY_ADMIN_STATE,
   );
   const [member, setMember] = useState("");
+
+  /*
+   * WHO IT CAN ACTUALLY GO TO, which is not the same as who is on the campus.
+   *
+   * Handing an institute to the rep who already owns it writes the value that
+   * is already there: no permission changes, nothing moves, and the card says
+   * "Reassigned. It now belongs to that rep." — a success message for an event
+   * that did not happen. So the owner comes out of the list.
+   *
+   * That in turn creates the state this exists to name. A campus with one rep
+   * is the ordinary case for this client, and once that rep owns the institute
+   * the picker is EMPTY: a dropdown with nothing in it, above a button that
+   * cannot be pressed, with no explanation. `reps.length === 0` was already
+   * handled — "no reps on this campus at all" — but this one looked identical
+   * and meant something quite different.
+   */
+  const candidates = reps.filter((rep) => rep.id !== ownerId);
 
   return (
     <FormSection
@@ -79,6 +110,18 @@ export function ReassignOwner({
           There are no reps on this institute&rsquo;s campus to hand it to. Add
           one in Settings, or move the institute to another campus first.
         </p>
+      ) : candidates.length === 0 ? (
+        /*
+          THE SOLE REP ALREADY OWNS IT. Said as its own sentence rather than
+          folded into the empty-campus one above, because the two have different
+          answers: that one wants another rep created, this one is simply
+          finished. Nothing is wrong and there is nothing to do.
+        */
+        <p className="text-muted-foreground text-xs">
+          No other reps on this campus to reassign to.{" "}
+          {ownerName ? `${ownerName} is` : "Its owner is"} the only one, so
+          there is nowhere to move it. Add another rep in Settings first.
+        </p>
       ) : (
         <form action={formAction} className="space-y-3">
           <input type="hidden" name="institute_id" value={instituteId} />
@@ -95,7 +138,7 @@ export function ReassignOwner({
                 <SelectValue placeholder="Choose a rep on this campus" />
               </SelectTrigger>
               <SelectContent>
-                {reps.map((rep) => (
+                {candidates.map((rep) => (
                   <SelectItem key={rep.id} value={rep.id}>
                     {rep.name}
                   </SelectItem>

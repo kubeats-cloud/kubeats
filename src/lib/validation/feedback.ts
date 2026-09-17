@@ -317,6 +317,20 @@ export interface FeedbackState {
   sessionTopic: string;
   sessionTakenBy: string;
   closesVisitId: string;
+  /**
+   * CONTROLLED AS OF THE DRAFT WORK, and it was the odd one out before.
+   *
+   * The Notes textarea was the only field on this form React did not hold — it
+   * posted by `name` and nothing read it. That was fine while nothing needed to
+   * know what was in it, and stopped being fine the moment Log Visit started
+   * saving a draft: the longest and most expensive thing a rep types was the
+   * one thing that could not be saved or restored.
+   *
+   * It belongs in this state rather than in a second one beside it because it
+   * is the same kind of value as the other four — a field of the closing report
+   * that `close_visit()` writes, which is the invariant feedback.test.ts pins.
+   */
+  notes: string;
 }
 
 export const EMPTY_FEEDBACK: FeedbackState = {
@@ -324,6 +338,7 @@ export const EMPTY_FEEDBACK: FeedbackState = {
   sessionTopic: "",
   sessionTakenBy: "",
   closesVisitId: "",
+  notes: "",
 };
 
 /** One field's worth of change. */

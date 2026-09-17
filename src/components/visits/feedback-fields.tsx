@@ -244,12 +244,16 @@ export function FeedbackFields({
       */}
       <div className="space-y-2">
         <Label htmlFor="notes">Notes {notesRequired && <RequiredMark />}</Label>
+        {/* Controlled, so a draft can hold it — see FeedbackState. Everything
+            else about it is unchanged: same name, same cap, same rule. */}
         <Textarea
           id="notes"
           name="notes"
           rows={4}
           maxLength={2000}
           aria-required={notesRequired || undefined}
+          value={value.notes}
+          onChange={(event) => onChange({ notes: event.target.value })}
         />
         {err("notes")}
       </div>

@@ -214,6 +214,7 @@ export default async function InstituteDetailPage(
         <div className="mb-4">
           <ReassignOwner
             instituteId={institute.id}
+            ownerId={institute.registered_by}
             ownerName={institute.ownerName}
             reps={reps}
           />
