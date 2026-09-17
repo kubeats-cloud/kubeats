@@ -122,20 +122,51 @@ export interface PurposeRow {
    * to "not set" rather than throwing.
    */
   activity: string | null;
+  /**
+   * Set or Done for the two activities that have one, null for the other four
+   * (migration 0025). It is what tells "Fix a session" from "Complete a
+   * session" — both map to `session`, and without it Sessions Set and Sessions
+   * Done would be indistinguishable — so the panel SHOWS it rather than leaving
+   * an admin to infer which end of the metric a purpose feeds from its wording.
+   */
+  lifecycle: string | null;
+  /**
+   * False once an admin has retired it: still readable, so every plan that
+   * used it can resolve its mapping for ever, and no longer offered to a rep.
+   * `listPurposes()` in visits.ts is where the filtering actually happens.
+   */
+  isActive: boolean;
 }
 
+/**
+ * Every purpose, retired ones INCLUDED.
+ *
+ * The opposite of `listPurposes()`, which a rep's picker reads and which filters
+ * on `is_active`. An admin maintaining the vocabulary has to see what they
+ * retired, or restoring it is impossible and the panel looks like a delete after
+ * all. Retired rows sort last so the working list stays at the top.
+ */
 export async function listPurposeRows(): Promise<PurposeRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("purposes")
-    .select("id, label, activity")
+    .select("id, label, activity, lifecycle, is_active")
+    .order("is_active", { ascending: false })
     .order("label");
 
   if (error) {
     logError("admin:purposes", error);
     return [];
   }
-  return data ?? [];
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    label: row.label,
+    activity: row.activity,
+    lifecycle: row.lifecycle,
+    // Defaulted like every other nullable read here, so a page rendered against
+    // a database without 0025 shows the list rather than an empty panel.
+    isActive: row.is_active ?? true,
+  }));
 }
 
 /* ------------------------------------------------------------------ */

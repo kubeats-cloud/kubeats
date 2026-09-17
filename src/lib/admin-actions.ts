@@ -17,6 +17,7 @@ import {
   flushSchema,
   newMemberSchema,
   purposeSchema,
+  purposeUpdateSchema,
   reassignSchema,
   removeSchema,
   statusRenameSchema,
@@ -309,6 +310,24 @@ export async function renameStatus(
 /* Purposes                                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Add a purpose — which is choosing a weekly metric, and sometimes choosing
+ * which END of one.
+ *
+ * THE LIFECYCLE IS WHY SESSION AND CAMPUS-VISIT PURPOSES COULD NOT BE ADDED AT
+ * ALL. This action sent `label` and `activity` and nothing else, so
+ * `purposes_lifecycle_matches_activity` (0025) refused every insert whose
+ * activity was `session` or `campus_visit` with a bare 23514 that reached the
+ * admin as "we could not add that purpose". Four of the eight weekly metrics —
+ * Sessions Set, Sessions Done, Campus Visits Set, Campus Visits Done — are fed
+ * only by such purposes, so the four seeded ones were all an admin would ever
+ * have. It is sent now, and `purposeSchema` insists on it for exactly the two
+ * activities the CHECK insists on it for.
+ *
+ * Null for the other four, and explicitly rather than by omission: 0025's CHECK
+ * refuses a lifecycle on an activity that has none just as firmly as it demands
+ * one on an activity that does.
+ */
 export async function addPurpose(
   _prev: AdminState,
   formData: FormData,
@@ -319,20 +338,24 @@ export async function addPurpose(
   const parsed = purposeSchema.safeParse({
     label: textOf(formData, "label"),
     activity: textOf(formData, "activity"),
+    lifecycle: textOf(formData, "lifecycle"),
   });
   if (!parsed.success) {
     return {
-      error: CHECK_FIELD,
+      error: CHECK_FIELDS,
       fieldErrors: fieldErrorsFrom(parsed.error),
     };
   }
 
-  // The activity travels with the row from stage 2 on. It is what stage 3 reads
-  // instead of the Activity selector, and what decides which weekly metric a
-  // visit planned under this purpose feeds.
-  const { error } = await gate.supabase
-    .from("purposes")
-    .insert({ label: parsed.data.label, activity: parsed.data.activity });
+  // Both travel with the row from stage 2 on. `activity` is what stage 3 reads
+  // instead of the Activity selector; `lifecycle` is what tells "Fix a session"
+  // from "Complete a session", which map to the same activity and to opposite
+  // ends of the weekly metrics.
+  const { error } = await gate.supabase.from("purposes").insert({
+    label: parsed.data.label,
+    activity: parsed.data.activity,
+    lifecycle: parsed.data.lifecycle,
+  });
 
   if (error) {
     logError("admin:purpose-add", error);
@@ -349,6 +372,70 @@ export async function addPurpose(
     fieldErrors: {},
     ok: true,
     message: `Added “${parsed.data.label}”.`,
+  };
+}
+
+/**
+ * Retire a purpose, or bring one back.
+ *
+ * RETIRING IS THE ONLY REMOVAL PATH, exactly as it is for a status — and here
+ * the reason is arithmetic rather than history. `purposes` is the one thing that
+ * decides which of the eight weekly metrics a visit counts toward, so deleting
+ * the last purpose feeding one zeroes that metric for ever and NOTHING SAYS SO:
+ * the week's numbers simply come in flat. 0025's assertion block refuses to
+ * apply against a database where any metric has no active purpose behind it,
+ * which is the same failure caught at the other end.
+ *
+ * It strands history too. `daily_plans.purpose_id` points at the row, and a rep
+ * whose plan referenced a deleted purpose reaches `/log` with no mapping to
+ * derive an activity from — the Activity selector that used to be the fallback
+ * was deleted in stage 3, so there is none. `is_active = false` keeps the row
+ * readable and merely stops offering it, which is the whole difference.
+ *
+ * Restoring is the same UPDATE pointed the other way. Without it, retiring by
+ * mistake would be a dead end — and unlike a status, a purpose an admin retired
+ * by accident silently stops a metric being earnable.
+ */
+export async function setPurposeActive(
+  id: string,
+  isActive: boolean,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = purposeUpdateSchema.safeParse({ id });
+  if (!parsed.success) {
+    return denied("That purpose could not be identified.");
+  }
+
+  const { error } = await gate.supabase
+    .from("purposes")
+    .update({ is_active: isActive })
+    .eq("id", parsed.data.id);
+
+  if (error) {
+    logError("admin:purpose-retire", error);
+    return denied(
+      toFriendlyMessage(
+        error,
+        isActive
+          ? "We could not restore that purpose."
+          : "We could not retire that purpose.",
+      ),
+    );
+  }
+
+  // listPurposes() filters on is_active and is what the Dashboard's planner
+  // reads, so both the panel and every rep's picker have to be re-rendered.
+  revalidatePath("/settings");
+  revalidatePath("/");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: isActive
+      ? "That purpose is available again."
+      : "Retired. Plans that already used it are unchanged.",
   };
 }
 
@@ -463,7 +550,11 @@ export async function addArea(
 }
 
 /**
- * Removing a purpose, or a branch of the location tree.
+ * Removing a branch of the location tree.
+ *
+ * NOT A PURPOSE. This used to take one, and deleting a purpose is the one
+ * removal on this screen that quietly changes what the weekly numbers mean —
+ * see REMOVABLE in validation/admin.ts. Retiring is `setPurposeActive()` above.
  *
  * States and cities cascade to their children in the database, so the
  * confirmation in the UI is what tells the admin how much is about to go. This
@@ -484,8 +575,11 @@ export async function removeEntry(
   });
   if (!parsed.success) return denied("We could not tell what to remove.");
 
+  // `purpose` was a fourth entry here and is gone — see REMOVABLE in
+  // validation/admin.ts for why a purpose is retired and never deleted.
+  // removeSchema refuses the kind before this map is reached; the map simply
+  // has nowhere to send it either.
   const table = {
-    purpose: "purposes",
     state: "location_states",
     city: "location_cities",
     area: "location_areas",

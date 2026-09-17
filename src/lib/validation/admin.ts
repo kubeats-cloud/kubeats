@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ACTIVITY_KEYS } from "@/lib/validation/visit";
+import { ACTIVITY_KEYS, hasLifecycle } from "@/lib/validation/visit";
 import { STATUS_CATEGORIES, STATUS_TONES } from "@/lib/validation/institute";
 
 /**
@@ -27,7 +27,8 @@ const name = (max: number, label: string) =>
     .refine((v) => nameLooksValid(v, max), `${label} needs some letters.`);
 
 /**
- * A purpose, and the activity it counts as.
+ * A purpose: its label, the activity it counts as, and — for the two activities
+ * that have one — its lifecycle.
  *
  * THE ACTIVITY IS REQUIRED, and it is the point of the whole of stage 2. A
  * purpose is what a rep plans a visit under; from stage 3 it is also what
@@ -39,12 +40,79 @@ const name = (max: number, label: string) =>
  * `ACTIVITY_KEYS` is the same six-value list `visitSchema` validates against and
  * `purposes_activity_valid` (migration 0024) mirrors as a CHECK. Three copies,
  * two of which the migration's own assertion block compares — see 0024 §4.
+ *
+ * THE LIFECYCLE IS REQUIRED TOO, AND ONLY SOMETIMES, and leaving it out made
+ * half the vocabulary unaddable. `purposes_lifecycle_matches_activity` (0025)
+ * demands Set or Done on a session or a campus visit and NULL on everything
+ * else, so a form that never sent one could add "Other" and "Follow-up" all day
+ * and was refused with a raw 23514 the moment an admin tried to add a session
+ * purpose. Sessions Set, Sessions Done, Campus Visits Set and Campus Visits Done
+ * are four of the eight weekly metrics; without a lifecycle there is no way to
+ * feed any of them.
+ *
+ * It is what tells "Fix a session" from "Complete a session" — both map to the
+ * `session` activity, and without it Sessions Set and Sessions Done would be
+ * indistinguishable. So it is asked at the moment the activity is chosen, and
+ * refused on an activity that may not carry one: the CASE below is the same
+ * shape as `plannedActivityIsValid()`, `visits_lifecycle_matches_activity`
+ * (0001) and 0025's CHECK. Four copies of one rule, which is what 0025's
+ * assertion block exists to keep in step.
  */
-export const purposeSchema = z.object({
-  label: name(120, "The purpose"),
-  activity: z.enum(ACTIVITY_KEYS, {
-    message: "Choose what this purpose counts as.",
-  }),
+export const PURPOSE_LIFECYCLES = ["Set", "Done"] as const;
+export type PurposeLifecycle = (typeof PURPOSE_LIFECYCLES)[number];
+
+export const purposeSchema = z
+  .object({
+    label: name(120, "The purpose"),
+    activity: z.enum(ACTIVITY_KEYS, {
+      message: "Choose what this purpose counts as.",
+    }),
+    /**
+     * Empty means "not asked", which is the right answer for the four
+     * one-shot activities and a missing one for the other two. It arrives as
+     * "" from a picker that mounts empty, so it is normalised here rather than
+     * at each call site.
+     *
+     * ABSENT ENTIRELY is tolerated for the same reason `visitSchema` tolerates
+     * a missing `accuracy`: during a deploy an admin's cached page posts a form
+     * with no such field. It is read as "not asked", so a session purpose from
+     * such a page is still refused — by the rule below, with the sentence that
+     * explains it, rather than as an unreadable field.
+     */
+    lifecycle: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => (v === undefined || v === "" ? null : v))
+      .nullable()
+      .refine((v) => v === null || v === "Set" || v === "Done", {
+        message: "Choose Set or Done.",
+      }),
+  })
+  .superRefine((value, ctx) => {
+    if (hasLifecycle(value.activity)) {
+      if (value.lifecycle === null) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["lifecycle"],
+          message:
+            "Say whether this purpose SETS the session or campus visit, or COMPLETES one.",
+        });
+      }
+      return;
+    }
+    if (value.lifecycle !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lifecycle"],
+        message: "This activity does not have a Set or Done state.",
+      });
+    }
+  });
+
+/** Retiring and restoring both target one existing purpose, by id. */
+export const purposeUpdateSchema = z.object({
+  id: z.uuid("That purpose could not be identified."),
 });
 
 /**
@@ -120,7 +188,27 @@ export const areaSchema = z.object({
   name: name(120, "The area name"),
 });
 
-export const REMOVABLE = ["purpose", "state", "city", "area"] as const;
+/**
+ * What `removeEntry` will actually delete — and what it deliberately will not.
+ *
+ * "purpose" WAS on this list and has been taken off. Deleting a purpose is not
+ * removal, it is silent arithmetic: `purposes` is the only thing that decides
+ * which weekly metric a visit counts toward, so deleting the last one feeding a
+ * metric zeroes that metric for ever and nothing anywhere says so — Sessions Set
+ * simply comes in flat. It also strands every `daily_plans` row pointing at it,
+ * and with Log Visit's Activity selector gone there is no by-hand fallback to
+ * recover with.
+ *
+ * `purposes.is_active` (0025) is the removal path instead, through
+ * `setPurposeActive()`. Retiring takes a purpose out of the rep's picker and
+ * leaves every plan that used it able to resolve its mapping, which is the same
+ * bargain the status vocabulary makes and for the same reason.
+ *
+ * Taken off the LIST rather than only out of the panel, because deleting the
+ * button never closes the path behind it — the lesson FO020 records about the
+ * rep's abandon button. The action is the boundary; the UI is the courtesy.
+ */
+export const REMOVABLE = ["state", "city", "area"] as const;
 export type RemovableKind = (typeof REMOVABLE)[number];
 
 export const removeSchema = z.object({

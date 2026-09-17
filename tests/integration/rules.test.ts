@@ -3430,6 +3430,264 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
 
+    /**
+     * Defect B — the recovery path, which used to trap a report for ever.
+     *
+     * WHAT THE BUG WAS. Logging a visit and filing its report are one submit
+     * but TWO RPCs, so a visit can exist unreported overnight. The nightly
+     * sweep then closes the check-in the only honest way it can — checkout_at
+     * stays null and checkout_missing goes true — and an admin clearing a stuck
+     * visit from Overview does exactly the same. close_visit() came back the
+     * next morning and tried to stamp a check-out anyway: its UPDATE filtered
+     * on `checkout_at is null`, which is STILL TRUE on a swept row, so it
+     * matched, and daily_plans_checkout_missing_valid (0014) refused the write
+     * with 23514. Inside a function that is a rolled-back transaction: the
+     * report, the closed loop, all of it — and the rep got the generic "we
+     * could not file that". Every retry failed identically, and Pending's
+     * getUnreportedVisits() block went on offering a link that could not work.
+     *
+     * Migration 0030 adds `and checkout_missing = false` to that one UPDATE, so
+     * the statement matches nothing on a row somebody has already closed. The
+     * report files; the check-out honestly stays "not recorded".
+     *
+     * WHY THE ASSERTIONS COME IN PAIRS. Each test checks the report landed AND
+     * that the plan row was left alone. A "fix" that cleared checkout_missing
+     * and stamped now() would also make the first half pass — and would write a
+     * departure time of whenever the rep got round to the paperwork, which the
+     * duration report cannot tell from a measured one. The blank is the point.
+     */
+    describe("filing a report after the check-out has been closed for you", () => {
+      /**
+       * Logged, not yet filed — the state the whole defect lives in.
+       *
+       * Every field here is one the DATABASE insists on across every era of the
+       * schema, so the fixture is not quietly asserting a migration of its own:
+       * a photo (Rule 12), a status (FO024, 0027) and — because "First meeting
+       * done" is an OPEN status — the follow-up date Rule 5 demands of one.
+       */
+      const logVisit = async (
+        planId: string,
+        instituteId: string,
+        // The plan's OWN date, not today's. The meeting gate (rule 2) matches a
+        // visit against that member's daily_plans row FOR THAT DATE, so the
+        // swept cases below - whose plan is two days old - would be refused by
+        // FO001 if this defaulted to today.
+        date: string,
+      ) => {
+        const { data, error } = await repA.db
+          .from("visits")
+          .insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "meeting",
+            date,
+            daily_plan_id: planId,
+            status_set_to: "First meeting done",
+            // Both halves of the follow-up, so this fixture reads the same on
+            // either side of 0023: the trigger wanted a date AND a time from
+            // 0018, and only the date after it. A time is still ACCEPTED post
+            // 0023 - visitSchema takes one for exactly this reason - so
+            // supplying both is what makes the test honest about neither.
+            follow_up_date: iso(7),
+            follow_up_time: "11:00",
+            photo_url: photoFor(repA.id),
+          })
+          .select("id")
+          .single();
+        if (error) throw new Error(`visit: ${error.message}`);
+        return data.id as string;
+      };
+
+      it("files after the NIGHTLY SWEEP has closed the check-in", async () => {
+        // Yesterday: arrived, logged the visit, never filed the report.
+        const yesterday = iso(-2);
+        const { planId, instituteId } = await freshPlan("swept then filed", yesterday);
+        await arrive(planId);
+        const visitId = await logVisit(planId, instituteId, yesterday);
+
+        // Overnight.
+        await admin.rpc("sweep_open_checkins");
+        const { data: swept } = await admin
+          .from("daily_plans")
+          .select("checkout_missing, checkout_at")
+          .eq("id", planId)
+          .single();
+        expect(swept?.checkout_missing, "the sweep ran").toBe(true);
+        expect(swept?.checkout_at, "and invented nothing").toBeNull();
+
+        // This morning, from the link Pending still offers. Before 0030 this
+        // came back 23514 and rolled the whole report back with it.
+        const { error } = await repA.db.rpc("close_visit", {
+          p_visit_id: visitId,
+          p_daily_plan_id: planId,
+          p_notes: "Filed the morning after.",
+          p_met_name: "A Person",
+          // The browser offers a departure fix on this path like any other. It
+          // must be DISCARDED rather than stored, for the same reason now() is:
+          // it is where the rep is standing today, not where they were.
+          p_checkout_lat: 23.0225,
+          p_checkout_lng: 72.5714,
+          p_checkout_accuracy: 12,
+        });
+        expect(error, "the report files").toBeNull();
+
+        const { data: visit } = await admin
+          .from("visits")
+          .select("reported_at, notes, met_name")
+          .eq("id", visitId)
+          .single();
+        expect(visit?.reported_at, "reported_at is stamped").not.toBeNull();
+        expect(visit?.notes).toBe("Filed the morning after.");
+        expect(visit?.met_name).toBe("A Person");
+
+        const { data: plan } = await admin
+          .from("daily_plans")
+          .select(
+            "checkout_missing, checkout_at, checkout_lat, checkout_lng, checkout_accuracy",
+          )
+          .eq("id", planId)
+          .single();
+        // The honest blank. "Completed, duration not recorded" is what this
+        // pair has meant since 0014, and filing a report this morning does not
+        // change what happened yesterday evening.
+        expect(plan?.checkout_missing, "still closed by the sweep").toBe(true);
+        expect(plan?.checkout_at, "no departure time invented").toBeNull();
+        expect(plan?.checkout_lat, "and no departure position either").toBeNull();
+        expect(plan?.checkout_lng).toBeNull();
+        expect(plan?.checkout_accuracy).toBeNull();
+      });
+
+      it("files after an ADMIN has cleared the stuck visit", async () => {
+        // The same-day half. An admin unblocks a rep whose visit was orphaned —
+        // one open visit stops them working anywhere — and the report is still
+        // owed afterwards.
+        const { planId, instituteId } = await freshPlan("admin cleared then filed");
+        await arrive(planId);
+        const visitId = await logVisit(planId, instituteId, day);
+
+        const { error: clearError } = await boss.db
+          .from("daily_plans")
+          .update({ checkout_missing: true })
+          .eq("id", planId);
+        expect(clearError, "the admin can clear it").toBeNull();
+
+        const { error } = await repA.db.rpc("close_visit", {
+          p_visit_id: visitId,
+          p_daily_plan_id: planId,
+          p_notes: "Filed after the admin unblocked me.",
+        });
+        expect(error, "the report still files").toBeNull();
+
+        const { data: plan } = await admin
+          .from("daily_plans")
+          .select("checkout_missing, checkout_at, checkout_closed_by")
+          .eq("id", planId)
+          .single();
+        expect(plan?.checkout_missing).toBe(true);
+        expect(plan?.checkout_at).toBeNull();
+        // Who closed it is not rewritten by the rep filing afterwards.
+        expect(plan?.checkout_closed_by, "the admin is still named").toBe(boss.id);
+      });
+
+      it("still stamps the check-out on the ORDINARY path", async () => {
+        // The half that must not have been traded away. 0030 narrows one UPDATE
+        // and nothing else: a rep who logs and files in the same submit is
+        // checked out exactly as before, with their departure fix stored.
+        const { planId, instituteId } = await freshPlan("ordinary checkout");
+        await arrive(planId);
+        const visitId = await logVisit(planId, instituteId, day);
+
+        const { error } = await repA.db.rpc("close_visit", {
+          p_visit_id: visitId,
+          p_daily_plan_id: planId,
+          p_notes: "Filed on the spot.",
+          p_checkout_lat: 23.0225,
+          p_checkout_lng: 72.5714,
+          p_checkout_accuracy: 12,
+        });
+        expect(error).toBeNull();
+
+        const { data: plan } = await admin
+          .from("daily_plans")
+          .select("checkout_missing, checkout_at, checkout_lat, checkout_accuracy")
+          .eq("id", planId)
+          .single();
+        expect(plan?.checkout_missing).toBe(false);
+        expect(plan?.checkout_at, "the departure is recorded").not.toBeNull();
+        expect(plan?.checkout_lat).toBeCloseTo(23.0225, 4);
+        expect(plan?.checkout_accuracy).toBe(12);
+      });
+
+      it("closes an earlier Set from the recovery path too", async () => {
+        // The other half of the transaction that used to roll back with the
+        // report. A loop left open is the expensive kind of loss: Pending and
+        // the open-loops tile both read `Set AND closed_at is null`, so it would
+        // have sat there for ever with nothing able to take it down.
+        const yesterday = iso(-2);
+        const { planId, instituteId } = await freshPlan("swept loop", yesterday);
+        await arrive(planId);
+
+        const { data: setRow, error: setError } = await repA.db
+          .from("visits")
+          .insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "session",
+            lifecycle_status: "Set",
+            date: yesterday,
+            expected_date: iso(7),
+            daily_plan_id: planId,
+            // OPEN, so Rule 5 wants a follow-up - both halves, for the reason
+            // the fixture above gives.
+            status_set_to: "Session scheduled",
+            follow_up_date: iso(7),
+            follow_up_time: "11:00",
+            photo_url: photoFor(repA.id),
+          })
+          .select("id")
+          .single();
+        if (setError) throw new Error(`set: ${setError.message}`);
+
+        const { data: doneRow, error: doneError } = await repA.db
+          .from("visits")
+          .insert({
+            institute_id: instituteId,
+            member: repA.id,
+            activity: "session",
+            lifecycle_status: "Done",
+            date: yesterday,
+            daily_plan_id: planId,
+            // CLOSED, so it needs no follow-up at all.
+            status_set_to: "Session done",
+            photo_url: photoFor(repA.id),
+          })
+          .select("id")
+          .single();
+        if (doneError) throw new Error(`done: ${doneError.message}`);
+
+        await admin.rpc("sweep_open_checkins");
+
+        const { error } = await repA.db.rpc("close_visit", {
+          p_visit_id: doneRow!.id,
+          p_daily_plan_id: planId,
+          p_closes_visit_id: setRow!.id,
+        });
+        expect(error, "the whole transaction lands").toBeNull();
+
+        const { data: after } = await admin
+          .from("visits")
+          .select("id, lifecycle_status, closed_at, reported_at")
+          .in("id", [setRow!.id, doneRow!.id]);
+
+        const set = after!.find((r) => r.id === setRow!.id)!;
+        const done = after!.find((r) => r.id === doneRow!.id)!;
+        expect(set.lifecycle_status, "the Set stays a Set").toBe("Set");
+        expect(set.closed_at, "and the loop comes down").not.toBeNull();
+        expect(done.reported_at, "and the report is filed").not.toBeNull();
+      });
+    });
+
+
     describe.skipIf(!has0019)("0019 — the closing report's final fields", () => {
       it("guards an arrival created by INSERT, not only by UPDATE", async () => {
         // The gap a test found rather than a reading did. 0018 attached both
