@@ -1,0 +1,42 @@
+# Cache-Control for the static assets Cloudflare serves directly.
+#
+# WHY THIS FILE EXISTS. The Worker never sees a request for /_next/static — the
+# ASSETS binding in wrangler.jsonc answers those itself, so Next's own asset
+# caching never runs and Workers Assets applies its default instead:
+# `public, max-age=0, must-revalidate`. That makes the browser re-validate every
+# chunk on every navigation. The audit measured about eleven conditional
+# requests, roughly 2.4 seconds, on each page load — all of them 304s for files
+# that could not possibly have changed.
+#
+# WHY IMMUTABLE IS SAFE HERE, AND ONLY HERE. Everything under /_next/static is
+# content-hashed by the build: the hash IS the content, so a file at a given
+# name can never change meaning. A new build produces new names, and the HTML
+# that references them is not cached by this file at all — so a deploy is picked
+# up on the next page load, not in a year. That is the whole bargain, and it is
+# only true of hashed filenames.
+#
+# WHAT IS DELIBERATELY NOT HERE:
+#
+#   HTML and RSC payloads   not matched, and must not be. They are how a new
+#                           build is discovered; caching them would pin reps to
+#                           an old deploy.
+#   /api/*                  never reaches this file — it is the Worker's, not
+#                           the asset store's — and /api/health in particular
+#                           must stay uncached.
+#   /brand/*                NOT content-hashed. kubeats-logo.png keeps its name
+#                           across builds, so a year of immutable caching would
+#                           make replacing the logo impossible for existing
+#                           visitors. Left on the default on purpose.
+#
+# WHY A FILE RATHER THAN CONFIG. `assets` in wrangler.jsonc takes only
+# `directory`, `binding`, `html_handling`, `not_found_handling` and
+# `run_worker_first` — there is no headers block to put this in. Workers Assets
+# reads `_headers` from the ROOT of the assets directory, which is
+# `.open-next/assets`; Next copies everything in `public/` there, which is why
+# this lives in public/ and not at the repo root.
+#
+# The `*` is a splat: it matches across `/`, so this covers
+# /_next/static/chunks/… and /_next/static/media/… as well as the top level.
+
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
