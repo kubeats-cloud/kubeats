@@ -71,6 +71,91 @@ const admin = configured
 const photoFor = (memberId: string) => `${memberId}/${crypto.randomUUID()}.jpg`;
 
 /**
+ * A fixture institute, WITH AN OWNER — which is the whole reason this exists.
+ *
+ * Every institute here is created through the service-role `admin` client, so
+ * `institutes.registered_by`'s `default auth.uid()` evaluates to NULL. That was
+ * harmless until migration 0028 made an institute belong to exactly one rep:
+ * `enforce_plan_institute_owned` (FO026) refuses any plan row whose institute's
+ * owner is not the planner, and a NULL owner matches nobody. 0028's own header
+ * says so — "AN ORPHANED INSTITUTE IS REFUSED by the same predicate, and that
+ * is correct."
+ *
+ * So the owner is a REQUIRED argument rather than a defaulted one. A fixture
+ * that forgets it should not compile, because the failure it causes otherwise
+ * is twenty-four tests deep in another suite with a message about somebody
+ * else's institute.
+ *
+ * `campus_id` is required for the same family of reasons — FO022 refuses an
+ * institute with no campus, and a rep only sees their own campus — and is left
+ * to the caller because the campus a fixture belongs to is a fact about the
+ * suite, not about this helper.
+ */
+const makeInstitute = async (
+  owner: string,
+  campusId: string,
+  label: string,
+  extra: Record<string, unknown> = {},
+) => {
+  const { data, error } = await admin
+    .from("institutes")
+    .insert({
+      name: `${TAG} ${label}`,
+      type: "school",
+      boards: BOARDS,
+      campus_id: campusId,
+      // The half that was missing everywhere. See above.
+      registered_by: owner,
+      ...extra,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(`institute(${label}): ${error.message}`);
+  return data.id as string;
+};
+
+/**
+ * The status a SETUP-ONLY visit carries, and why this particular one.
+ *
+ * `enforce_status_required` (FO024, migration 0027) refuses any visit insert
+ * with no `status_set_to` — service role included, deliberately, because
+ * Pending is built on every visit saying where it left the institute. Fixtures
+ * written before 0027 supply none, so they are all refused.
+ *
+ * CLOSED, so it settles nothing else. `enforce_follow_up_when_open` (FO016)
+ * demands a `follow_up_date` on an OPEN status, so an open default would trade
+ * one refusal for another. Of the four closed-and-active statuses — Session
+ * done, Campus visit done, RSVP received, Will not come — this one is already
+ * idiomatic in this file.
+ *
+ * FOR SETUP ONLY. Any test that asserts on a status, or counts anything by one,
+ * passes its own: a default that quietly decided what a test counted would be
+ * far worse than the refusal it replaced. `visitRow` takes `status_set_to` like
+ * any other field, and the call sites that care set it.
+ */
+const SETUP_STATUS = "Session done";
+
+/**
+ * A visit row with the two things every visit must now carry.
+ *
+ * Rule 12 (0006) requires a photo; FO024 (0027) requires a status. Both are
+ * defaulted here so a fixture states only what it is actually about, and both
+ * can be overridden — including to null, which is what the tests that PROVE
+ * those rules do.
+ *
+ * Spread last, so an explicit `photo_url: null` or `status_set_to: null`
+ * survives rather than being quietly filled back in.
+ */
+const visitRow = (
+  fields: { member: string; institute_id: string } & Record<string, unknown>,
+) => ({
+  activity: "olympiad",
+  photo_url: photoFor(fields.member),
+  status_set_to: SETUP_STATUS,
+  ...fields,
+});
+
+/**
  * One institute's status journey, oldest first. Shared by the feature C suite
  * that checks the recording and the feature D suite that checks planning does
  * NOT record — both are asking the same table the same question.
@@ -338,6 +423,152 @@ if (configured && !has0011) {
 }
 
 /**
+ * Migration 0033 drops daily_plans_unique_per_day, so one institute may be
+ * visited more than once in a day.
+ *
+ * Probed by asking pg_constraint through a lookup the anon/service client can
+ * actually reach — there is none, so it is probed the way the rule itself is
+ * felt: insert two plan rows for one institute on one day and see whether the
+ * second is refused. Done against a throwaway institute and cleaned up
+ * immediately, because a probe must not leave a row behind.
+ *
+ * Reported as "applied" only when the second insert succeeds. A 23505 means the
+ * constraint is still standing, which is the correct state for a database that
+ * has the new code but not yet this migration — the deploy order is code first,
+ * migration second, so that window is expected rather than broken.
+ */
+const has0033 = configured
+  ? await (async () => {
+      // A FIXED PAST DATE, not iso(). This runs at module scope, where `iso` is
+      // still in its temporal dead zone — and the probe does not care which day
+      // it uses, only that two rows name the same one. Nothing on daily_plans
+      // constrains the date, and a 2020 date cannot collide with live work.
+      const PROBE_DAY = "2020-01-01";
+      let campusId: string | null = null;
+      let repId: string | null = null;
+      let instituteId: string | null = null;
+
+      try {
+        const { data: campus } = await admin
+          .from("campuses")
+          .insert({ name: `${TAG} probe campus`, city: "Testville", active: false })
+          .select("id")
+          .single();
+        if (!campus) return false;
+        campusId = campus.id as string;
+
+        const { data: probeRep } = await admin.auth.admin.createUser({
+          email: `${TAG}.probe@example.com`.replace(/:/g, "."),
+          password: `${TAG}-passphrase`,
+          email_confirm: true,
+        });
+        if (!probeRep?.user) return false;
+        repId = probeRep.user.id;
+        await admin.from("profiles").insert({
+          id: repId,
+          name: `${TAG} probe`,
+          role: "rep",
+          campus_id: campusId,
+        });
+
+        // Owned by the probe rep, because FO026 refuses a plan row naming an
+        // institute the planner does not own — even for the service role.
+        const { data: institute } = await admin
+          .from("institutes")
+          .insert({
+            name: `${TAG} probe School`,
+            type: "school",
+            boards: BOARDS,
+            city: "Bengaluru",
+            state: "Karnataka",
+            registered_by: repId,
+            campus_id: campusId,
+          })
+          .select("id")
+          .single();
+        if (!institute) return false;
+        instituteId = institute.id as string;
+
+        const row = {
+          member: repId,
+          date: PROBE_DAY,
+          institute_id: instituteId,
+          purpose: `${TAG} probe`,
+        };
+        // THE FIRST INSERT HAS TO SUCCEED, or the second one proves nothing.
+        // Without this check a probe that failed for an unrelated reason — a
+        // missing column, a trigger refusing the row — would leave no first row
+        // for the second to collide with, the second would succeed, and the
+        // probe would report 0033 as APPLIED on a database that still has the
+        // constraint. Every test below would then run and fail confusingly.
+        if ((await admin.from("daily_plans").insert(row)).error !== null) return false;
+        return (await admin.from("daily_plans").insert(row)).error === null;
+      } catch {
+        return false;
+      } finally {
+        // In reverse dependency order, and in a finally so a probe that threw
+        // part-way still takes its rows with it. Campuses are last: profiles
+        // and institutes reference them ON DELETE RESTRICT.
+        if (instituteId) {
+          await admin.from("daily_plans").delete().eq("institute_id", instituteId);
+          await admin.from("institutes").delete().eq("id", instituteId);
+        }
+        if (repId) {
+          await admin.from("profiles").delete().eq("id", repId);
+          await admin.auth.admin.deleteUser(repId);
+        }
+        if (campusId) await admin.from("campuses").delete().eq("id", campusId);
+      }
+    })()
+  : false;
+
+if (configured && !has0033) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0033 is not applied to this project.",
+      "    The several-visits-a-day suite is being SKIPPED, not passing — nothing",
+      "    is checking that FO013 survived dropping the per-day uniqueness.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
+/**
+ * Migration 0032 adds public.delete_member().
+ *
+ * Probed by its REFUSAL, not by its success, for the obvious reason: the only
+ * way to prove the function runs is to delete somebody. A database without it
+ * answers PGRST202 ("could not find the function"); one with it refuses this
+ * call some other way and that is a yes.
+ *
+ * Refuses HOW depends on who is asking, and the service-role client here is the
+ * interesting case: `is_admin()` reads `auth.uid()`, which is null for the
+ * service role, so this probe is turned away with 42501 rather than reaching
+ * the member check. That is the function working as specified — a destructive
+ * delete requires a named admin and has no trusted-context bypass, unlike the
+ * guard triggers where a null caller means the nightly sweep. Every test below
+ * calls it through `boss.db`, which has a session and a profile.
+ */
+const has0032 = configured
+  ? await admin
+      .rpc("delete_member", { p_member: "00000000-0000-4000-8000-000000000000" })
+      .then(({ error }) => error?.code !== "PGRST202")
+  : false;
+
+if (configured && !has0032) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0032 is not applied to this project.",
+      "    The member-teardown suite is being SKIPPED, not passing — nothing is",
+      "    checking that a delete refuses rather than wipes a colleague's work.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
+/**
  * Migration 0010 adds the institute_statuses lookup and the three event
  * statuses. Like 0008's suite, this one is the only thing that can catch the
  * app's catalogue and the database's table disagreeing about which statuses
@@ -556,7 +787,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     // is written, so it is removed again immediately.
     const probe = await admin
       .from("visits")
-      .insert({ institute_id: instituteId, member: repA.id, activity: "olympiad", date: iso() })
+      .insert(visitRow({ institute_id: instituteId, member: repA.id, date: iso() }))
       .select("id")
       .maybeSingle();
     has0006 = Boolean(probe.error);
@@ -628,10 +859,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   describe("Rule 2 — the meeting gate", () => {
     it("refuses a meeting for an institute that is not on that day's plan", async () => {
       const { error } = await repA.db.from("visits").insert({
-        institute_id: instituteId,
-        member: repA.id,
-        photo_url: photoFor(repA.id),
-        activity: "meeting",
+        ...visitRow({ institute_id: instituteId, member: repA.id, activity: "meeting" }),
         date: iso(),
       });
 
@@ -642,10 +870,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     it("refuses it even for the service role, which bypasses RLS entirely", async () => {
       // Proves the gate is a trigger and not a policy: no key gets past it.
       const { error } = await admin.from("visits").insert({
-        institute_id: instituteId,
-        member: repA.id,
-        photo_url: photoFor(repA.id),
-        activity: "meeting",
+        ...visitRow({ institute_id: instituteId, member: repA.id, activity: "meeting" }),
         date: iso(),
       });
 
@@ -670,10 +895,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(planError).toBeNull();
 
       const { error } = await repA.db.from("visits").insert({
-        institute_id: instituteId,
-        member: repA.id,
-        photo_url: photoFor(repA.id),
-        activity: "meeting",
+        ...visitRow({ institute_id: instituteId, member: repA.id, activity: "meeting" }),
         date: iso(),
       });
       expect(error).toBeNull();
@@ -682,10 +904,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     it("keys the gate on the day, not just the institute", async () => {
       // The plan above is for today; a meeting dated tomorrow is still ungated.
       const { error } = await repA.db.from("visits").insert({
-        institute_id: instituteId,
-        member: repA.id,
-        photo_url: photoFor(repA.id),
-        activity: "meeting",
+        ...visitRow({ institute_id: instituteId, member: repA.id, activity: "meeting" }),
         date: iso(1),
       });
       expect(error?.code).toBe(CHECK_VIOLATION);
@@ -728,16 +947,25 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("dates a plan row it was not given a date for", async () => {
-      // repB, not repA: the meeting-gate suite above leaves a plan row on
-      // (repA, today, instituteId) that the weekly-metrics suite below then
-      // marks held and counts, so it has to stay. daily_plans is unique on
-      // (member, date, institute_id), and this row defaults to today — under
-      // repA that is the same key, which made this a duplicate-key failure.
+      /*
+       * repB AND AN INSTITUTE OF THEIR OWN, for a reason that has changed.
+       *
+       * It used repB against the shared institute because
+       * `daily_plans_unique_per_day` made (repA, today, instituteId) a
+       * duplicate of the row the meeting-gate suite leaves behind. Migration
+       * 0033 dropped that constraint, so the collision is gone — but FO026
+       * arrived in its place: the shared institute is repA's, and a plan row
+       * naming an institute the planner does not own is refused.
+       *
+       * Its own school settles both at once, and leaves the row the
+       * weekly-metrics suite counts completely alone.
+       */
+      const ownSchool = await makeInstitute(repB.id, campusA, "default-date school");
       const { data, error } = await admin
         .from("daily_plans")
         .insert({
           member: repB.id,
-          institute_id: instituteId,
+          institute_id: ownSchool,
           purpose: `${TAG} default-date`,
         })
         .select("id, date")
@@ -751,12 +979,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     it("dates a visit it was not given a date for", async () => {
       const { data, error } = await admin
         .from("visits")
-        .insert({
-          institute_id: instituteId,
-          member: repA.id,
-          activity: "olympiad",
-          photo_url: photoFor(repA.id),
-        })
+        .insert(visitRow({ institute_id: instituteId, member: repA.id }))
         .select("id, date")
         .single();
 
@@ -779,12 +1002,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .is("checkout_at", null)
         .eq("checkout_missing", false);
 
-      const institute = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} app_today school`, type: "school", boards: BOARDS, campus_id: campusA })
-        .select("id")
-        .single();
-      const houseId = institute.data!.id as string;
+      const houseId = await makeInstitute(repA.id, campusA, "app_today school");
 
       const plan = await repA.db
         .from("daily_plans")
@@ -809,6 +1027,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_activity: "meeting",
         p_photo_url: photoFor(repA.id),
         p_daily_plan_id: plan.data!.id,
+        // FO024 (0027): every visit says where it left the institute. Closed,
+        // so FO016 does not then want a follow-up date as well.
+        p_status_set_to: SETUP_STATUS,
       });
 
       expect(error).toBeNull();
@@ -836,12 +1057,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     it("still refuses one planned for the day before", async () => {
       // The gate did not get looser, only consistent.
-      const institute = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} yesterday school`, type: "school", boards: BOARDS, campus_id: campusA })
-        .select("id")
-        .single();
-      const houseId = institute.data!.id as string;
+      const houseId = await makeInstitute(repA.id, campusA, "yesterday school");
 
       const plan = await admin
         .from("daily_plans")
@@ -865,6 +1081,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_activity: "meeting",
         p_photo_url: photoFor(repA.id),
         p_daily_plan_id: plan.data!.id,
+        p_status_set_to: SETUP_STATUS,
       });
       expect(error?.code).toBe("FO001");
 
@@ -927,38 +1144,45 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   /* ---------------------------------------------------------------- */
 
   describe("Rule 12 — the visit photo is mandatory", () => {
+    /**
+     * AN ARRIVAL OF ITS OWN, because FO009 covers every activity.
+     *
+     * The presence guarantee (0018) refuses any visit with no check-in behind
+     * it, whatever the visit is testing. These tests reached the photo CHECK
+     * only because an earlier suite happened to have checked repA in at the
+     * shared institute first — running the suite alone gives FO009 instead of
+     * 23514, and a test that depends on another suite's leftovers is a test
+     * that passes for the wrong reason.
+     */
+    beforeAll(async () => {
+      if (configured) await ensureArrival(repA.id, instituteId, iso());
+    });
+
     it("refuses a direct insert with no photo, bypassing the form entirely", async (ctx) => {
       if (!has0006) ctx.skip();
-      const { error } = await repA.db.from("visits").insert({
-        institute_id: instituteId,
-        member: repA.id,
-        activity: "olympiad",
-        date: iso(),
-      });
+      const { error } = await repA.db.from("visits").insert(
+        // photo_url NULL deliberately — that is the rule under test. The status
+        // is supplied so FO024 (0027) does not refuse the row first and hide
+        // the photo CHECK behind a different code.
+        visitRow({ institute_id: instituteId, member: repA.id, date: iso(), photo_url: null }),
+      );
       expect(error?.code).toBe(CHECK_VIOLATION);
       expect(error?.message).toMatch(/visits_photo_required/i);
     });
 
     it("refuses it for the service role too, so no key gets past it", async (ctx) => {
       if (!has0006) ctx.skip();
-      const { error } = await admin.from("visits").insert({
-        institute_id: instituteId,
-        member: repA.id,
-        activity: "olympiad",
-        date: iso(),
-      });
+      const { error } = await admin.from("visits").insert(
+        visitRow({ institute_id: instituteId, member: repA.id, date: iso(), photo_url: null }),
+      );
       expect(error?.code).toBe(CHECK_VIOLATION);
     });
 
     it("refuses an empty string, which is not a photograph either", async (ctx) => {
       if (!has0006) ctx.skip();
-      const { error } = await repA.db.from("visits").insert({
-        institute_id: instituteId,
-        member: repA.id,
-        activity: "olympiad",
-        date: iso(),
-        photo_url: "   ",
-      });
+      const { error } = await repA.db.from("visits").insert(
+        visitRow({ institute_id: instituteId, member: repA.id, date: iso(), photo_url: "   " }),
+      );
       expect(error?.code).toBe(CHECK_VIOLATION);
     });
 
@@ -975,13 +1199,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       if (!has0006) ctx.skip();
       const made = await repA.db
         .from("visits")
-        .insert({
-          institute_id: instituteId,
-          member: repA.id,
-          activity: "olympiad",
-          date: iso(),
-          photo_url: photoFor(repA.id),
-        })
+        .insert(visitRow({ institute_id: instituteId, member: repA.id, date: iso() }))
         .select("id")
         .single();
       if (made.error) throw new Error(`visit: ${made.error.message}`);
@@ -1018,13 +1236,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       if (!has0006) ctx.skip();
       const made = await repA.db
         .from("visits")
-        .insert({
-          institute_id: instituteId,
-          member: repA.id,
-          activity: "olympiad",
-          date: iso(),
-          photo_url: photoFor(repA.id),
-        })
+        .insert(visitRow({ institute_id: instituteId, member: repA.id, date: iso() }))
         .select("id")
         .single();
       if (made.error) throw new Error(`visit: ${made.error.message}`);
@@ -1043,13 +1255,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       if (!has0006) ctx.skip();
       const { data, error } = await repA.db
         .from("visits")
-        .insert({
-          institute_id: instituteId,
-          member: repA.id,
-          activity: "olympiad",
-          date: iso(),
-          photo_url: photoFor(repA.id),
-        })
+        .insert(visitRow({ institute_id: instituteId, member: repA.id, date: iso() }))
         .select("id")
         .single();
       expect(error).toBeNull();
@@ -1171,13 +1377,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("stops rep B writing a visit in rep A's name", async () => {
-      const { error } = await repB.db.from("visits").insert({
-        institute_id: instituteId,
-        member: repA.id,
-        photo_url: photoFor(repA.id),
-        activity: "olympiad",
-        date: iso(),
-      });
+      const { error } = await repB.db.from("visits").insert(
+        visitRow({ institute_id: instituteId, member: repA.id, date: iso() }),
+      );
 
       expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
     });
@@ -1233,13 +1435,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     beforeAll(async () => {
       const { data, error } = await admin
         .from("visits")
-        .insert({
-          institute_id: instituteId,
-          member: repA.id,
-          photo_url: photoFor(repA.id),
-          activity: "olympiad",
-          date: iso(),
-        })
+        .insert(visitRow({ institute_id: instituteId, member: repA.id, date: iso() }))
         .select("id")
         .single();
       if (error) throw new Error(`visit: ${error.message}`);
@@ -1311,11 +1507,26 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   /* ---------------------------------------------------------------- */
 
   describe.skipIf(!has0005)("admin-assigned visits", () => {
+    /**
+     * AN INSTITUTE THE ASSIGNEE OWNS.
+     *
+     * This suite assigned the shared `instituteId`, which belongs to repA, to
+     * repB. FO023 — widened by 0028 from "the rep's campus" to "the rep's
+     * institute" — refuses that, and correctly: an assignment a rep cannot then
+     * see is an entry on a Dashboard for a school they cannot open.
+     *
+     * So the fixture now assigns what an admin would actually assign.
+     */
+    let repBSchool: string;
+    beforeAll(async () => {
+      repBSchool = await makeInstitute(repB.id, campusA, "assigned to rep B");
+    });
+
     it("lets an admin put a visit on a rep's plan", async () => {
       const { error } = await boss.db.from("daily_plans").insert({
         member: repB.id,
         date: iso(2),
-        institute_id: instituteId,
+        institute_id: repBSchool,
         purpose: "Other",
         assigned_by: boss.id,
       });
@@ -1336,7 +1547,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { error } = await repA.db.from("daily_plans").insert({
         member: repB.id,
         date: iso(3),
-        institute_id: instituteId,
+        // repB's own, so FO023 has nothing to say and the ONLY thing left to
+        // refuse this is the RLS policy — which is what this test is about.
+        institute_id: repBSchool,
         purpose: "Other",
       });
       expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
@@ -1355,7 +1568,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     it("lets the assigned rep mark it held without losing who assigned it", async () => {
       // The update a rep makes when they log the meeting. It must not read as
-      // an attempt to change the assignment.
+      // an attempt to change the assignment. Against repB's OWN institute, so
+      // FO023 does not refuse the assignment before the update is reached.
       const { error } = await repB.db
         .from("daily_plans")
         .update({ meetings_actual: 1 })
@@ -1491,15 +1705,19 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       // the one dated outside the week — the presence guarantee is keyed on the
       // visit's own date, so that one needs its own.
       await ensureArrival(repA.id, instituteId, iso());
+      // GUARDRAIL: every status here is stated, never defaulted. These rows are
+      // what the weekly metrics are counted FROM, so a factory default silently
+      // choosing one would silently decide what this test proves.
       await admin.from("visits").insert([
-        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "session", lifecycle_status: "Set", date: iso(), expected_date: iso(7) },
-        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "session", lifecycle_status: "Done", date: iso() },
-        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), activity: "olympiad", date: iso() },
+        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), status_set_to: "Session scheduled", follow_up_date: iso(7), activity: "session", lifecycle_status: "Set", date: iso(), expected_date: iso(7) },
+        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), status_set_to: "Session done", activity: "session", lifecycle_status: "Done", date: iso() },
+        { institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id), status_set_to: "Session done", activity: "olympiad", date: iso() },
       ]);
 
       await ensureArrival(repA.id, instituteId, iso(-40));
       await admin.from("visits").insert({
         institute_id: instituteId, member: repA.id, photo_url: photoFor(repA.id),
+        status_set_to: "Session done",
         activity: "olympiad", date: iso(-40),
       });
     });
@@ -1826,23 +2044,23 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
      */
     let subjectId: string;
 
-    /** A fresh institute per test, so one test's journey is not another's. */
-    const makeInstitute = async (label: string) => {
-      const { data, error } = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, registered_by: repA.id, campus_id: campusA })
-        .select("id")
-        .single();
-      if (error) throw new Error(`institute: ${error.message}`);
-      return data.id as string;
-    };
+    /**
+     * A fresh institute per test, so one test's journey is not another's.
+     *
+     * Delegates to the module-level `makeInstitute` rather than repeating the
+     * insert. It cannot keep its own name and do that — a local
+     * `makeInstitute` calling `makeInstitute` is infinite recursion — so the
+     * wrapper is named for what it supplies: this suite's owner and campus.
+     */
+    const historyInstitute = (label: string) =>
+      makeInstitute(repA.id, campusA, label);
 
     beforeAll(async () => {
-      subjectId = await makeInstitute("history subject");
+      subjectId = await historyInstitute("history subject");
     });
 
     it("records a change made by a direct update, and who made it", async () => {
-      const id = await makeInstitute("direct update");
+      const id = await historyInstitute("direct update");
 
       const { error } = await repA.db
         .from("institutes")
@@ -1861,7 +2079,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     it("still maintains 0001's audit columns alongside it", async () => {
       // Feature C sits beside institutes_touch_status rather than replacing it,
       // so the pair that already existed has to keep working.
-      const id = await makeInstitute("audit columns");
+      const id = await historyInstitute("audit columns");
       await repA.db.from("institutes").update({ status: "Session scheduled" }).eq("id", id);
 
       const { data: row } = await admin
@@ -1879,7 +2097,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("appends rather than overwrites, so the journey grows", async () => {
-      const id = await makeInstitute("journey");
+      const id = await historyInstitute("journey");
 
       for (const status of [
         "First meeting done",
@@ -1909,7 +2127,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("records nothing when the status is re-saved unchanged", async () => {
-      const id = await makeInstitute("no-op save");
+      const id = await historyInstitute("no-op save");
       await repA.db.from("institutes").update({ status: "Session done" }).eq("id", id);
       // Same value again, plus an unrelated edit in the same statement.
       await repA.db
@@ -1921,13 +2139,13 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("records nothing when an edit does not touch the status", async () => {
-      const id = await makeInstitute("unrelated edit");
+      const id = await historyInstitute("unrelated edit");
       await repA.db.from("institutes").update({ city: "Vadodara" }).eq("id", id);
       expect(await historyFor(id)).toHaveLength(0);
     });
 
     it("links the visit when the change came through log_visit()", async () => {
-      const id = await makeInstitute("via log_visit");
+      const id = await historyInstitute("via log_visit");
       // A visit needs an arrival behind it from 0018 (FO009).
       await ensureArrival(repA.id, id, iso());
 
@@ -1953,7 +2171,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("does not attribute a direct change to an unrelated earlier visit", async () => {
-      const id = await makeInstitute("no mislink");
+      const id = await historyInstitute("no mislink");
       // A visit needs an arrival behind it from 0018 (FO009).
       await ensureArrival(repA.id, id, iso());
 
@@ -1981,7 +2199,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("keeps the history when the visit that caused it is deleted", async () => {
-      const id = await makeInstitute("visit deleted");
+      const id = await historyInstitute("visit deleted");
       // A visit needs an arrival behind it from 0018 (FO009).
       await ensureArrival(repA.id, id, iso());
       const { data: visitId } = await repA.db.rpc("log_visit", {
@@ -2008,23 +2226,47 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(error?.code).toBe("23503");
     });
 
-    it("is readable by any signed-in rep — it is the registry's history", async () => {
-      const id = await makeInstitute("shared read");
+    /**
+     * NARROWED BY 0028, and this test used to assert the opposite.
+     *
+     * It read "is readable by any signed-in rep - it is the registry's
+     * history", and under 0020b that was true: the history policy was
+     * campus-scoped, so a colleague on the same campus saw the journey of an
+     * institute they had never touched.
+     *
+     * 0028 made an institute belong to exactly ONE rep and narrowed this policy
+     * with it — its own assertion block refuses to apply unless
+     * `institute_status_history_select` mentions `registered_by`. So the
+     * journey now follows the institute's owner, like the institute itself.
+     *
+     * Asserted from BOTH sides, because "the owner can read it" and "a
+     * colleague cannot" are two different guarantees and a test that checked
+     * only one of them would pass on a policy that denied everybody.
+     */
+    it("follows the institute's owner, not the campus", async () => {
+      const id = await historyInstitute("shared read");
       await repA.db.from("institutes").update({ status: "Session done" }).eq("id", id);
 
-      // repB had nothing to do with this institute and still sees its journey,
-      // unlike visits, which stay with their owner.
-      const { data, error } = await repB.db
+      // The owner sees the journey.
+      const mine = await repA.db
         .from("institute_status_history")
         .select("status")
         .eq("institute_id", id);
+      expect(mine.error).toBeNull();
+      expect(mine.data?.map((r) => r.status)).toEqual(["Session done"]);
 
-      expect(error).toBeNull();
-      expect(data?.map((r) => r.status)).toEqual(["Session done"]);
+      // A colleague on the same campus does not. RLS answers an unreadable row
+      // with absence rather than an error, so [] IS the refusal.
+      const theirs = await repB.db
+        .from("institute_status_history")
+        .select("status")
+        .eq("institute_id", id);
+      expect(theirs.error).toBeNull();
+      expect(theirs.data ?? []).toEqual([]);
     });
 
     it("cannot be written, rewritten or erased by a rep", async () => {
-      const id = await makeInstitute("append only");
+      const id = await historyInstitute("append only");
       await repA.db.from("institutes").update({ status: "Session done" }).eq("id", id);
 
       const inserted = await repA.db.from("institute_status_history").insert({
@@ -2047,7 +2289,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     it("goes when the institute goes", async () => {
-      const id = await makeInstitute("cascade");
+      const id = await historyInstitute("cascade");
       await repA.db.from("institutes").update({ status: "Session done" }).eq("id", id);
       expect(await historyFor(id)).toHaveLength(1);
 
@@ -2068,18 +2310,13 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
      * actual request, and nothing else here would notice.
      */
     const closedInstitute = async (label: string, status: string) => {
-      const { data, error } = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, registered_by: repA.id, campus_id: campusA })
-        .select("id")
-        .single();
-      if (error) throw new Error(`institute: ${error.message}`);
+      const id = await makeInstitute(repA.id, campusA, label);
       const { error: statusError } = await repA.db
         .from("institutes")
         .update({ status })
-        .eq("id", data.id);
+        .eq("id", id);
       if (statusError) throw new Error(`status: ${statusError.message}`);
-      return data.id as string;
+      return id;
     };
 
     it("can be added to today's plan, like any other", async () => {
@@ -2203,7 +2440,21 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(planned).toHaveLength(3);
     });
 
-    it("still refuses a second entry for the same institute on the same day", async () => {
+    /**
+     * INVERTED BY MIGRATION 0033, and it is the one assertion in this file that
+     * asks the opposite question it used to.
+     *
+     * It read "still refuses a second entry for the same institute on the same
+     * day" and expected 23505 from `daily_plans_unique_per_day`. The client
+     * asked for a rep to be able to visit one school twice in a day - a morning
+     * meeting and an afternoon session - so that constraint is dropped and the
+     * second row is now the FEATURE rather than the error.
+     *
+     * Skipped, loudly, until 0033 is applied: before it, the old rule is still
+     * correct and this test would fail for a reason that has nothing to do with
+     * the code.
+     */
+    it.skipIf(!has0033)("allows a second entry for the same institute on the same day", async () => {
       const id = await closedInstitute("same day twice", "Session done");
       const entry = {
         member: repA.id,
@@ -2213,10 +2464,88 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       };
 
       expect((await repA.db.from("daily_plans").insert(entry)).error).toBeNull();
-      // The app upserts on this conflict, which is how re-planning corrects a
-      // purpose rather than erroring. The constraint underneath still holds.
+      // The app INSERTS now rather than upserting on a conflict that no longer
+      // exists - which is why the deploy order is code first, migration second.
       const second = await repA.db.from("daily_plans").insert(entry);
-      expect(second.error?.code).toBe("23505");
+      expect(second.error, "a second visit to one institute is allowed").toBeNull();
+
+      const { data: rows } = await admin
+        .from("daily_plans")
+        .select("id")
+        .eq("member", repA.id)
+        .eq("date", iso())
+        .eq("institute_id", id);
+      expect(rows ?? [], "two separate plan rows, not one corrected one").toHaveLength(2);
+    });
+
+    /**
+     * THE RULE THAT MUST SURVIVE 0033, asserted right beside the one that goes.
+     *
+     * Several visits a day is the feature; several visits AT ONCE is not. The
+     * client's ask was explicit that a rep must finish one visit before
+     * checking in anywhere else, and that is FO013 - guaranteed by the partial
+     * unique index `daily_plans_one_open_visit`, keyed on (member) alone.
+     *
+     * This is the test that would catch 0033 taking the wrong rule with it.
+     * Both plan rows are for the SAME institute on the SAME day, which is
+     * exactly what the dropped constraint used to prevent, so it can only be
+     * written at all once 0033 has landed - and it proves the two rules are
+     * independent rather than one having depended on the other.
+     */
+    it.skipIf(!has0033 || !has0018)("still refuses a second check-in while one is open (FO013)", async () => {
+      const id = await closedInstitute("two arrivals", "Session done");
+      const day = iso();
+
+      const { data: rows, error: planError } = await repA.db
+        .from("daily_plans")
+        .insert([
+          { member: repA.id, date: day, institute_id: id, purpose: `${TAG} morning` },
+          { member: repA.id, date: day, institute_id: id, purpose: `${TAG} afternoon` },
+        ])
+        .select("id");
+      expect(planError, "two plan rows for one institute").toBeNull();
+      expect(rows ?? []).toHaveLength(2);
+
+      // Free this rep first: other suites leave arrivals open, and FO013 is
+      // global to the member rather than scoped to a day or an institute.
+      await admin
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("member", repA.id)
+        .not("checkin_at", "is", null)
+        .is("checkout_at", null)
+        .eq("checkout_missing", false);
+
+      const arrive = (planId: string) =>
+        repA.db
+          .from("daily_plans")
+          .update({
+            checkin_at: new Date().toISOString(),
+            checkin_lat: 23.03,
+            checkin_lng: 72.53,
+          })
+          .eq("id", planId);
+
+      expect((await arrive(rows![0].id)).error, "the first arrival is fine").toBeNull();
+
+      // The second is refused even though it is the same institute on the same
+      // day - the rep is inside a visit, and that is the only thing FO013 asks.
+      // Either code is the rule working: the trigger names the institute, the
+      // index settles the race.
+      const second = await arrive(rows![1].id);
+      expect(["FO013", "23505"]).toContain(second.error?.code);
+
+      // ...and it goes through once the first is finished, which is the half
+      // that proves this is "one at a time" and not "one a day".
+      await admin
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("id", rows![0].id);
+
+      expect(
+        (await arrive(rows![1].id)).error,
+        "a second visit is allowed once the first is closed",
+      ).toBeNull();
     });
   });
 
@@ -2384,13 +2713,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
     beforeAll(async () => {
       subject = await makeMember("rep", "targets", campusA);
-      const { data, error } = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} targets school`, type: "school", boards: BOARDS, campus_id: campusA })
-        .select("id")
-        .single();
-      if (error) throw new Error(`institute: ${error.message}`);
-      houseId = data.id;
+      // Owned by the SUBJECT, not by repA: every plan row and visit in this
+      // suite is the subject's, and FO026 asks that they match.
+      houseId = await makeInstitute(subject.id, campusA, "targets school");
     });
 
     afterAll(async () => {
@@ -2647,12 +2972,15 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       await ensureArrival(subject.id, houseId, old);
 
       await admin.from("visits").insert([
+        // GUARDRAIL: stated, not defaulted - these rows are what the period
+        // ranges are counted over.
         {
           institute_id: houseId,
           member: subject.id,
           activity: "olympiad",
           date: day,
           photo_url: photoFor(subject.id),
+          status_set_to: "Session done",
         },
         {
           institute_id: houseId,
@@ -2660,6 +2988,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           activity: "olympiad",
           date: old,
           photo_url: photoFor(subject.id),
+          status_set_to: "Session done",
         },
       ]);
 
@@ -2688,26 +3017,25 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       // makes the count depend on test order, which is how this one was wrong
       // the first time.
       const coverDay = iso(-6);
-      const { data: second } = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} second school`, type: "school", boards: BOARDS, campus_id: campusA })
-        .select("id")
-        .single();
+      const secondId = await makeInstitute(subject.id, campusA, "second school");
 
       // An arrival at each school on that day (FO009). Two visits at the first
       // school share one arrival — Q3 allows several activities in one cycle,
       // which is exactly what this test needs.
       await ensureArrival(subject.id, houseId, coverDay);
-      await ensureArrival(subject.id, second!.id, coverDay);
+      await ensureArrival(subject.id, secondId, coverDay);
 
       // Three visits, two schools: the first school twice.
       await admin.from("visits").insert([
+        // GUARDRAIL: stated, not defaulted - this test counts DISTINCT
+        // institutes across these three rows.
         {
           institute_id: houseId,
           member: subject.id,
           activity: "olympiad",
           date: coverDay,
           photo_url: photoFor(subject.id),
+          status_set_to: "Session done",
         },
         {
           institute_id: houseId,
@@ -2715,13 +3043,15 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           activity: "application",
           date: coverDay,
           photo_url: photoFor(subject.id),
+          status_set_to: "Session done",
         },
         {
-          institute_id: second!.id,
+          institute_id: secondId,
           member: subject.id,
           activity: "olympiad",
           date: coverDay,
           photo_url: photoFor(subject.id),
+          status_set_to: "Session done",
         },
       ]);
 
@@ -2774,33 +3104,23 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     const plan = async (label: string, date = day) => {
-      const { data: house, error: hErr } = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} ${label}`, type: "school", boards: BOARDS, campus_id: campusA })
-        .select("id")
-        .single();
-      if (hErr) throw new Error(`institute: ${hErr.message}`);
+      const houseId = await makeInstitute(repA.id, campusA, label);
       const { data, error } = await repA.db
         .from("daily_plans")
         .insert({
           member: repA.id,
           date,
-          institute_id: house.id,
+          institute_id: houseId,
           purpose: `${TAG} ${label}`,
         })
         .select("id")
         .single();
       if (error) throw new Error(`plan: ${error.message}`);
-      return { planId: data.id as string, instituteId: house.id as string };
+      return { planId: data.id as string, instituteId: houseId };
     };
 
     beforeAll(async () => {
-      const { data } = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} presence base`, type: "school", boards: BOARDS, campus_id: campusA })
-        .select("id")
-        .single();
-      houseId = data!.id;
+      houseId = await makeInstitute(repA.id, campusA, "presence base");
     });
 
     it("derives the same status the app does, for all four shapes", async () => {
@@ -2964,6 +3284,10 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_activity: "meeting",
         p_photo_url: photoFor(repA.id),
         p_daily_plan_id: planId,
+        // Supplied so the ONLY thing left to refuse this is the missing
+        // arrival. Without it FO024 could answer first and the test would
+        // pass while proving nothing about the presence guarantee.
+        p_status_set_to: SETUP_STATUS,
       });
       expect(error?.code).toBe("FO009");
     });
@@ -2986,6 +3310,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_activity: "meeting",
         p_photo_url: photoFor(repA.id),
         p_daily_plan_id: planId,
+        p_status_set_to: SETUP_STATUS,
       });
       expect(error).toBeNull();
     });
@@ -2995,13 +3320,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       // exempt from the presence guarantee exactly as they are exempt from the
       // meeting gate. Stage 3 ends that exemption — see the stage 3 suite — so
       // this describes the database only until 0018 is applied.
-      const { error } = await repA.db.from("visits").insert({
-        institute_id: houseId,
-        member: repA.id,
-        activity: "olympiad",
-        date: day,
-        photo_url: photoFor(repA.id),
-      });
+      const { error } = await repA.db.from("visits").insert(
+        visitRow({ institute_id: houseId, member: repA.id, date: day }),
+      );
       expect(error).toBeNull();
     });
   });
@@ -3022,24 +3343,19 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const day = iso();
 
     const freshPlan = async (label: string, date = day) => {
-      const { data: house, error: hErr } = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} s3 ${label}`, type: "school", boards: BOARDS, campus_id: campusA })
-        .select("id")
-        .single();
-      if (hErr) throw new Error(`institute: ${hErr.message}`);
+      const houseId = await makeInstitute(repA.id, campusA, `s3 ${label}`);
       const { data, error } = await repA.db
         .from("daily_plans")
         .insert({
           member: repA.id,
           date,
-          institute_id: house.id,
+          institute_id: houseId,
           purpose: `${TAG} ${label}`,
         })
         .select("id")
         .single();
       if (error) throw new Error(`plan: ${error.message}`);
-      return { planId: data.id as string, instituteId: house.id as string };
+      return { planId: data.id as string, instituteId: houseId };
     };
 
     /**
@@ -3069,12 +3385,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .eq("id", planId);
 
     beforeAll(async () => {
-      const { data } = await admin
-        .from("institutes")
-        .insert({ name: `${TAG} s3 base`, type: "school", boards: BOARDS, campus_id: campusA })
-        .select("id")
-        .single();
-      houseId = data!.id;
+      houseId = await makeInstitute(repA.id, campusA, "s3 base");
     });
 
     describe("#6 — a check-in is located, or says why not", () => {
@@ -3215,13 +3526,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         await arrive(planId);
 
         for (const activity of ["olympiad", "application"] as const) {
-          const { error } = await repA.db.from("visits").insert({
-            institute_id: instituteId,
-            member: repA.id,
-            activity,
-            date: day,
-            photo_url: photoFor(repA.id),
-          });
+          const { error } = await repA.db.from("visits").insert(
+            visitRow({ institute_id: instituteId, member: repA.id, activity, date: day }),
+          );
           expect(error, activity).toBeNull();
         }
       });
@@ -3230,13 +3537,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     describe("the presence guarantee, widened to every activity", () => {
       it("refuses EVERY activity without a check-in, not just a meeting", async () => {
         for (const activity of ["olympiad", "application", "admission"] as const) {
-          const { error } = await repA.db.from("visits").insert({
-            institute_id: houseId,
-            member: repA.id,
-            activity,
-            date: day,
-            photo_url: photoFor(repA.id),
-          });
+          const { error } = await repA.db.from("visits").insert(
+            visitRow({ institute_id: houseId, member: repA.id, activity, date: day }),
+          );
           expect(error?.code, activity).toBe("FO009");
         }
       });
@@ -3247,13 +3550,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         // refused, and by the gate rather than by the new rule.
         const { planId, instituteId } = await freshPlan("gate intact", iso(-3));
         await arrive(planId);
-        const { error } = await repA.db.from("visits").insert({
-          institute_id: instituteId,
-          member: repA.id,
-          activity: "meeting",
-          date: day,
-          photo_url: photoFor(repA.id),
-        });
+        const { error } = await repA.db.from("visits").insert(
+          visitRow({ institute_id: instituteId, member: repA.id, activity: "meeting", date: day }),
+        );
         expect(error).not.toBeNull();
       });
     });
@@ -3269,28 +3568,26 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
         const { data: setRow } = await repA.db
           .from("visits")
-          .insert({
+          .insert(visitRow({
             institute_id: instituteId,
             member: repA.id,
             activity: "session",
             lifecycle_status: "Set",
             date: day,
             expected_date: iso(7),
-            photo_url: photoFor(repA.id),
-          })
+          }))
           .select("id")
           .single();
 
         const { data: doneRow } = await repA.db
           .from("visits")
-          .insert({
+          .insert(visitRow({
             institute_id: instituteId,
             member: repA.id,
             activity: "session",
             lifecycle_status: "Done",
             date: day,
-            photo_url: photoFor(repA.id),
-          })
+          }))
           .select("id")
           .single();
 
@@ -3324,13 +3621,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         await arrive(planId);
         const { data: mine } = await repA.db
           .from("visits")
-          .insert({
-            institute_id: instituteId,
-            member: repA.id,
-            activity: "meeting",
-            date: day,
-            photo_url: photoFor(repA.id),
-          })
+          .insert(visitRow({ institute_id: instituteId, member: repA.id, activity: "meeting", date: day }))
           .select("id")
           .single();
 
@@ -3694,16 +3985,12 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         // check-in guards as `before update of checkin_at`, which is how the app
         // works — plan first, arrive later — and not what the rules claim. A row
         // INSERTED with checkin_at already set skipped them entirely.
-        const { data: house } = await admin
-          .from("institutes")
-          .insert({ name: `${TAG} insert guard`, type: "school", boards: BOARDS, campus_id: campusA })
-          .select("id")
-          .single();
+        const guardHouse = await makeInstitute(repA.id, campusA, "insert guard");
 
         const { error } = await admin.from("daily_plans").insert({
           member: repA.id,
           date: iso(),
-          institute_id: house!.id,
+          institute_id: guardHouse,
           purpose: `${TAG} insert guard`,
           checkin_at: new Date().toISOString(),
         });
@@ -3715,13 +4002,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         await arrive(planId);
         const { data: visit } = await repA.db
           .from("visits")
-          .insert({
-            institute_id: instituteId,
-            member: repA.id,
-            activity: "meeting",
-            date: day,
-            photo_url: photoFor(repA.id),
-          })
+          .insert(visitRow({ institute_id: instituteId, member: repA.id, activity: "meeting", date: day }))
           .select("id")
           .single();
 
@@ -3758,13 +4039,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         await arrive(planId);
         const { data: visit } = await repA.db
           .from("visits")
-          .insert({
-            institute_id: instituteId,
-            member: repA.id,
-            activity: "meeting",
-            date: day,
-            photo_url: photoFor(repA.id),
-          })
+          .insert(visitRow({ institute_id: instituteId, member: repA.id, activity: "meeting", date: day }))
           .select("id")
           .single();
 
@@ -3958,13 +4233,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           });
           const { data: visit } = await admin
             .from("visits")
-            .insert({
-              institute_id: aliceSchool,
-              member: alice.id,
-              activity: "olympiad",
-              date: iso(),
-              photo_url: photoFor(alice.id),
-            })
+            .insert(visitRow({ institute_id: aliceSchool, member: alice.id, date: iso() }))
             .select("id")
             .single();
 
@@ -4104,4 +4373,315 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       });
     },
   );
+
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Migration 0032 — deleting a member, and everything that is theirs.
+   *
+   * WHAT THIS SUITE CAN AND CANNOT SEE. `public.delete_member()` is the whole
+   * of the transaction: eight tables, in the one order the foreign keys allow.
+   * It does NOT touch auth.users or storage — those are the server action's,
+   * after this commits — so nothing below asserts anything about a sign-in or a
+   * photograph. The action's ordering is asserted at source level in
+   * tests/unit/settings-mutations.test.ts, which is where a "use server" module
+   * can be examined without a Next request behind it.
+   *
+   * THE GUARDS ARE THE SUBJECT. The delete itself is a handful of DELETE
+   * statements and would work; what is worth a database to prove is that it
+   * cannot be reached by accident, that it refuses rather than wipes when
+   * somebody else's work is in the way, and that a rep cannot call it at all —
+   * it is SECURITY DEFINER, so if the is_admin() check were ever dropped the
+   * function would happily delete anybody for anyone.
+   */
+  describe.skipIf(!has0032)("0032 — deleting a member", () => {
+    /**
+     * A member who exists only to be deleted, with one of everything.
+     *
+     * Made fresh per test rather than shared: these tests destroy their subject
+     * by design, and a shared one would work exactly once.
+     */
+    const makeVictim = async (label: string) => {
+      const victim = await makeMember("rep", `victim-${label}`, campusA);
+
+      const { data: institute, error: instituteError } = await admin
+        .from("institutes")
+        .insert({
+          name: `${TAG} ${label} School`,
+          type: "school",
+          boards: BOARDS,
+          city: "Bengaluru",
+          state: "Karnataka",
+          registered_by: victim.id,
+          campus_id: campusA,
+        })
+        .select("id")
+        .single();
+      if (instituteError) throw new Error(`institute: ${instituteError.message}`);
+
+      const day = iso();
+      await ensureArrival(victim.id, institute.id, day);
+
+      const { error: visitError } = await admin.from("visits").insert(
+        visitRow({ institute_id: institute.id, member: victim.id, date: day }),
+      );
+      if (visitError) throw new Error(`visit: ${visitError.message}`);
+
+      await admin.from("targets").insert({
+        member: victim.id,
+        period: "weekly",
+        period_start: mondayOf(day),
+        meetings: 3,
+      });
+
+      return { victim, instituteId: institute.id };
+    };
+
+    /** What is left of a member, counted the way the runbook query counts it. */
+    const remainsOf = async (memberId: string) => {
+      const [visits, plans, targets, owned, profile] = await Promise.all([
+        admin.from("visits").select("id").eq("member", memberId),
+        admin.from("daily_plans").select("id").eq("member", memberId),
+        admin.from("targets").select("id").eq("member", memberId),
+        admin.from("institutes").select("id").eq("registered_by", memberId),
+        admin.from("profiles").select("id").eq("id", memberId),
+      ]);
+      return {
+        visits: visits.data?.length ?? 0,
+        plans: plans.data?.length ?? 0,
+        targets: targets.data?.length ?? 0,
+        owned: owned.data?.length ?? 0,
+        profile: profile.data?.length ?? 0,
+      };
+    };
+
+    it("takes everything that is the member's, in one transaction", async () => {
+      const { victim, instituteId } = await makeVictim("whole");
+
+      // Not empty first, or the assertion below would pass on a no-op.
+      const before = await remainsOf(victim.id);
+      expect(before.visits, "a visit to delete").toBeGreaterThan(0);
+      expect(before.plans, "a plan to delete").toBeGreaterThan(0);
+      expect(before.targets, "a target to delete").toBeGreaterThan(0);
+      expect(before.owned, "an institute to delete").toBeGreaterThan(0);
+      expect(before.profile, "a profile to delete").toBe(1);
+
+      const { error } = await boss.db.rpc("delete_member", { p_member: victim.id });
+      expect(error).toBeNull();
+
+      expect(await remainsOf(victim.id)).toEqual({
+        visits: 0,
+        plans: 0,
+        targets: 0,
+        owned: 0,
+        profile: 0,
+      });
+
+      // The institute went with them, and its status history cascaded with it.
+      const { data: gone } = await admin
+        .from("institutes")
+        .select("id")
+        .eq("id", instituteId);
+      expect(gone ?? []).toHaveLength(0);
+      expect(await historyFor(instituteId)).toHaveLength(0);
+    });
+
+    it("reports what it removed, table by table", async () => {
+      const { victim } = await makeVictim("receipt");
+
+      const { data, error } = await boss.db.rpc("delete_member", {
+        p_member: victim.id,
+      });
+      expect(error).toBeNull();
+
+      // The action turns this into the admin's receipt. Counted by the function
+      // as it went, so it is what happened rather than what was promised.
+      const removed = data as Record<string, number>;
+      expect(removed.visits).toBeGreaterThan(0);
+      expect(removed.daily_plans).toBeGreaterThan(0);
+      expect(removed.targets).toBeGreaterThan(0);
+      expect(removed.institutes).toBeGreaterThan(0);
+      expect(removed.profiles).toBe(1);
+    });
+
+    it("refuses a rep outright — it is SECURITY DEFINER, so this is the whole gate", async () => {
+      const { victim } = await makeVictim("not-admin");
+
+      const { error } = await repA.db.rpc("delete_member", { p_member: victim.id });
+      expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+
+      // And nothing moved.
+      const after = await remainsOf(victim.id);
+      expect(after.profile).toBe(1);
+      expect(after.visits).toBeGreaterThan(0);
+
+      await boss.db.rpc("delete_member", { p_member: victim.id });
+    });
+
+    it("refuses an admin deleting themselves", async () => {
+      const { error } = await boss.db.rpc("delete_member", { p_member: boss.id });
+      expect(error?.code).toBe("FO027");
+
+      const { data } = await admin.from("profiles").select("id").eq("id", boss.id);
+      expect(data ?? [], "the admin is still there").toHaveLength(1);
+    });
+
+    it("refuses a member who is already gone", async () => {
+      const { error } = await boss.db.rpc("delete_member", {
+        p_member: "00000000-0000-4000-8000-000000000000",
+      });
+      expect(error?.code).toBe("FO027");
+    });
+
+    /**
+     * FO027 — the safety net, and the one shape that can still produce it.
+     *
+     * Since 0028 a rep can only plan and visit institutes they own, so a NEW
+     * cross-member visit cannot be made at all — which is why this test has to
+     * build one the way reality does: repA registers and visits a school, and an
+     * admin then REASSIGNS it to somebody else. `reassignInstitute` allows
+     * exactly that and leaves the old owner's visits where they are.
+     *
+     * The `on delete restrict` on visits.institute_id would refuse the delete
+     * regardless. What FO027 adds is refusing it BEFORE anything is deleted, and
+     * saying which institute is in the way.
+     */
+    it("refuses, and deletes nothing, when an owned institute carries another member's work", async () => {
+      const victim = await makeMember("rep", "victim-legacy", campusA);
+
+      // repA's school, repA's visit — ordinary, legal, owned by repA.
+      const { data: institute } = await admin
+        .from("institutes")
+        .insert({
+          name: `${TAG} legacy School`,
+          type: "school",
+          boards: BOARDS,
+          city: "Bengaluru",
+          state: "Karnataka",
+          registered_by: repA.id,
+          campus_id: campusA,
+        })
+        .select("id")
+        .single();
+
+      const day = iso();
+      await ensureArrival(repA.id, institute!.id, day);
+      await admin.from("visits").insert(
+        visitRow({ institute_id: institute!.id, member: repA.id, date: day }),
+      );
+
+      /*
+       * FINISH REP A'S VISIT BEFORE REASSIGNING.
+       *
+       * `ensureArrival` checks the rep IN and leaves them there — which is
+       * exactly what FO025 refuses a reassignment over: "That rep is at this
+       * institute now - reassign it when they have finished." Without this the
+       * move below is refused and the test fails one line into its own setup,
+       * on a rule it is not about.
+       *
+       * It is the real rule working, not stale data: the arrival was made four
+       * lines ago by this same test.
+       */
+      await admin
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("member", repA.id)
+        .eq("institute_id", institute!.id)
+        .not("checkin_at", "is", null)
+        .is("checkout_at", null);
+
+      // ...and now it is the victim's, with repA's visit still attached.
+      const { error: moveError } = await admin
+        .from("institutes")
+        .update({ registered_by: victim.id })
+        .eq("id", institute!.id);
+      expect(moveError, "the reassign itself is legal").toBeNull();
+
+      const { error } = await boss.db.rpc("delete_member", { p_member: victim.id });
+      expect(error?.code).toBe("FO027");
+
+      // NOTHING WAS DELETED — the whole point of raising before the first
+      // statement rather than letting the restrict catch it half way through.
+      const after = await remainsOf(victim.id);
+      expect(after.profile, "the member is untouched").toBe(1);
+      expect(after.owned, "and still owns the institute").toBe(1);
+
+      const { data: repVisits } = await admin
+        .from("visits")
+        .select("id")
+        .eq("institute_id", institute!.id)
+        .eq("member", repA.id);
+      expect(repVisits ?? [], "rep A's visit survived").toHaveLength(1);
+
+      // Put it back where it came from, so the ordinary cleanup can reach it.
+      await admin
+        .from("institutes")
+        .update({ registered_by: repA.id })
+        .eq("id", institute!.id);
+    });
+
+    /**
+     * The last-admin guard, tested from the side it CAN be tested from.
+     *
+     * Producing "there is only one admin" would mean deleting the project's real
+     * admins, which this suite must never do. So this proves the half that is
+     * safe and is also the half that regresses: with more than one admin in the
+     * table, the guard must NOT fire. A guard that refused every admin would
+     * look identical to a working one until the day somebody needed to remove a
+     * colleague.
+     */
+    it("lets one admin be deleted while another remains", async () => {
+      const spare = await makeMember("admin", "spare-admin");
+
+      const { count } = await admin
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("role", "admin");
+      expect(count ?? 0, "boss and spare at least").toBeGreaterThan(1);
+
+      const { error } = await boss.db.rpc("delete_member", { p_member: spare.id });
+      expect(error).toBeNull();
+
+      const { data } = await admin.from("profiles").select("id").eq("id", spare.id);
+      expect(data ?? []).toHaveLength(0);
+    });
+
+    /**
+     * MATERIALS ARE NOT THE MEMBER'S TO TAKE, and this is the test that says so.
+     *
+     * `materials.uploaded_by` is an audit stamp, not ownership: the library is
+     * one collection the whole team reads. Deleting a departing admin's uploads
+     * would take the team's posters and fee sheets with them, so the FK is
+     * `on delete set null` and the row outlives the uploader.
+     */
+    it("leaves the shared library standing, and only drops the byline", async () => {
+      const uploader = await makeMember("admin", "uploader");
+
+      const { data: material, error: materialError } = await admin
+        .from("materials")
+        .insert({
+          title: `${TAG} shared poster`,
+          category: "Poster",
+          file_path: `${uploader.id}/${crypto.randomUUID()}.png`,
+          file_name: "poster.png",
+          file_type: "image/png",
+          file_size: 1024,
+          uploaded_by: uploader.id,
+        })
+        .select("id")
+        .single();
+      if (materialError) throw new Error(`material: ${materialError.message}`);
+
+      const { error } = await boss.db.rpc("delete_member", { p_member: uploader.id });
+      expect(error).toBeNull();
+
+      const { data: still } = await admin
+        .from("materials")
+        .select("id, uploaded_by")
+        .eq("id", material.id)
+        .maybeSingle();
+      expect(still, "the material is still there").not.toBeNull();
+      expect(still?.uploaded_by, "only the byline went").toBeNull();
+    });
+  });
 });
