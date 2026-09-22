@@ -55,6 +55,40 @@ which never expires and is never regenerated).
 Adding a table in a future migration means adding one line to `BACKUP_TABLES`,
 or to `NOT_BACKED_UP` with a reason. The backup will refuse to run until you do.
 
+### Deleting a member is the one thing only a backup can undo
+
+**Settings → Team → Delete is a true delete, and nothing in the app reverses
+it.** `public.delete_member()` (migration `0032`) removes, in one transaction,
+that member's visits and the people met on them, their daily plans, their
+weekly targets under every name the table has had, the institutes they own and
+those institutes' whole status history, and their profile. The server action
+then empties their folder in the `visit-photos` bucket and deletes the auth
+user. There is no retire, no archive and no undo button — the client asked for
+the data to be gone rather than hidden, which is the opposite call from
+statuses and purposes, both of which are retired and never deleted.
+
+So **a restore from a backup taken beforehand is the only way back**, and it is
+a whole-database restore rather than a per-member one. Two practical
+consequences:
+
+- If a deletion is planned — somebody leaving, an account made by mistake —
+  **take a backup first** (`npm run backup`). It costs a few minutes and is the
+  difference between a reversible mistake and a permanent one.
+- Restoring to undo a deletion also rolls back everything else logged since
+  that backup. If the deletion was a week ago, a week of everybody's visits goes
+  with it. Weigh that before restoring, and say so to the client.
+
+Nothing about the backup itself changes: no table is added or removed by 0032,
+and `npm run backup:verify` covers the same 14 tables as before.
+
+**What a delete does NOT take, so nobody goes looking for it:** materials
+(`uploaded_by` is a byline, not ownership — the library is shared and the row
+survives with a null uploader), visits logged by anybody else, and the
+`institute_status_history` rows of institutes belonging to other reps. Those
+last ones keep their entry and lose only their `visit_id` link, which is
+migration `0011`'s deliberate choice: deleting a visit must not erase the record
+that an institute's status moved.
+
 ---
 
 ## The restore contract: schema, not seed

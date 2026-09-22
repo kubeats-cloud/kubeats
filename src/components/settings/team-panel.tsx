@@ -1,10 +1,23 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { CheckCircle2Icon, UserPlusIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  Trash2Icon,
+  TriangleAlertIcon,
+  UserPlusIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -14,10 +27,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createMember } from "@/lib/admin-actions";
-import { EMPTY_MEMBER_STATE, type MemberState } from "@/lib/admin-form-state";
+import { createMember, deleteMember } from "@/lib/admin-actions";
+import {
+  EMPTY_DELETE_MEMBER_STATE,
+  EMPTY_MEMBER_STATE,
+  type MemberState,
+} from "@/lib/admin-form-state";
 import {
   MIN_PASSWORD,
+  confirmationMatches,
   fieldErrorsFrom,
   newMemberSchema,
 } from "@/lib/validation/admin";
@@ -58,6 +76,85 @@ export function TeamPanel({
   const [campusId, setCampusId] = useState("");
   const [values, setValues] = useState({ name: "", email: "", password: "" });
   const [adding, setAdding] = useState(false);
+
+  /*
+   * Deleting a member — one dialog for the whole panel, not one per row.
+   *
+   * THE STATE HAS TO LIVE UP HERE, and that is not a tidiness preference. A
+   * successful delete revalidates the page and the member's row disappears, so
+   * a `useActionState` owned by the row would unmount along with it and take
+   * the receipt with it — the admin would see the row vanish and never learn
+   * what was actually removed. Held at panel level, the dialog outlives the row
+   * it was opened from.
+   *
+   * It also means one action hook instead of one per member, which matters on a
+   * team of twenty.
+   */
+  const [deleteState, deleteAction, deletePending] = useActionState(
+    deleteMember,
+    EMPTY_DELETE_MEMBER_STATE,
+  );
+  /** The member the dialog is currently about. Null when it is closed. */
+  const [confirming, setConfirming] = useState<TeamMember | null>(null);
+  /** What the admin has typed into the confirmation box. */
+  const [typedName, setTypedName] = useState("");
+  /*
+   * Whether the dialog now open has actually been submitted.
+   *
+   * `useActionState` has no reset, so a finished delete's receipt stays in
+   * `deleteState` for ever — and without this it would render the moment the
+   * dialog was opened for the NEXT member, claiming a delete that had not
+   * happened. Reading "did this dialog submit" rather than "is there a result
+   * lying around" is what keeps the receipt attached to the right member.
+   * Same problem, same shape of answer, as `dismissed` in sign-out-button.tsx.
+   */
+  const [submitted, setSubmitted] = useState(false);
+
+  const receipt = submitted ? deleteState.deleted : undefined;
+
+  function openDelete(member: TeamMember) {
+    setConfirming(member);
+    setTypedName("");
+    setSubmitted(false);
+  }
+
+  function closeDelete() {
+    setConfirming(null);
+    setTypedName("");
+    setSubmitted(false);
+  }
+
+  /*
+   * The same rule the server will apply, asked here so the button is not
+   * offered until it would succeed. `confirmationMatches` is exported from the
+   * schema module precisely so this cannot be a second, slightly different
+   * guess at what counts as a match.
+   */
+  const confirmed = confirming
+    ? confirmationMatches(typedName, confirming.name)
+    : false;
+
+  /**
+   * Dispatched by hand, like the create form above and for the same reason.
+   *
+   * React resets a form it is driving, and a reset event makes every Radix
+   * Select in that form revert to its MOUNT value — the chain log-visit-form.tsx
+   * documents. There is no Select in this dialog today, so nothing would revert;
+   * it is written this way because the invariant is the file's, not this form's,
+   * and log-visit-form.test.ts holds every form in these components to it. A
+   * form that takes `action=` is one Select away from the bug whether or not it
+   * has one now.
+   *
+   * `submitted` is flipped here rather than in an effect, so the receipt below
+   * belongs to this dialog's own submission and cannot be a previous delete's
+   * result still sitting in `deleteState`.
+   */
+  function handleDelete(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    setSubmitted(true);
+    deleteAction(formData);
+  }
   /*
    * The typo the admin has already been shown and chosen to keep.
    *
@@ -186,6 +283,7 @@ export function TeamPanel({
                   {member.campusName}
                 </span>
               )}
+              <DeleteTrigger member={member} onOpen={openDelete} />
             </li>
           ))}
         </ul>
@@ -203,6 +301,9 @@ export function TeamPanel({
                 </th>
                 <th scope="col" className="px-4 py-2 text-right text-xs font-medium">
                   Role
+                </th>
+                <th scope="col" className="w-10 px-2 py-2">
+                  <span className="sr-only">Remove</span>
                 </th>
               </tr>
             </thead>
@@ -228,6 +329,9 @@ export function TeamPanel({
                           {member.campusName}
                         </span>
                       )}
+                  </td>
+                  <td className="px-2 py-2.5 text-right">
+                    <DeleteTrigger member={member} onOpen={openDelete} />
                   </td>
                 </tr>
               ))}
@@ -423,7 +527,227 @@ export function TeamPanel({
             </div>
           </form>
         )}
+
+        {/*
+          THE DELETE DIALOG — one for the panel, outside the list, so it
+          survives the row it was opened from disappearing on success.
+
+          Escape and the overlay close it while nothing has been submitted;
+          once the delete has run they are the only way out, because the receipt
+          is the admin's one chance to see what went.
+        */}
+        <Dialog
+          open={confirming !== null}
+          onOpenChange={(next) => {
+            if (!next && !deletePending) closeDelete();
+          }}
+        >
+          <DialogContent showCloseButton={false} className="max-w-md">
+            {receipt ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    <CheckCircle2Icon
+                      className="text-success size-5 shrink-0"
+                      aria-hidden
+                    />
+                    {receipt.name} has been deleted
+                  </DialogTitle>
+                  <DialogDescription className="text-left">
+                    Their account, their work and their photographs are gone.
+                    This cannot be undone from here.
+                  </DialogDescription>
+                </DialogHeader>
+
+                {/*
+                  WHAT ACTUALLY WENT, counted by the database as it went rather
+                  than promised beforehand. An admin who has just destroyed
+                  somebody's history is owed a receipt, and a figure worked out
+                  before the delete would be a guess wearing the clothes of one.
+                */}
+                <dl className="border-border divide-border divide-y rounded-md border text-sm">
+                  {REMOVED_LABELS.filter(
+                    ([key]) => (receipt.removed[key] ?? 0) > 0,
+                  ).map(([key, label]) => (
+                    <div key={key} className="flex justify-between px-3 py-2">
+                      <dt className="text-muted-foreground">{label}</dt>
+                      <dd className="font-medium tabular-nums">
+                        {receipt.removed[key]}
+                      </dd>
+                    </div>
+                  ))}
+                  <div className="flex justify-between px-3 py-2">
+                    <dt className="text-muted-foreground">Photographs</dt>
+                    <dd className="font-medium tabular-nums">{receipt.photos}</dd>
+                  </div>
+                </dl>
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    className="h-11 w-full sm:w-auto"
+                    onClick={closeDelete}
+                  >
+                    Done
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : (
+              <form onSubmit={handleDelete}>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    <TriangleAlertIcon
+                      className="text-danger size-5 shrink-0"
+                      aria-hidden
+                    />
+                    Delete {confirming?.name}?
+                  </DialogTitle>
+                  <DialogDescription className="text-left">
+                    This permanently removes their account and everything they
+                    recorded. It cannot be undone.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <input type="hidden" name="member" value={confirming?.id ?? ""} />
+
+                {/*
+                  Said plainly, because "all their data" means nothing until it
+                  is a list. The second half matters just as much: an admin
+                  worrying about the shared library should not have to guess.
+                */}
+                <ul className="text-muted-foreground my-4 list-disc space-y-1 pl-5 text-xs">
+                  <li>Every visit they logged, and the report on each</li>
+                  <li>Their daily plans and their weekly targets</li>
+                  <li>The institutes they own, and those institutes&rsquo; history</li>
+                  <li>Every photograph they took</li>
+                  <li>Their sign-in</li>
+                </ul>
+                <p className="text-muted-foreground mb-4 text-xs">
+                  Shared materials stay. Visits logged by other reps stay, and
+                  if any of their institutes carries a colleague&rsquo;s work
+                  this will refuse rather than delete it.
+                </p>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-name">
+                    Type{" "}
+                    <span className="text-foreground font-medium">
+                      {confirming?.name}
+                    </span>{" "}
+                    to confirm
+                  </Label>
+                  <Input
+                    id="confirm-name"
+                    name="confirm_name"
+                    className="h-11"
+                    autoComplete="off"
+                    value={typedName}
+                    onChange={(e) => setTypedName(e.target.value)}
+                    aria-invalid={
+                      deleteState.fieldErrors.confirm_name ? true : undefined
+                    }
+                  />
+                  {deleteState.fieldErrors.confirm_name && (
+                    <p className="text-danger text-xs">
+                      {deleteState.fieldErrors.confirm_name}
+                    </p>
+                  )}
+                </div>
+
+                {deleteState.error && (
+                  <div className="mt-4">
+                    <FormNotice message={deleteState.error} />
+                  </div>
+                )}
+
+                <DialogFooter className="mt-5 gap-2 sm:gap-2">
+                  <Button
+                    type="submit"
+                    variant="destructive"
+                    className="h-11 w-full sm:w-auto"
+                    // The same rule the server applies. Disabled rather than
+                    // hidden, so the reason is visible: the box above is empty
+                    // or does not match.
+                    disabled={!confirmed || deletePending}
+                  >
+                    {deletePending ? "Deleting…" : "Delete permanently"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full sm:w-auto"
+                    onClick={closeDelete}
+                    disabled={deletePending}
+                  >
+                    Cancel
+                  </Button>
+                </DialogFooter>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );
 }
+
+/**
+ * The per-row Delete, and the two people it is never offered for.
+ *
+ * SELF and the LAST ADMIN are both refused by `deleteMember()` and again by
+ * `delete_member()` in the database, so this decides nothing — it is what stops
+ * an admin walking into a refusal they could have been spared. Rendering a
+ * disabled button with a title is better than rendering nothing: an absent
+ * button looks like a bug, a disabled one with a reason looks like a rule.
+ */
+function DeleteTrigger({
+  member,
+  onOpen,
+}: {
+  member: TeamMember;
+  onOpen: (member: TeamMember) => void;
+}) {
+  const blocked = member.isSelf
+    ? "You cannot delete your own account"
+    : member.isLastAdmin
+      ? "The only admin account cannot be deleted"
+      : member.isUnnamed
+        ? "Give this member a name before deleting them"
+        : null;
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="text-muted-foreground hover:text-danger size-9 shrink-0"
+      aria-label={
+        blocked ? `${blocked}: ${member.name}` : `Delete ${member.name}`
+      }
+      title={blocked ?? `Delete ${member.name}`}
+      disabled={blocked !== null}
+      onClick={() => onOpen(member)}
+    >
+      <Trash2Icon className="size-4" aria-hidden />
+    </Button>
+  );
+}
+
+/**
+ * What the RPC's row counts are called on screen, in the order they are
+ * removed.
+ *
+ * A list rather than a lookup, so the receipt reads in teardown order and so a
+ * key the database returns that nobody has named here is simply not shown —
+ * better a short receipt than one with `weekly_targets_pre_0013` in it.
+ */
+const REMOVED_LABELS: [string, string][] = [
+  ["visits", "Visits"],
+  ["visit_people", "People met"],
+  ["daily_plans", "Planned visits"],
+  ["targets", "Weekly targets"],
+  ["weekly_targets", "Weekly targets (archive)"],
+  ["weekly_targets_pre_0013", "Weekly targets (archive)"],
+  ["institutes", "Institutes they owned"],
+  ["profiles", "Profile"],
+];

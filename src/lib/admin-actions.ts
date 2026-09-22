@@ -7,12 +7,15 @@ import { ensureAreas, ensureCity, ensureState } from "@/lib/locations";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import type {
   AdminState,
+  DeleteMemberState,
   FlushState,
   MemberState,
 } from "@/lib/admin-form-state";
 import {
   areaSchema,
   citySchema,
+  confirmationMatches,
+  deleteMemberSchema,
   fieldErrorsFrom,
   flushSchema,
   newMemberSchema,
@@ -712,12 +715,434 @@ export async function createMember(
   };
 }
 
+/**
+ * Deleting a team member, and everything that is theirs.
+ *
+ * THE MIRROR IMAGE OF createMember ABOVE, and deliberately shaped like it: the
+ * same service-role client for the one thing only it can do, the same
+ * requireAdmin() for the sake of a sentence, the same by-CODE error mapping.
+ * What is not the same is that this cannot be rolled back. createMember's
+ * failure path deletes the auth user it just made; there is no equivalent here,
+ * which is why four guards stand in front of it.
+ *
+ * A TRUE DELETE, AND THE ONLY ONE ON THIS SCREEN. Statuses and purposes are
+ * retired and never deleted, each for a reason written at length in
+ * validation/admin.ts and admin-actions above: a deleted status erases what a
+ * past visit said, a deleted purpose silently zeroes a weekly metric. Neither
+ * argument applies to a person who has left the team, and the client asked for
+ * the data to be gone rather than hidden.
+ *
+ * FIVE STEPS, IN THIS ORDER, AND THE ORDER IS THE DESIGN:
+ *
+ *   1. the four guards, below
+ *   2. read the photo paths, BEFORE step 3 deletes the rows holding them
+ *   3. public.delete_member() — one transaction, eight tables
+ *   4. the private bucket, by the member's own folder prefix
+ *   5. auth.admin.deleteUser(), last
+ *
+ * WHY STORAGE SITS BETWEEN THE ROWS AND THE AUTH USER. Storage is not
+ * transactional and cannot join the RPC. After the rows, so a teardown that
+ * rolls back has not already destroyed the photographs of visits that still
+ * exist. Before the auth user, so the id naming the folder is still meaningful
+ * if this half fails. Files with no rows are an orphan recoverable by prefix;
+ * rows with no files would be visits whose evidence vanished under a delete
+ * that never happened. `deleteMaterial()` makes the opposite call for the
+ * opposite reason — there it is one row to one file, and a file with no row is
+ * invisible and permanent.
+ *
+ * WHAT IS NOT DELETED: materials. The library is shared by the whole team and
+ * `materials.uploaded_by` is an audit stamp rather than ownership, so its FK is
+ * `on delete set null` and the poster outlives the admin who uploaded it.
+ */
+export async function deleteMember(
+  _prev: DeleteMemberState,
+  formData: FormData,
+): Promise<DeleteMemberState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = deleteMemberSchema.safeParse({
+    member: textOf(formData, "member"),
+    confirm_name: textOf(formData, "confirm_name"),
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELDS, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+  const { member, confirm_name } = parsed.data;
+
+  // GUARD 1 — not yourself. First because it needs no query, and because an
+  // admin who reaches this by accident should be told before anything is read.
+  // FO027 says the same thing in the database.
+  if (member === gate.user.id) {
+    return denied(
+      "You cannot delete your own account. Ask another admin to do it.",
+    );
+  }
+
+  /*
+   * The target, read from the database.
+   *
+   * GUARD 2 IS THE TYPED NAME, and it is compared against THIS name — never
+   * against one posted alongside the id. A form that sends both the id and the
+   * name it should match is a form where a tampered request supplies its own
+   * answer and passes. The whole value of a typed confirmation is that one half
+   * of the comparison came from somewhere the person deleting cannot reach.
+   */
+  const { data: target, error: readError } = await gate.supabase
+    .from("profiles")
+    .select("id, name, role")
+    .eq("id", member)
+    .maybeSingle();
+
+  if (readError) {
+    logError("admin:delete-member-read", readError);
+    return denied(
+      toFriendlyMessage(readError, "We could not check that account."),
+    );
+  }
+  if (!target) {
+    return denied("That member no longer exists. The list may be out of date.");
+  }
+
+  const actualName = target.name ?? "";
+
+  /*
+   * A member with no name cannot be confirmed, so they are refused with the
+   * remedy rather than with an impossible instruction.
+   *
+   * `profiles.name` is nullable and `confirmationMatches` fails closed on an
+   * empty target — deliberately, since matching "" against "" would make an
+   * empty press delete somebody. That leaves one dead end: the list renders the
+   * "Unnamed member" fallback, the admin types it, and the comparison against
+   * "" refuses for ever with `Type "" exactly to confirm`. The trigger is
+   * disabled for these rows too; this is the half a hand-made request meets.
+   */
+  if (actualName.trim() === "") {
+    return denied(
+      "That member has no name recorded, so there is nothing to type to confirm. Give them a name first, then delete them.",
+    );
+  }
+
+  if (!confirmationMatches(confirm_name, actualName)) {
+    return {
+      error: "That name does not match. Nothing was deleted.",
+      fieldErrors: {
+        confirm_name: `Type “${actualName}” exactly to confirm.`,
+      },
+    };
+  }
+
+  // GUARD 3 — never the last admin. Without it the app becomes unadministrable
+  // and there is no self-signup, so nothing in the product could put it right.
+  if (target.role === "admin") {
+    const { count, error: countError } = await gate.supabase
+      .from("profiles")
+      .select("id", { count: "exact", head: true })
+      .eq("role", "admin");
+
+    if (countError) {
+      logError("admin:delete-member-admin-count", countError);
+      return denied(
+        toFriendlyMessage(countError, "We could not check that account."),
+      );
+    }
+    if ((count ?? 0) <= 1) {
+      return denied(
+        "That is the only admin account. Create another admin first, then delete this one.",
+      );
+    }
+  }
+
+  /*
+   * GUARD 4 — the cross-member safety net, said in the app so it can NAME the
+   * schools.
+   *
+   * Since 0028 an institute belongs to exactly one rep, and FO026 refuses a
+   * plan row for anybody else's at planning AND at arrival — so a NEW
+   * cross-member visit cannot be made. Two ways one exists anyway: rows from
+   * before 0028, when campus was the only boundary; and an admin reassigning an
+   * institute AFTER somebody visited it, which `reassignInstitute` allows and
+   * which leaves the old owner's visits exactly where they are.
+   *
+   * `delete_member()` raises FO027 for this and the `on delete restrict` on
+   * visits.institute_id would refuse it regardless, so the OUTCOME is already
+   * safe without a line of this. What this adds is the half an admin can act
+   * on: which institutes, by name. A refusal that does not say which school is
+   * in the way leaves them opening the registry row by row.
+   *
+   * Written in TypeScript rather than passed out of the RPC because no database
+   * text reaches a screen in this app — the same rule log_visit()'s FO001-FO009
+   * mapping follows. The function keeps the check; this keeps the sentence.
+   *
+   * An admin's RLS scope returns every institute and every visit, so these two
+   * reads see the whole picture. A race between this and the call is what the
+   * FO027 branch below is for.
+   */
+  const { data: owned, error: ownedError } = await gate.supabase
+    .from("institutes")
+    .select("id, name")
+    .eq("registered_by", member);
+
+  if (ownedError) {
+    logError("admin:delete-member-owned", ownedError);
+    return denied(
+      toFriendlyMessage(ownedError, "We could not check that member's institutes."),
+    );
+  }
+
+  const ownedIds = (owned ?? []).map((row) => row.id);
+  if (ownedIds.length > 0) {
+    const [foreignVisits, foreignPlans] = await Promise.all([
+      gate.supabase
+        .from("visits")
+        .select("institute_id")
+        .in("institute_id", ownedIds)
+        .neq("member", member),
+      gate.supabase
+        .from("daily_plans")
+        .select("institute_id")
+        .in("institute_id", ownedIds)
+        .neq("member", member),
+    ]);
+
+    if (foreignVisits.error || foreignPlans.error) {
+      logError(
+        "admin:delete-member-foreign",
+        foreignVisits.error ?? foreignPlans.error,
+      );
+      return denied(
+        toFriendlyMessage(
+          foreignVisits.error ?? foreignPlans.error,
+          "We could not check that member's institutes.",
+        ),
+      );
+    }
+
+    const blockedIds = new Set([
+      ...(foreignVisits.data ?? []).map((row) => row.institute_id),
+      ...(foreignPlans.data ?? []).map((row) => row.institute_id),
+    ]);
+
+    if (blockedIds.size > 0) {
+      const names = (owned ?? [])
+        .filter((row) => blockedIds.has(row.id))
+        .map((row) => row.name)
+        .sort((a, b) => a.localeCompare(b));
+
+      return denied(
+        `Nothing was deleted. ${names.length === 1 ? "One institute" : `${names.length} institutes`} ` +
+          `owned by ${actualName} carr${names.length === 1 ? "ies" : "y"} work logged by somebody ` +
+          `else (${names.join(", ")}). Reassign ${names.length === 1 ? "it" : "them"} to another rep first, then delete.`,
+      );
+    }
+  }
+
+  /*
+   * The service-role client, before anything is destroyed.
+   *
+   * Created here rather than at step 5 on purpose: it throws when
+   * SUPABASE_SERVICE_ROLE_KEY is missing or malformed, and discovering that
+   * AFTER the rows had gone would leave an account that can still sign in with
+   * no profile, no data and no way for this screen to finish the job. Same
+   * guard, same reasoning, as createMember above — only the timing matters more.
+   */
+  let db;
+  try {
+    db = createAdminClient();
+  } catch (error) {
+    logError("admin:delete-member-client", error);
+    return denied(
+      "Accounts cannot be deleted right now — the server is missing a setting. Please tell whoever set the app up.",
+    );
+  }
+
+  /*
+   * STEP 2 — the photo paths, read before the visits that hold them are gone.
+   *
+   * The folder listing in step 4 is the primary source and this is the
+   * cross-check: `list()` finds abandoned uploads that never became a visit,
+   * and this finds anything whose path was written somewhere unexpected. The
+   * union of the two is what gets removed, because neither alone is complete.
+   */
+  const { data: photoRows, error: photoError } = await gate.supabase
+    .from("visits")
+    .select("photo_url")
+    .eq("member", member)
+    .not("photo_url", "is", null);
+
+  if (photoError) {
+    // Not fatal. A listing we could not take is a handful of files that may be
+    // missed, and the folder walk below is the one that usually finds them all.
+    logError("admin:delete-member-photos-read", photoError);
+  }
+
+  const recordedPhotos = (photoRows ?? [])
+    .map((row) => row.photo_url)
+    .filter(
+      (path): path is string =>
+        // Only ever files under this member's own folder. A path pointing
+        // anywhere else is somebody else's object and is left alone, whatever
+        // the row claims.
+        typeof path === "string" && path.startsWith(`${member}/`),
+    );
+
+  // STEP 3 — the teardown itself, in one transaction. Every guard above is
+  // repeated inside it, because this action is the courtesy and the function is
+  // the control.
+  const { data: removed, error: rpcError } = await gate.supabase.rpc(
+    "delete_member",
+    { p_member: member },
+  );
+
+  if (rpcError) {
+    logError("admin:delete-member", rpcError);
+    /*
+     * FO027 — reached only by a race, because all four of its cases are
+     * checked above. Two admins deleting at once, or a colleague logging a
+     * visit at one of these institutes in the gap between guard 4 and this
+     * call. Mapped by CODE, never by message, so no database text reaches the
+     * screen; the wording lives in errors.ts with the rest.
+     *
+     * "Nothing was changed" is the literal truth — every guard in the function
+     * runs before the first delete, inside the same transaction.
+     */
+    if (rpcError.code === "FO027") {
+      return denied(
+        toFriendlyMessage(
+          rpcError,
+          "That member could not be deleted. Nothing was changed.",
+        ) + " Reload the page and try again.",
+      );
+    }
+    if (rpcError.code === "42501") {
+      return denied("Only an admin can delete a member.");
+    }
+    return denied(
+      toFriendlyMessage(
+        rpcError,
+        "We could not delete that member. Nothing was changed.",
+      ),
+    );
+  }
+
+  /*
+   * STEP 4 — the photographs.
+   *
+   * Removed as the ADMIN, not the service role: `visit_photos_delete` (0001)
+   * already allows `is_admin()` over the whole bucket, so RLS is still the
+   * thing granting this — the same reasoning flushPhotos states.
+   *
+   * A file that is already gone is not an error. The nightly purge (0003/0004)
+   * deletes past the retention window, so an older member's folder is expected
+   * to be thinner than their visit count.
+   */
+  let photos = 0;
+  try {
+    const paths = new Set(recordedPhotos);
+
+    // The folder walk, paged: storage's default page is small and a rep with a
+    // year of visits has more objects than one call returns.
+    for (let offset = 0; ; offset += PHOTO_PAGE) {
+      const { data: files, error: listError } = await gate.supabase.storage
+        .from("visit-photos")
+        .list(member, { limit: PHOTO_PAGE, offset });
+
+      if (listError) {
+        logError("admin:delete-member-photo-list", listError);
+        break;
+      }
+      for (const file of files ?? []) paths.add(`${member}/${file.name}`);
+      if (!files || files.length < PHOTO_PAGE) break;
+    }
+
+    const all = [...paths];
+    for (let i = 0; i < all.length; i += REMOVE_BATCH) {
+      const { data, error: removeError } = await gate.supabase.storage
+        .from("visit-photos")
+        .remove(all.slice(i, i + REMOVE_BATCH));
+
+      if (removeError) {
+        logError("admin:delete-member-photo-remove", removeError);
+        break;
+      }
+      photos += data?.length ?? 0;
+    }
+  } catch (error) {
+    // The rows are already gone and cannot come back, so a storage failure must
+    // not throw away the rest of the teardown. It is logged, and the leftover
+    // files are recoverable by prefix — which is why this runs before step 5,
+    // while the id still names something.
+    logError("admin:delete-member-photos", error);
+  }
+
+  /*
+   * STEP 5 — the auth user, last.
+   *
+   * The profile is already gone, so from step 3 onwards this account cannot do
+   * anything: getCurrentUser() has no profile to read and requireAdmin()
+   * refuses it. This closes the sign-in itself.
+   *
+   * A failure here is reported rather than swallowed, and it is the one partial
+   * outcome worth naming out loud: the person's data is gone and their login is
+   * not. Told plainly, because the remedy — delete the user in the Supabase
+   * dashboard — is not something this screen can offer.
+   */
+  const { error: authError } = await db.auth.admin.deleteUser(member);
+  if (authError) {
+    logError("admin:delete-member-auth", authError);
+    revalidatePath("/settings");
+    revalidatePath("/", "layout");
+    return denied(
+      `${actualName}'s data was deleted, but their sign-in could not be removed. ` +
+        "They can no longer use the app, but the login still exists — " +
+        "please tell whoever set the app up.",
+    );
+  }
+
+  // Everything an institute, a visit or a name appears on.
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  revalidatePath("/institutes", "layout");
+  revalidatePath("/team");
+  revalidatePath("/review");
+  revalidatePath("/pending");
+
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    deleted: {
+      name: actualName,
+      // Straight from the RPC, which counted as it went. Defaulted to an empty
+      // object so a database answering something unexpected renders as "no
+      // detail" rather than crashing the panel that just succeeded.
+      removed:
+        removed && typeof removed === "object" && !Array.isArray(removed)
+          ? (removed as Record<string, number>)
+          : {},
+      photos,
+    },
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Photo flush                                                         */
 /* ------------------------------------------------------------------ */
 
 /** Storage takes a list per call; keep each one modest. */
 const REMOVE_BATCH = 100;
+
+/**
+ * How many objects to ask for per `list()` call when walking one member's
+ * folder.
+ *
+ * Storage's own default page is 100 and it does NOT tell a caller there is
+ * more, so a single call silently truncates a rep with a year of visits behind
+ * them — and a truncated list here means photographs left in the bucket after
+ * the member who took them is gone. `deleteMember` pages until a short page
+ * comes back, which is the only reliable end-of-list signal on offer.
+ */
+const PHOTO_PAGE = 100;
 
 /**
  * Deleting photos early, on demand.

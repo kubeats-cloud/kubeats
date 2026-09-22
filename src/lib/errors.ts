@@ -55,6 +55,22 @@ const CODE_MESSAGES: Record<string, string> = {
    * where logError puts it.
    */
   "42703": DATABASE_BEHIND,
+  /*
+   * FO027 — a member deletion that was refused (migration 0032).
+   *
+   * The code covers four cases the RPC checks for itself: deleting yourself,
+   * deleting the last admin, a member who has already gone, and an owned
+   * institute carrying another member's work. `deleteMember()` checks all four
+   * in TypeScript BEFORE it calls the function, so in practice an admin reads a
+   * sentence written here in the app — one that can name the institutes in the
+   * way, which is the only part they can act on.
+   *
+   * This entry is what the fourth case falls back to when the RPC raises
+   * anyway: two admins acting at once, or a visit logged in the gap between the
+   * pre-check and the call. Generic, and deliberately so — the database's own
+   * wording is never what reaches a screen.
+   */
+  FO027: "That member could not be deleted. Nothing was changed.",
   // PostgREST
   PGRST116: "We could not find that.",
   PGRST204: DATABASE_BEHIND,

@@ -220,6 +220,37 @@ export interface TeamMember {
   /** From auth.users, which only the service-role client can read. */
   email: string | null;
   createdAt: string | null;
+  /**
+   * Whether this row is the admin reading the page.
+   *
+   * Deciding it HERE rather than in the component, because the component would
+   * need the viewer's id passed down to it and a prop that is only ever used
+   * for one comparison is a prop that can be forgotten on one of the two
+   * layouts. `deleteMember()` refuses a self-delete regardless — this is what
+   * stops the button being offered in the first place.
+   */
+  isSelf: boolean;
+  /**
+   * Whether deleting this member would leave nobody able to administer the app.
+   *
+   * True only for the sole remaining admin. There is no self-signup and no
+   * other route to an admin account, so this is a one-way door with nothing in
+   * the product able to reopen it. Enforced in the action and again in the RPC;
+   * this is the third copy, and the only one that prevents the tap.
+   */
+  isLastAdmin: boolean;
+  /**
+   * Whether this member has no `profiles.name` at all.
+   *
+   * `name` is nullable and `createMember` always sets one, so this is close to
+   * unreachable — but it is the one state where the confirmation box cannot
+   * work: the list shows the "Unnamed member" fallback, the admin types that,
+   * and the action compares it against the empty string in the database and
+   * refuses for ever. A button that can never succeed is exactly the failure
+   * the Settings panels were already fixed for once, so it is disabled with a
+   * reason instead.
+   */
+  isUnnamed: boolean;
 }
 
 /**
@@ -240,6 +271,19 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
     logError("admin:team", error);
     return [];
   }
+
+  /*
+   * Who is reading, and how many admins there are — the two facts the Delete
+   * button needs and the list did not carry.
+   *
+   * Both are counted from the rows already fetched rather than with a second
+   * query: an admin's RLS scope returns every profile, which is the only scope
+   * this function is ever called in (Settings is admin-only). Counting from a
+   * narrower read would undercount admins and make the last-admin guard fire on
+   * a team that has three.
+   */
+  const viewer = await getCurrentUser();
+  const adminCount = (profiles ?? []).filter((p) => p.role === "admin").length;
 
   const emails = new Map<string, string | null>();
   try {
@@ -273,6 +317,10 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
     })(),
     email: emails.get(profile.id) ?? null,
     createdAt: profile.created_at ?? null,
+    isSelf: viewer?.id === profile.id,
+    isLastAdmin: profile.role === "admin" && adminCount <= 1,
+    // The RAW column, not the display fallback above — that is the whole point.
+    isUnnamed: (profile.name ?? "").trim() === "",
   }));
 }
 

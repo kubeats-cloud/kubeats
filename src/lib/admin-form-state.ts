@@ -34,3 +34,27 @@ export interface MemberState extends AdminState {
 }
 
 export const EMPTY_MEMBER_STATE: MemberState = { error: null, fieldErrors: {} };
+
+/**
+ * The outcome of a member deletion.
+ *
+ * `removed` is what the RPC counted as it went, not what the form promised
+ * beforehand — an admin who has just destroyed somebody's history deserves to
+ * be told what actually went, and a count taken before the delete would be a
+ * guess dressed as a receipt. Kept separate from `MemberState` so the create
+ * form and the delete dialog cannot render each other's result.
+ */
+export interface DeleteMemberState extends AdminState {
+  deleted?: {
+    name: string;
+    /** Rows removed, by table. Straight from the RPC's return value. */
+    removed: Record<string, number>;
+    /** Photographs taken out of the private bucket. */
+    photos: number;
+  };
+}
+
+export const EMPTY_DELETE_MEMBER_STATE: DeleteMemberState = {
+  error: null,
+  fieldErrors: {},
+};

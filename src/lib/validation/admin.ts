@@ -304,6 +304,53 @@ export const newMemberSchema = z
 
 export type NewMemberInput = z.infer<typeof newMemberSchema>;
 
+/**
+ * Deleting a member — which is a TRUE delete, unlike everything else an admin
+ * removes on this screen.
+ *
+ * Statuses and purposes are retired and never deleted, each for a written
+ * reason: a status erases what a past visit said, a purpose silently zeroes a
+ * weekly metric. Neither reason applies to a person who has left, and the
+ * client asked for the account and its data to be gone rather than hidden. So
+ * this is the one removal on Settings that cannot be undone from inside the
+ * app, and the schema is shaped around saying so.
+ *
+ * THE TYPED NAME IS THE CONFIRMATION, and this schema deliberately does NOT
+ * check it against anything. It cannot: the only name available here is one
+ * that arrived in the same POST as the id, and comparing a posted pair to
+ * itself is a check a tampered form passes trivially. `deleteMember()` reads
+ * the name from `profiles` and compares against THAT. All this does is insist
+ * something was typed, so the action is never reached with an empty box.
+ */
+export const deleteMemberSchema = z.object({
+  member: z.uuid("That member could not be identified."),
+  confirm_name: z
+    .string()
+    .trim()
+    .min(1, "Type the member's name to confirm.")
+    .max(120, "That is not the member's name."),
+});
+
+export type DeleteMemberInput = z.infer<typeof deleteMemberSchema>;
+
+/**
+ * Do these two names match closely enough to count as a confirmation?
+ *
+ * Trim and case-fold, and nothing cleverer. The point of typing a name is to
+ * make the admin look at WHICH member they are about to delete, not to test
+ * their typing — so trailing whitespace and a lowercase first letter are not
+ * the failure this guard is for. Anything beyond that (collapsing inner
+ * spaces, stripping punctuation) starts accepting a name that is not the name.
+ *
+ * Exported so the browser can disable the button on exactly the rule the
+ * server will apply, rather than on a second guess at it.
+ */
+export function confirmationMatches(typed: string, actual: string): boolean {
+  const normalise = (v: string) => v.trim().toLocaleLowerCase();
+  const wanted = normalise(actual);
+  return wanted.length > 0 && normalise(typed) === wanted;
+}
+
 /* ------------------------------------------------------------------ */
 /* Photo flush                                                         */
 /* ------------------------------------------------------------------ */

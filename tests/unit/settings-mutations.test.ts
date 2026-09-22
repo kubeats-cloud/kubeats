@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { DATABASE_BEHIND, GENERIC_ERROR, toFriendlyMessage } from "@/lib/errors";
+import {
+  confirmationMatches,
+  deleteMemberSchema,
+} from "@/lib/validation/admin";
 
 /**
  * The Settings crash, and why it took a re-test to find.
@@ -44,6 +48,9 @@ const read = (relative: string) =>
 
 const PURPOSES = "src/components/settings/purposes-panel.tsx";
 const STATUSES = "src/components/settings/statuses-panel.tsx";
+const TEAM = "src/components/settings/team-panel.tsx";
+const ACTIONS = "src/lib/admin-actions.ts";
+const MIGRATION = "supabase/migrations/0032_delete_member.sql";
 
 /* ------------------------------------------------------------------ */
 /* (1) a database behind its app says so                               */
@@ -192,5 +199,325 @@ describe("the add forms read the form before they empty it", () => {
     expect(source).toContain("needsLifecycle && (");
     const capture = source.indexOf("new FormData(event.currentTarget)");
     expect(source.lastIndexOf('setActivity("")')).toBeGreaterThan(capture);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* (4) deleting a member — the guards, and where each one lives        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The one TRUE delete on the Settings screen, and the only irreversible thing
+ * an admin can do in the app.
+ *
+ * Everything else here is retired: a status keeps what a past visit said, a
+ * purpose keeps a weekly metric earnable. A member who has left is neither, and
+ * the client asked for the account and its data to be gone. So the interesting
+ * question is not "does it delete" — that needs a database, and the integration
+ * suite asks it — but "can it be reached by accident", which is four guards and
+ * is checkable from Node.
+ *
+ * WHAT IS CHECKED WHERE. The confirmation rule is a pure function and is tested
+ * properly. The guards live in a "use server" module and the dialog in a client
+ * component, and this project has no DOM test environment on purpose
+ * (vitest.config.mts documents the split), so those are read at source level —
+ * the same thing log-visit-form.test.ts and section (2) above already do.
+ */
+
+describe("the typed-name confirmation", () => {
+  it("accepts the name exactly", () => {
+    expect(confirmationMatches("Asha Menon", "Asha Menon")).toBe(true);
+  });
+
+  it("forgives case and surrounding space, because it is not a typing test", () => {
+    // The point of typing a name is to make the admin LOOK at which member they
+    // are about to delete. A trailing space is not the mistake this guards.
+    expect(confirmationMatches("  asha menon  ", "Asha Menon")).toBe(true);
+  });
+
+  it("refuses a different name, a partial one, and an empty box", () => {
+    expect(confirmationMatches("Asha", "Asha Menon")).toBe(false);
+    expect(confirmationMatches("Asha Menonn", "Asha Menon")).toBe(false);
+    expect(confirmationMatches("", "Asha Menon")).toBe(false);
+    expect(confirmationMatches("   ", "Asha Menon")).toBe(false);
+  });
+
+  it("refuses everything when the member has no name at all", () => {
+    // profiles.name is nullable, so the action reads "" for an unnamed member.
+    // Matching "" against "" would make the confirmation box a formality — an
+    // empty press would delete somebody. It must fail closed.
+    expect(confirmationMatches("", "")).toBe(false);
+    expect(confirmationMatches("anything", "")).toBe(false);
+  });
+
+  it("does not collapse inner spaces or strip punctuation", () => {
+    // Anything cleverer than trim-and-fold starts accepting a name that is not
+    // the name, which is the opposite of what a confirmation is for.
+    expect(confirmationMatches("Asha  Menon", "Asha Menon")).toBe(false);
+    expect(confirmationMatches("AshaMenon", "Asha Menon")).toBe(false);
+  });
+});
+
+describe("the delete schema insists something was typed", () => {
+  const id = "11111111-2222-4333-8444-555555555555";
+
+  it("takes a uuid and a non-empty confirmation", () => {
+    const parsed = deleteMemberSchema.safeParse({
+      member: id,
+      confirm_name: "Asha Menon",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("refuses an empty confirmation before the action is ever reached", () => {
+    const parsed = deleteMemberSchema.safeParse({ member: id, confirm_name: "  " });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("refuses an id that is not a uuid", () => {
+    const parsed = deleteMemberSchema.safeParse({
+      member: "not-an-id",
+      confirm_name: "Asha Menon",
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("carries no name to compare against, which is the point", () => {
+    // A schema that validated the name against one posted beside it would be
+    // comparing a tampered pair to itself. The action reads profiles.name and
+    // compares against THAT; this only insists the box was filled in.
+    const shape = Object.keys(
+      deleteMemberSchema.parse({ member: id, confirm_name: "x" }),
+    );
+    expect(shape.sort()).toEqual(["confirm_name", "member"]);
+  });
+});
+
+describe("all four guards stand in the server action", () => {
+  const source = read(ACTIONS);
+  const flat = source.replace(/\s+/g, " ");
+
+  it("is admin-only, like every other action in the file", () => {
+    const start = source.indexOf("export async function deleteMember");
+    expect(start).toBeGreaterThan(-1);
+    const body = source.slice(start, start + 800);
+    expect(body).toContain("await requireAdmin()");
+  });
+
+  it("refuses an admin deleting themselves", () => {
+    expect(flat).toContain("if (member === gate.user.id)");
+  });
+
+  it("refuses the last remaining admin", () => {
+    expect(flat).toContain('.eq("role", "admin")');
+    expect(flat).toContain("(count ?? 0) <= 1");
+  });
+
+  it("compares the typed name against the DATABASE value, never a posted one", () => {
+    // THE REGRESSION TO PREVENT. A form that posts both the id and the name it
+    // should match is a form a tampered request answers for itself. The name
+    // has to be read back.
+    expect(flat).toContain('.from("profiles")');
+    expect(flat).toContain('const actualName = target.name ?? ""');
+    expect(flat).toContain("confirmationMatches(confirm_name, actualName)");
+    // ...and never against anything that arrived in the FormData.
+    expect(flat).not.toContain("confirmationMatches(confirm_name, textOf(");
+  });
+
+  it("names the institutes when a colleague's work is in the way", () => {
+    expect(flat).toContain('.eq("registered_by", member)');
+    expect(flat).toContain('.neq("member", member)');
+    expect(flat).toContain("Reassign");
+  });
+
+  it("refuses an unnamed member with the remedy, not an impossible instruction", () => {
+    // confirmationMatches fails closed on an empty target, so without this the
+    // refusal would read `Type "" exactly to confirm` for ever — a button that
+    // can never succeed, which is the failure the Settings panels were already
+    // fixed for once.
+    expect(flat).toContain('if (actualName.trim() === "")');
+    expect(flat).toContain("has no name recorded");
+    // ...and the trigger is disabled for those rows, so it is not reached by an
+    // ordinary tap at all.
+    expect(read(TEAM)).toContain("member.isUnnamed");
+  });
+});
+
+describe("the teardown runs in the one order the foreign keys allow", () => {
+  const source = read(ACTIONS);
+  const rpcAt = source.indexOf('"delete_member"');
+
+  it("reads the photo paths before the rows that hold them are deleted", () => {
+    const photos = source.indexOf('.select("photo_url")');
+    expect(photos).toBeGreaterThan(-1);
+    expect(rpcAt).toBeGreaterThan(photos);
+  });
+
+  it("empties the bucket after the rows and before the auth user", () => {
+    // Storage is not transactional and cannot join the RPC. After the rows, so
+    // a teardown that rolls back has not already destroyed the photographs of
+    // visits that still exist; before the auth user, so the id naming the
+    // folder still means something if this half fails.
+    const storage = source.indexOf('.from("visit-photos")');
+    const authDelete = source.indexOf("db.auth.admin.deleteUser(member)");
+    expect(rpcAt).toBeGreaterThan(-1);
+    expect(storage).toBeGreaterThan(rpcAt);
+    expect(authDelete).toBeGreaterThan(storage);
+  });
+
+  it("builds the service-role client before anything is destroyed", () => {
+    // It throws when the key is missing. Discovering that after the rows had
+    // gone would leave an account that can still sign in with no data behind it.
+    const client = source.indexOf("db = createAdminClient()");
+    expect(client).toBeGreaterThan(-1);
+    expect(rpcAt).toBeGreaterThan(client);
+  });
+
+  it("never deletes materials — the library is shared", () => {
+    const start = source.indexOf("export async function deleteMember");
+    const end = source.indexOf("export async function flushPhotos");
+    const body = source.slice(start, end);
+    expect(body).not.toContain('from("materials")');
+  });
+
+  it("leaks no database text to the screen", () => {
+    // FO027's own message is never passed through. The wording lives in
+    // errors.ts and in the action, like every other refusal in this app.
+    const start = source.indexOf("export async function deleteMember");
+    const end = source.indexOf("export async function flushPhotos");
+    const body = source.slice(start, end);
+    expect(body).not.toContain("rpcError.message");
+  });
+});
+
+describe("FO027 has a sentence that leaks nothing", () => {
+  it("is mapped by code", () => {
+    expect(toFriendlyMessage({ code: "FO027" })).toBe(
+      "That member could not be deleted. Nothing was changed.",
+    );
+  });
+
+  it("beats the generic fallback", () => {
+    expect(toFriendlyMessage({ code: "FO027" })).not.toBe(GENERIC_ERROR);
+  });
+
+  it("carries no table, column, id or SQL", () => {
+    const message = toFriendlyMessage({ code: "FO027" });
+    for (const fragment of ["institutes", "registered_by", "delete_member", "uuid"]) {
+      expect(message).not.toContain(fragment);
+    }
+  });
+});
+
+describe("the dialog cannot be opened for the two members it must never delete", () => {
+  const source = read(TEAM);
+
+  it("disables the trigger for the viewer's own row", () => {
+    expect(source).toContain("member.isSelf");
+    expect(source).toContain("You cannot delete your own account");
+  });
+
+  it("disables it for the sole admin", () => {
+    expect(source).toContain("member.isLastAdmin");
+    expect(source).toContain("The only admin account cannot be deleted");
+  });
+
+  it("disables the confirm button on the same rule the server applies", () => {
+    // Imported rather than re-implemented, so the browser and the server cannot
+    // disagree about what counts as a match.
+    expect(source).toContain("confirmationMatches(typedName, confirming.name)");
+    expect(source).toContain("disabled={!confirmed || deletePending}");
+  });
+
+  it("keeps the dialog outside the list, so the receipt survives the row", () => {
+    // A useActionState owned by the row would unmount with it on success and
+    // take the receipt with it — the admin would watch the row vanish and never
+    // learn what was removed.
+    const list = source.indexOf("{members.map(");
+    const dialog = source.indexOf("<Dialog");
+    expect(list).toBeGreaterThan(-1);
+    expect(dialog).toBeGreaterThan(list);
+  });
+
+  it("does not show a finished delete's receipt when the dialog reopens", () => {
+    // useActionState has no reset, so `deleteState.deleted` outlives the dialog.
+    // Reading "did THIS dialog submit" is what keeps the receipt attached to the
+    // right member.
+    expect(source).toContain(
+      "const receipt = submitted ? deleteState.deleted : undefined",
+    );
+    expect(source).toContain("setSubmitted(false)");
+  });
+});
+
+describe("migration 0032 is shaped the way a definer function has to be", () => {
+  const sql = read(MIGRATION);
+
+  it("checks is_admin() before it does anything else", () => {
+    const check = sql.indexOf("if not public.is_admin() then");
+    const firstDelete = sql.indexOf("delete from public.visit_people");
+    expect(check).toBeGreaterThan(-1);
+    expect(firstDelete).toBeGreaterThan(check);
+  });
+
+  it("pins search_path and is definer", () => {
+    expect(sql).toContain("security definer");
+    expect(sql).toContain("set search_path = ''");
+  });
+
+  it("is revoked from public and anon and granted to authenticated", () => {
+    expect(sql).toContain(
+      "revoke all on function public.delete_member(uuid) from public;",
+    );
+    expect(sql).toContain(
+      "revoke all on function public.delete_member(uuid) from anon;",
+    );
+    expect(sql).toContain(
+      "grant execute on function public.delete_member(uuid) to authenticated;",
+    );
+  });
+
+  it("raises FO027 for every case it refuses", () => {
+    expect(sql).toContain("FO027");
+    expect(sql).toContain("You cannot delete your own account.");
+    expect(sql).toContain("That is the only admin account.");
+  });
+
+  it("deletes visits and plans before the institutes that restrict them", () => {
+    const visits = sql.indexOf("delete from public.visits where member = p_member;");
+    const plans = sql.indexOf(
+      "delete from public.daily_plans where member = p_member;",
+    );
+    const institutes = sql.indexOf(
+      "delete from public.institutes where registered_by = p_member;",
+    );
+    const profile = sql.indexOf("delete from public.profiles where id = p_member;");
+    expect(visits).toBeGreaterThan(-1);
+    expect(plans).toBeGreaterThan(-1);
+    expect(institutes).toBeGreaterThan(visits);
+    expect(institutes).toBeGreaterThan(plans);
+    // The profile goes last, before the auth user the action deletes afterwards.
+    expect(profile).toBeGreaterThan(institutes);
+  });
+
+  it("guards the weekly_targets archive, which may exist under either name", () => {
+    // 0013 renamed rather than dropped, so which one is present depends on how
+    // far a given database has been migrated. scripts/tables.mjs lists both for
+    // the same reason.
+    expect(sql).toContain("to_regclass('public.weekly_targets')");
+    expect(sql).toContain("to_regclass('public.weekly_targets_pre_0013')");
+  });
+
+  it("never touches materials, auth.users or storage", () => {
+    expect(sql).not.toContain("delete from public.materials");
+    expect(sql).not.toContain("delete from auth.users");
+    expect(sql).not.toContain("delete from storage.objects");
+  });
+
+  it("asserts what it installed", () => {
+    expect(sql).toContain("0032 did not apply cleanly");
+    expect(sql).toContain("is not SECURITY DEFINER");
+    expect(sql).toContain("does not check is_admin()");
+    expect(sql).toContain("does not raise FO027");
   });
 });
