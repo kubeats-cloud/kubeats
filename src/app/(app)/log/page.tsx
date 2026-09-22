@@ -75,13 +75,36 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
   // check-in was swept closed overnight: the report is still owed, and the plan
   // row it came from is no longer in today's list at all.
   const named = planId ? await getPlanById(user.id, planId) : null;
-  const entry = inProgress.find((e) => e.id === planId) ?? inProgress[0] ?? null;
+
+  /*
+   * THE NAMED PLAN WINS, AND FROM 0033 THAT MATTERS.
+   *
+   * `inProgress[0]` was a safe fallback for as long as FO013 meant there was at
+   * most one open arrival and the unique constraint meant one institute could
+   * only appear once a day. FO013 still holds — so this list is still at most
+   * one entry — but the URL can now name any of SEVERAL plan rows for the same
+   * institute today, and answering with "whichever one is open" instead of the
+   * one that was asked for is how a rep ends up filing against the wrong cycle.
+   *
+   * So a plan named in the URL is used as itself. The fallback stays for the
+   * bare `/log` with no parameter, which is a rep arriving from the nav rather
+   * than from the chain.
+   */
+  const entry = planId
+    ? (inProgress.find((e) => e.id === planId) ?? null)
+    : (inProgress[0] ?? null);
 
   // Finishing a report needs a visit, not an arrival — so this is asked of the
   // named plan first and only then of the one in progress.
   const target = named ?? entry;
   const existing = target
     ? await getUnreportedVisitFor({
+        // THE PLAN ROW ITSELF. Until 0033 this function was keyed on the triple
+        // below, because (member, date, institute_id) was unique and
+        // daily_plan_id was not written until the report was filed. Both halves
+        // of that changed; the id is what now picks this arrival's own visit
+        // out of a day that may hold several at one institute.
+        id: target.id,
         member: user.id,
         date: named ? named.date : today,
         institute_id: target.institute_id,

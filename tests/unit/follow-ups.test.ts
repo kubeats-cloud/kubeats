@@ -123,9 +123,59 @@ describe("the launch is the ordinary chain, not a parallel one", () => {
     // guard_checkin_cycle_final (FO014) guards the DELETE path; nothing in the
     // database guards this one. Overwriting would change what a visit counts as
     // mid-visit, from a screen the rep is not looking at.
+    //
+    // THE SPELLING MOVED WITH MIGRATION 0033, the invariant did not. This read
+    // `existing?.checkin_at`, off a `.maybeSingle()` that was correct only
+    // while `daily_plans_unique_per_day` guaranteed one row per institute per
+    // day. Once a day can hold several, that call throws PGRST116 rather than
+    // returning the second row — so the action reads the LIST and asks whether
+    // any entry is still live. The guarantee is the same one: a row that is
+    // unstarted or in progress is handed back untouched, and only its absence
+    // lets a new row be written.
     const follow = action.slice(action.indexOf("export async function startFollowUp"));
     const body = follow.slice(0, follow.indexOf("export async function removeFromDailyPlan"));
-    expect(body).toContain("existing?.checkin_at");
+
+    // The live-row test, and the insert guarded by its absence.
+    expect(body).toContain("const live = rows.find(");
+    expect(body).toContain("row.checkin_at === null");
+    expect(body).toContain("if (!live) {");
+
+    /*
+     * ...and the ONE call that would throw is gone.
+     *
+     * Asserted against this query rather than against the whole action, because
+     * two other `.maybeSingle()` calls live in it and both are safe: the FO013
+     * "are you open elsewhere" check is `.limit(1)`-bounded, and the purpose
+     * lookup reads `purposes.label`, which is UNIQUE. A blanket ban would fail
+     * on those and teach the next reader that maybeSingle is the problem. It is
+     * not — matching on something that stopped being unique is.
+     */
+    const existing = body.slice(body.indexOf("const { data: existingRows"));
+    const query = existing.slice(0, existing.indexOf(";"));
+    expect(query).toContain('.eq("institute_id", parsed.data.institute_id)');
+    expect(query).not.toContain("maybeSingle");
+    expect(query).toContain('.order("created_at"');
+  });
+
+  /**
+   * THE FEATURE HALF of the same branch, asserted so it cannot quietly revert.
+   *
+   * A rep who held a meeting at a school this morning and is sent back there by
+   * Pending in the afternoon gets a NEW plan row — a fresh check-in, a fresh
+   * visit. Before 0033 the upsert folded that onto the morning's row and the
+   * afternoon visit could not exist.
+   */
+  it("starts a new visit when today's earlier one is already finished", () => {
+    const follow = action.slice(action.indexOf("export async function startFollowUp"));
+    const body = follow.slice(0, follow.indexOf("export async function removeFromDailyPlan"));
+
+    // An insert, not an upsert onto a constraint 0033 removes.
+    expect(body).toContain('.from("daily_plans").insert(');
+    expect(body).not.toContain("onConflict");
+    // "Finished" is what stops a row counting as live: checked in, and either
+    // checked out or closed by the sweep.
+    expect(body).toContain("row.checkout_at === null");
+    expect(body).toContain("row.checkout_missing !== true");
   });
 });
 

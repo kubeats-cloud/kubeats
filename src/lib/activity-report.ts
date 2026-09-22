@@ -138,6 +138,15 @@ interface RawVisit {
   lifecycle_status: string | null;
   reported_at: string | null;
   institute_id: string;
+  /**
+   * The arrival this visit was logged against.
+   *
+   * Written by `close_visit()` since 0018 and by `log_visit()` as well from
+   * 0033 — so a REPORTED visit has always carried it, and an unreported one
+   * carries it only if it was logged after that migration. Both cases are
+   * handled where it is read.
+   */
+  daily_plan_id: string | null;
   institutes: { name: string | null; type: string | null } | null;
 }
 
@@ -184,7 +193,7 @@ export async function getActivityReport(
     supabase
       .from("visits")
       .select(
-        "date, activity, lifecycle_status, reported_at, institute_id, institutes(name, type)",
+        "date, activity, lifecycle_status, reported_at, institute_id, daily_plan_id, institutes(name, type)",
       )
       .eq("member", memberId)
       .gte("date", start)
@@ -290,12 +299,32 @@ export async function getActivityReport(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, visits]) => ({ key, label: key, visits }));
 
-  // A plan's closing-report state comes from the visit logged against it:
-  // same member, same day, same institute, which is exactly what makes a plan
-  // row unique. Null means nothing was logged against that plan at all.
-  const reportByKey = new Map<string, boolean>();
+  /*
+   * A plan's closing-report state, from the visit logged against it.
+   *
+   * THIS WAS KEYED ON `date|institute_id` and said so: "same member, same day,
+   * same institute, which is exactly what makes a plan row unique." Migration
+   * 0033 makes it no longer unique, and a single-keyed map then silently
+   * answers for the wrong visit — three visits to one school in a day collapse
+   * to one entry, last write wins, and all three plan rows on the admin's
+   * report show whichever one happened to be written last. Not a crash; a
+   * quietly wrong column, which is worse.
+   *
+   * TWO MAPS, because the link is not always there. `daily_plan_id` is exact
+   * and is what any visit reported through `close_visit()` carries, plus
+   * anything logged from 0033 on. A visit with no link — unreported and logged
+   * before that migration — still has to be found, and for those rows the old
+   * triple is still correct, because the constraint that made it unique was
+   * still standing when they were written.
+   *
+   * Read plan-first, so an exact match always beats the fallback.
+   */
+  const reportByPlan = new Map<string, boolean>();
+  const reportByDayAndInstitute = new Map<string, boolean>();
   for (const visit of visits) {
-    reportByKey.set(`${visit.date}|${visit.institute_id}`, visit.reported_at !== null);
+    const filed = visit.reported_at !== null;
+    if (visit.daily_plan_id) reportByPlan.set(visit.daily_plan_id, filed);
+    else reportByDayAndInstitute.set(`${visit.date}|${visit.institute_id}`, filed);
   }
 
   const planRows = (plannedRows.data ?? []) as unknown as RawPlan[];
@@ -337,7 +366,12 @@ export async function getActivityReport(
         checkoutArea: areaAt(plan.checkout_lat, plan.checkout_lng),
         status: visitStatusOf(state),
         minutes: visitMinutes(state),
-        reportFiled: reportByKey.get(`${plan.date}|${plan.institute_id}`) ?? null,
+        // Plan-first, then the pre-0033 fallback. Null still means what it
+        // meant: nothing was logged against this plan at all.
+        reportFiled:
+          reportByPlan.get(plan.id) ??
+          reportByDayAndInstitute.get(`${plan.date}|${plan.institute_id}`) ??
+          null,
       };
     },
   );

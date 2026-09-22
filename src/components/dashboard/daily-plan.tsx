@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { CheckCircle2Icon, PlusIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -128,6 +128,48 @@ export function DailyPlan({
 
   const done = entries.filter((entry) => statusOf(entry) === "Completed");
   const open = entries.filter((entry) => statusOf(entry) !== "Completed");
+
+  /**
+   * "Visit 2 of 3" — which institutes appear more than once today, and where
+   * each entry sits in its own sequence.
+   *
+   * Migration 0033 lets a rep plan one school several times in a day, so the
+   * list can now hold two rows reading "St Xavier's · Follow-up" with nothing
+   * to tell them apart. Two identical rows where one has a Continue button and
+   * the other is finished is the kind of ambiguity that gets a rep to tap the
+   * wrong one.
+   *
+   * NUMBERED OLDEST-FIRST, so "visit 1" is the morning one and the numbering
+   * matches the order the day actually happened in. `getTodayPlan` returns
+   * newest-first, hence the reverse.
+   *
+   * COMPUTED OVER `entries`, NOT over the split lists, so a morning visit that
+   * has finished and an afternoon one still running are numbered 1 and 2
+   * against each other rather than each being "1 of 1" in its own column.
+   *
+   * NO TIMES HERE, deliberately. An arrival time would disambiguate too, and
+   * CLAUDE.md is explicit that a rep does not see a clock against their own
+   * name while they are mid-visit — the arrival is captured, shown to admins
+   * and shown on the finished record, and not read back to them in the
+   * building. A sequence number says which is which and carries no clock.
+   */
+  const sequence = useMemo(() => {
+    const byInstitute = new Map<string, string[]>();
+    for (const entry of [...entries].reverse()) {
+      const seen = byInstitute.get(entry.institute_id);
+      if (seen) seen.push(entry.id);
+      else byInstitute.set(entry.institute_id, [entry.id]);
+    }
+
+    const placed = new Map<string, { index: number; total: number }>();
+    for (const ids of byInstitute.values()) {
+      // A single visit needs no label at all — that is the ordinary day, and
+      // numbering it "1 of 1" would be noise on every row.
+      if (ids.length < 2) continue;
+      ids.forEach((id, i) => placed.set(id, { index: i + 1, total: ids.length }));
+    }
+    return placed;
+  }, [entries]);
 
   // #7 — one active visit at a time. Whichever entry is checked in and not yet
   // checked out is holding this rep; every other Check in button says so
@@ -346,6 +388,7 @@ export function DailyPlan({
                   </p>
                   <p className="text-muted-foreground truncate text-xs">
                     {entry.purpose}
+                    <VisitSequence at={sequence.get(entry.id)} />
                   </p>
                   {entry.assignedBy && (
                     <Badge variant="neutral" className="mt-1">
@@ -423,6 +466,7 @@ export function DailyPlan({
                   </p>
                   <p className="text-muted-foreground truncate text-xs">
                     {entry.purpose}
+                    <VisitSequence at={sequence.get(entry.id)} />
                     {entry.assignedBy
                       ? ` · assigned by ${entry.assignedByName ?? "an admin"}`
                       : ""}
@@ -463,6 +507,23 @@ export function DailyPlan({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * "· visit 2 of 3", shown only when an institute is on today's plan more than
+ * once.
+ *
+ * Renders nothing for the ordinary single visit, which is nearly every row —
+ * a label on every entry would be noise, and the whole job here is to mark the
+ * few that genuinely need telling apart.
+ */
+function VisitSequence({ at }: { at?: { index: number; total: number } }) {
+  if (!at) return null;
+  return (
+    <span className="text-muted-foreground">
+      {" · "}visit {at.index} of {at.total}
+    </span>
   );
 }
 

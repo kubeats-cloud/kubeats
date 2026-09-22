@@ -28,6 +28,17 @@ async function requireUser() {
   return { supabase, user };
 }
 
+/**
+ * Postgres's duplicate-key code.
+ *
+ * Only reachable on a plan row while `daily_plans_unique_per_day` is still in
+ * place — that is, between this code shipping and migration 0033 being applied.
+ * After 0033 nothing on this table is unique on (member, date, institute_id)
+ * and these branches become unreachable; they are kept because the deploy
+ * window is real and a rep inside it deserves a sentence that fits it.
+ */
+const UNIQUE_VIOLATION = "23505";
+
 /* ------------------------------------------------------------------ */
 /* A. Daily plan                                                       */
 /* ------------------------------------------------------------------ */
@@ -35,11 +46,27 @@ async function requireUser() {
 /**
  * Adds an institute to today's plan.
  *
- * Upsert rather than insert: daily_plans has UNIQUE(member, date,
- * institute_id), and planning the same institute twice in a day is a correction
- * of the purpose, not an error to shove in a rep's face. meetings_actual is
- * left out of the payload deliberately, so re-planning an institute that has
- * already been visited does not un-hold it.
+ * AN INSERT, NOT AN UPSERT, AND THAT IS THE WHOLE FEATURE. This read
+ * `.upsert(..., { onConflict: "member,date,institute_id" })` for as long as
+ * `daily_plans_unique_per_day` existed, and re-planning an institute corrected
+ * the purpose of the one row it was allowed to have. Migration 0033 drops that
+ * constraint so a rep can visit one school twice in a day - a morning meeting
+ * and an afternoon session - and each of those is its own plan row, its own
+ * check-in and its own visit.
+ *
+ * TWO THINGS FOLLOW FROM THAT, and the second is easy to miss:
+ *
+ *   * `onConflict` names a real unique constraint. PostgREST answers 42P10 when
+ *     it cannot find one, so leaving this an upsert would mean nothing could be
+ *     planned at all the moment 0033 lands. This is the change that makes the
+ *     deploy order code-first, migration-second.
+ *   * correcting a purpose is no longer what re-adding does. A rep who picks
+ *     the wrong purpose removes the entry and adds it again, which they could
+ *     always do and which `removeFromDailyPlan` still allows for any row that
+ *     has not been checked in.
+ *
+ * `meetings_actual` is still left out of the payload, so nothing here can
+ * un-hold a visit that has already happened.
  */
 export async function addToDailyPlan(
   _prev: FormState,
@@ -99,23 +126,74 @@ export async function addToDailyPlan(
     };
   }
 
-  const { error } = await supabase.from("daily_plans").upsert(
-    {
-      member: user.id,
-      date: todayISO(),
-      institute_id: parsed.data.institute_id,
-      purpose: purposeRow.label,
-      purpose_id: purposeRow.id,
-      // Cleared when the purpose does not want one, so re-planning the same
-      // institute under a different purpose cannot leave yesterday's note
-      // attached to today's reason.
-      purpose_note: purposeRow.requires_note ? parsed.data.purpose_note : null,
-    },
-    { onConflict: "member,date,institute_id" },
-  );
+  const today = todayISO();
+
+  /*
+   * ONE UNSTARTED ROW PER INSTITUTE AT A TIME.
+   *
+   * Several visits a day is the feature; two identical rows nobody has walked
+   * into yet is a double tap. Before 0033 the unique constraint absorbed that
+   * silently, and without something in its place the Dashboard would grow a
+   * second "St Xavier's - Follow-up" every time the button was pressed twice on
+   * a slow connection.
+   *
+   * SCOPED TO `checkin_at is null` deliberately. A row the rep has arrived at,
+   * or finished, does not block a new one - that is exactly the second visit
+   * the client asked for. What is refused is a duplicate of something not yet
+   * begun, which is never what anybody means.
+   *
+   * A courtesy, not a boundary: there is no constraint behind it and two
+   * requests racing can still both pass. The cost of that is a spare row the
+   * rep can remove, which is why it is checked here rather than being another
+   * index.
+   */
+  const { data: unstarted } = await supabase
+    .from("daily_plans")
+    .select("id")
+    .eq("member", user.id)
+    .eq("date", today)
+    .eq("institute_id", parsed.data.institute_id)
+    .is("checkin_at", null)
+    .limit(1);
+
+  if (unstarted && unstarted.length > 0) {
+    return {
+      error:
+        "That institute is already on today's plan and you have not checked in yet. " +
+        "Finish or remove that entry before adding it again.",
+      fieldErrors: {},
+    };
+  }
+
+  const { error } = await supabase.from("daily_plans").insert({
+    member: user.id,
+    date: today,
+    institute_id: parsed.data.institute_id,
+    purpose: purposeRow.label,
+    purpose_id: purposeRow.id,
+    // Only ever written when the purpose asks for one, so a note cannot ride
+    // along on a purpose that has nothing to explain.
+    purpose_note: purposeRow.requires_note ? parsed.data.purpose_note : null,
+  });
 
   if (error) {
     logError("plan:add", error);
+    /*
+     * 23505 IS NOW A DEPLOY-ORDER SYMPTOM, not a user error.
+     *
+     * This code ships BEFORE 0033 is applied, so for that window the dropped
+     * constraint is still standing and a genuine second visit is refused by it.
+     * The rep gets a sentence that describes the state they are actually in
+     * rather than "That already exists", which would send them looking for a
+     * row that is allowed to be there.
+     */
+    if (error.code === UNIQUE_VIOLATION) {
+      return {
+        error:
+          "That institute is already on today's plan. Visiting it twice in one day is not available yet.",
+        fieldErrors: {},
+      };
+    }
     return {
       error: toFriendlyMessage(error, "We could not add that to today's plan."),
       fieldErrors: {},
@@ -192,22 +270,39 @@ export async function assignVisit(
     };
   }
 
-  const { error } = await gate.supabase.from("daily_plans").upsert(
-    {
-      member: input.member,
-      date: input.date,
-      institute_id: input.institute_id,
-      purpose: purposeRow.label,
-      purpose_id: purposeRow.id,
-      assigned_by: gate.user.id,
-    },
-    { onConflict: "member,date,institute_id" },
-  );
+  /*
+   * An insert, for the same reason addToDailyPlan is one: `onConflict` names a
+   * constraint 0033 removes, and an admin assigning a second visit to the same
+   * school on the same day is the feature working rather than a mistake to
+   * absorb.
+   *
+   * NO UNSTARTED-DUPLICATE CHECK HERE, unlike the rep's own path. An admin
+   * assigning the same institute twice is far more likely to mean it — two
+   * errands at one school — and they are looking at the Assign screen rather
+   * than tapping a button on a phone with no signal. The rep's check exists to
+   * absorb a double tap; there is no double tap to absorb here.
+   */
+  const { error } = await gate.supabase.from("daily_plans").insert({
+    member: input.member,
+    date: input.date,
+    institute_id: input.institute_id,
+    purpose: purposeRow.label,
+    purpose_id: purposeRow.id,
+    assigned_by: gate.user.id,
+  });
 
   if (error) {
     logError("plan:assign", error);
     if (error.code === "42501") {
       return { error: "Only an admin can assign a visit.", fieldErrors: {} };
+    }
+    // Only reachable before 0033 is applied — see UNIQUE_VIOLATION above.
+    if (error.code === UNIQUE_VIOLATION) {
+      return {
+        error:
+          "That rep already has that institute on that day's plan. Assigning a second visit to the same institute is not available yet.",
+        fieldErrors: {},
+      };
     }
     // FO023 — WIDENED BY 0028, and this message was stale until now. The guard
     // used to check the rep's CAMPUS; it checks OWNERSHIP, which implies the
@@ -361,38 +456,83 @@ export async function startFollowUp(
   }
 
   /**
-   * An entry may already exist for today — the rep planned this institute this
-   * morning, or tapped Pending twice.
+   * What is already on today's plan for this institute — which may now be
+   * SEVERAL rows, and used to be at most one.
    *
-   * IF IT IS ALREADY CHECKED IN, ITS PURPOSE IS LEFT ALONE. Overwriting it
-   * would change what the visit in progress counts as, mid-visit, from a screen
-   * the rep is not even looking at. `guard_checkin_cycle_final` (FO014) guards
-   * the DELETE path; nothing in the database guards this one, so it is the
-   * application's to get right.
+   * `.maybeSingle()` stood here and would throw PGRST116 the moment 0033 let a
+   * second row exist. That is the sharpest kind of break: not a wrong answer, a
+   * thrown one, on the screen a rep reaches by tapping a follow-up.
+   *
+   * So it reads the LIST and asks a question about it. Newest first, because
+   * the only row that can block anything is the most recent one.
    */
-  const { data: existing } = await supabase
+  const { data: existingRows, error: existingError } = await supabase
     .from("daily_plans")
-    .select("id, checkin_at")
+    .select("id, checkin_at, checkout_at, checkout_missing")
     .eq("member", user.id)
     .eq("date", today)
     .eq("institute_id", parsed.data.institute_id)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
 
-  if (!existing?.checkin_at) {
-    const { error } = await supabase.from("daily_plans").upsert(
-      {
-        member: user.id,
-        date: today,
-        institute_id: parsed.data.institute_id,
-        purpose: purposeRow.label,
-        purpose_id: purposeRow.id,
-        purpose_note: purposeRow.requires_note ? parsed.data.purpose_note : null,
-      },
-      { onConflict: "member,date,institute_id" },
-    );
+  if (existingError) {
+    logError("plan:follow-up-existing", existingError);
+    return {
+      error: toFriendlyMessage(existingError, "We could not start that visit."),
+      fieldErrors: {},
+    };
+  }
+
+  const rows = existingRows ?? [];
+
+  /*
+   * THE QUESTION IS "IS ONE STILL RUNNING", NOT "DOES ONE EXIST", and that is
+   * the whole of what 0033 changes here.
+   *
+   * Before, any row for this institute today meant "already handled": if it had
+   * an arrival its purpose was left alone, if it did not the upsert corrected
+   * it. Neither is right once a day can hold several visits.
+   *
+   *   in progress      hand it back untouched. Overwriting the purpose of a
+   *                    visit the rep is standing inside would change what it
+   *                    counts as, mid-visit, from a screen they are not even
+   *                    looking at. FO014 guards the DELETE path; nothing in the
+   *                    database guards this one.
+   *   not yet started  hand it back too. It is the entry they are about to
+   *                    walk into, and a second identical row helps nobody.
+   *   finished         INSERT A NEW ONE. This is the feature: a rep who held a
+   *                    meeting at St Xavier's this morning and is now sent back
+   *                    by Pending gets a fresh plan row, a fresh check-in and a
+   *                    fresh visit, rather than being told they have already
+   *                    been there today.
+   */
+  const live = rows.find(
+    (row) =>
+      row.checkin_at === null ||
+      (row.checkout_at === null && row.checkout_missing !== true),
+  );
+
+  if (!live) {
+    const { error } = await supabase.from("daily_plans").insert({
+      member: user.id,
+      date: today,
+      institute_id: parsed.data.institute_id,
+      purpose: purposeRow.label,
+      purpose_id: purposeRow.id,
+      purpose_note: purposeRow.requires_note ? parsed.data.purpose_note : null,
+    });
 
     if (error) {
       logError("plan:follow-up", error);
+      // Only reachable before 0033 is applied — the constraint still standing
+      // is what refuses the second visit. Named, because "we could not start
+      // that visit" would read as a fault rather than as a feature not yet on.
+      if (error.code === UNIQUE_VIOLATION) {
+        return {
+          error:
+            "You have already visited that institute today. Visiting it twice in one day is not available yet.",
+          fieldErrors: {},
+        };
+      }
       return {
         error: toFriendlyMessage(error, "We could not start that visit."),
         fieldErrors: {},

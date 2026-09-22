@@ -61,6 +61,39 @@ This is load-bearing, not a layout preference: the meeting gate (rule 2) checks
 a visit against that member's `daily_plans` rows for that date, so a meeting
 cannot be logged at all unless the Dashboard flow put it on the plan first.
 
+**An institute may be visited more than once in a day, and each visit is its own
+plan row.** Migration 0033 drops `daily_plans_unique_per_day` — the
+`unique (member, date, institute_id)` from 0001 that made "one institute, one
+visit per day" true. A morning meeting and an afternoon session at one school
+are now two rows, two check-ins and two visits, and the Dashboard numbers them
+"visit 1 of 2" so two otherwise identical entries can be told apart.
+
+**What did NOT relax is FO013**, and the two are separate rules that only looked
+like one. A rep still holds **one open visit at a time**: the guarantee is the
+partial unique index `daily_plans_one_open_visit`, keyed on `(member)` alone and
+partial on the open predicate, so it reads neither the date nor the institute.
+Finish one before checking in anywhere else — including at the same institute.
+0033's assertion block checks that index is still there *and* still unique,
+because taking it out by accident is the one way this change could go wrong.
+
+Three consequences worth knowing before touching any of it:
+
+- **`addToDailyPlan`, `assignVisit` and `startFollowUp` insert, they do not
+  upsert.** `onConflict: "member,date,institute_id"` names a constraint that no
+  longer exists, and PostgREST answers 42P10 when it cannot find one. **So the
+  code ships BEFORE the migration** — the reverse of 0027, and the reverse of
+  the usual advice.
+- **`visits.daily_plan_id` is written by `log_visit()` now**, not only by
+  `close_visit()`. `getUnreportedVisitFor()` was keyed on
+  `(member, date, institute_id)` *because* the link did not exist until the
+  report was filed; that triple no longer identifies an arrival, so the link had
+  to move earlier. Same signature, no second overload — 0015's drop-block and
+  0026's `count(*) = 1` both still hold.
+- **The weekly Meetings figure can legitimately rise.** Rule 7 counts
+  `daily_plans where meetings_actual = 1`, and one row per institute per day
+  used to cap that at one meeting per school per day. `institutesCovered` in the
+  activity report is a distinct count of institutes and does not move.
+
 **A purpose is admin-managed; an activity is not, and the asymmetry is
 arithmetic.** Two requests that sound identical get opposite answers, and this
 is the one paragraph to read before touching either:

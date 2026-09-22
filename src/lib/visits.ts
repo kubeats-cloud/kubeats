@@ -683,29 +683,66 @@ export async function openLoopsAt(
 }
 
 /**
- * The visit already logged against this check-in whose report is not finished.
+ * The visit already logged against THIS check-in whose report is not finished.
  *
- * MATCHED ON THE PLAN'S OWN KEY, NOT ON visits.daily_plan_id, and that is the
- * whole point of this function rather than an incidental detail.
+ * WHY THIS FUNCTION EXISTS. Logging and filing are one submit but two RPCs. If
+ * `log_visit()` succeeds and `close_visit()` does not, the visit exists,
+ * unreported, and the rep is still checked in. Finding it means they finish the
+ * report; missing it means they are handed the full form and log a SECOND visit
+ * for one arrival.
  *
- * Logging and filing are one submit but two RPCs. If the first succeeds and the
- * second does not, the visit exists, unreported, and the rep is still checked
- * in — which is exactly the case this exists to recover. But `daily_plan_id` is
- * written by `close_visit()`, the step that just failed, so looking the visit up
- * by that link finds nothing in precisely the situation it was added for. The
- * rep would be handed the full log form and would log a SECOND visit for one
- * arrival.
+ * IT USED TO MATCH ON (member, date, institute_id) and could not do anything
+ * else. Its own comment said so: `daily_plan_id` was written only by
+ * `close_visit()` — the step that had just failed — so the link was null in
+ * precisely the situation this is for. The triple was safe because
+ * `daily_plans_unique_per_day` made it unique.
  *
- * So it matches the way the plan row itself is keyed: (member, date,
- * institute_id), which `daily_plans_unique_per_day` has made unique since 0001
- * and which #8 keeps to one check-in cycle. `reported_at is null` is what makes
- * it a resume rather than a duplicate — once the report is filed this returns
- * nothing and the screen stops offering it.
+ * MIGRATION 0033 REMOVES THAT UNIQUENESS, and the triple stops identifying an
+ * arrival. Concretely: a rep logs a visit at St Xavier's, the report fails, an
+ * admin clears the stuck check-in, the rep goes back to St Xavier's in the
+ * afternoon and checks in again. On the triple this returns the MORNING's
+ * visit — so the afternoon's `/log` files the morning's report, stamps the
+ * afternoon plan's check-out, and the afternoon visit can never be logged at
+ * all. That is why 0033 also makes `log_visit()` write `daily_plan_id` at
+ * insert time: without it there is nothing to re-key to.
  *
- * Newest first, because a cycle may legitimately record more than one activity
- * (Q3) and the one still owing a report is the one just logged.
+ * SO IT ASKS FOR THE PLAN, AND FALLS BACK TO THE TRIPLE FOR ROWS THAT HAVE NO
+ * PLAN. The fallback is not legacy politeness — it is what keeps this working
+ * during the deploy window. The code ships BEFORE the migration, so for that
+ * period `log_visit()` still writes a null link and every visit logged in it
+ * would be invisible to a plan-only lookup. During that same window the unique
+ * constraint is still standing, so the triple still identifies exactly one
+ * arrival and the old behaviour is exactly right. Afterwards the exact match
+ * wins and the fallback only ever catches rows left over from before.
+ *
+ * ONE PLAN CAN STILL HOLD SEVERAL UNREPORTED VISITS, and swapping the key does
+ * not change that — checked rather than assumed. 0018 explicitly permits more
+ * than one activity per check-in cycle ("the live data already holds a
+ * legitimate olympiad + meeting at one institute on one day"), and a
+ * re-submitted stale form can log twice before either report lands. So the row
+ * count here is not guaranteed to be one and never was.
+ *
+ * WHAT MAKES THAT SAFE is not the key but the three lines under it:
+ *
+ *   `.limit(1)` and `data?.[0]`   this has never used `.maybeSingle()`, so it
+ *                                 cannot throw PGRST116. The failure mode was
+ *                                 always "the wrong row", never "an exception".
+ *   a deterministic order         the exact plan match first, then newest — the
+ *                                 visit the rep just logged is the one they are
+ *                                 trying to file.
+ *   convergence                   filing one sets its `reported_at`, so the
+ *                                 next load surfaces the next. N unreported
+ *                                 visits take N passes and each files a real
+ *                                 one. Nothing is stranded and nothing is
+ *                                 misattributed.
+ *
+ * Filing the second does not double-stamp the check-out either: `/log` passes
+ * `planId` only while the arrival is still open, and `close_visit()` filters on
+ * `checkout_at is null` regardless.
  */
 export async function getUnreportedVisitFor(plan: {
+  /** The plan row's own id — what the visit is matched on from 0033. */
+  id: string;
   member: string;
   date: string;
   institute_id: string;
@@ -724,6 +761,13 @@ export async function getUnreportedVisitFor(plan: {
     .eq("date", plan.date)
     .eq("institute_id", plan.institute_id)
     .is("reported_at", null)
+    // This arrival's own visits, or one that names no arrival at all. A visit
+    // carrying a DIFFERENT plan's id is another cycle's and is excluded — which
+    // is the entire fix.
+    .or(`daily_plan_id.eq.${plan.id},daily_plan_id.is.null`)
+    // Non-null first, so an exact match always beats the unattributed fallback.
+    // The only non-null value that survives the filter above is this plan's id.
+    .order("daily_plan_id", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1);
 
@@ -742,6 +786,20 @@ export async function getUnreportedVisitFor(plan: {
  * COMPLETED. This lists visits that already happened and are waiting to be
  * DESCRIBED, which is a different kind of owing and a much shorter one: a rep
  * finishes these today.
+ *
+ * `planId` IS WHAT MAKES THE LINK ON THIS SCREEN WORK, and until 0033 it was
+ * null for exactly the rows listed here. CLAUDE.md calls this block the only
+ * thing in the app that produces a `/log?plan=` link for an unreported visit —
+ * and `daily_plan_id` was written by `close_visit()`, which by definition has
+ * not run for any of them. So every link this rendered was `/log?plan=null`,
+ * which `getPlanById` cannot resolve; the page fell back to whatever arrival
+ * happened to be in progress, and to nothing at all when none was.
+ *
+ * 0033 has `log_visit()` write the link at insert time, so these rows now carry
+ * their arrival and the link points at it. Not the reason 0033 exists — it is a
+ * side effect of the column being needed for `getUnreportedVisitFor()` — but it
+ * repairs this screen, and it is worth knowing that rows logged before the
+ * migration still have a null here and still fall back.
  */
 export interface UnreportedVisit {
   id: string;
