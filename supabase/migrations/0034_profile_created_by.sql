@@ -55,20 +55,19 @@
 --                            nullable, and the trigger allows null on every
 --                            path. There is no window here at all.
 --
---   NEW CODE, OLD DATABASE   two failures, and the second is the one to know
---                            about. createMember() sends created_by and is
---                            refused with PGRST204, which errors.ts already
---                            maps to DATABASE_BEHIND - loud, named, and no
+--   NEW CODE, OLD DATABASE   two failures, both loud. createMember() sends
+--                            created_by and is refused with PGRST204, which
+--                            errors.ts maps to DATABASE_BEHIND - named, and no
 --                            account is half-created, because the profile
 --                            insert is what fails and its own rollback path
---                            deletes the auth user. But listTeamMembers() also
---                            asks for the `creator:profiles!
---                            profiles_created_by_fkey(name)` embed, and
---                            PostgREST fails the WHOLE query when the hint
---                            names a constraint that is not there. That
---                            function returns [] on error, so the Settings
---                            team list and the hierarchy screen would both go
---                            empty rather than saying why.
+--                            deletes the auth user. listTeamMembers() selects
+--                            created_by as a plain column, so it is refused the
+--                            same way; that function returns [] on error, so
+--                            the team list and the hierarchy would come up
+--                            EMPTY rather than saying why. That silence is
+--                            exactly how the PGRST200 outage went unnoticed -
+--                            see section 1 - so treat an empty team list as a
+--                            missing migration until proven otherwise.
 --
 -- So: this file first, the deploy second. `npm run check:schema` probes
 -- profiles.created_by and is the way to confirm it landed before deploying.
@@ -87,10 +86,33 @@
 -- could join to a name.
 --
 -- The constraint is NAMED rather than left to Postgres, even though the name
--- chosen is the one Postgres would have picked. PostgREST needs an explicit
--- hint to resolve a SELF-referencing embed - `creator:profiles!
--- profiles_created_by_fkey(name)` in listTeamMembers() - so the name is part of
--- the app's read path, not an implementation detail. Section 3 asserts it.
+-- chosen is the one Postgres would have picked: a stable, stated name is what
+-- lets section 3 assert the DELETE RULE below, which is the part of this file
+-- that can go quietly and catastrophically wrong.
+--
+-- ⚠ WHAT THIS NAME IS *NOT* FOR, recorded because the original version of this
+-- comment said the opposite and the mistake reached production.
+--
+-- It claimed the name was "part of the app's read path", because
+-- listTeamMembers() resolved the creator with a self-referencing embed hinted
+-- by the CONSTRAINT: `creator:profiles!profiles_created_by_fkey(name)`.
+-- PostgREST does not accept that. It disambiguates a self-join by the
+-- REFERENCING COLUMN - `profiles!created_by` - and answers the constraint-name
+-- spelling with
+--
+--   PGRST200: Could not find a relationship between 'profiles' and 'profiles'
+--   in the schema cache.
+--
+-- The foreign key was present and correct throughout (a dangling created_by is
+-- still refused with 23503 naming this very constraint), and RLS was never
+-- involved - the service role, which bypasses policies entirely, got the same
+-- PGRST200. listTeamMembers() returns [] on error, so every admin screen
+-- rendered empty over a table with every row intact.
+--
+-- THE APP NO LONGER EMBEDS AT ALL. It reads created_by as a plain column and
+-- resolves the name from the rows it has already fetched, so nothing in the
+-- read path depends on PostgREST's relationship graph. Section 3's assertion
+-- on this name stays, for the delete rule.
 -- -----------------------------------------------------------------------------
 alter table public.profiles
   add column if not exists created_by uuid;
@@ -302,7 +324,7 @@ begin
   if v_delrule is null then
     problems := array_append(
       problems,
-      'profiles_created_by_fkey is missing - the self-embed in listTeamMembers() has no hint to resolve and the creator column is unconstrained');
+      'profiles_created_by_fkey is missing - created_by would be unconstrained, so a deleted admin could leave dangling ids instead of nulls');
   elsif v_delrule <> 'n' then
     problems := array_append(
       problems,

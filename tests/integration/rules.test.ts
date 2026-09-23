@@ -4727,6 +4727,118 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
   });
 
+  /* ------------------------------------------------------------------ */
+  /* listTeamMembers() — the query every admin screen is built on          */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * THIS SUITE EXISTS BECAUSE ITS ABSENCE SHIPPED AN OUTAGE.
+   *
+   * listTeamMembers() feeds the Settings team list, Assign, Field Presence,
+   * the hierarchy and the member editor. Until now NOTHING executed its query
+   * against a real database — settings-mutations.test.ts reads the file as
+   * TEXT, which proves the source says what we meant and nothing about whether
+   * PostgREST will accept it. So a select string that could never resolve
+   * passed every check, green, and emptied every admin screen in production.
+   *
+   * What went wrong: the creator lookup was written as a self-referential
+   * embed hinted with the CONSTRAINT name —
+   * `creator:profiles!profiles_created_by_fkey(name)` — and PostgREST answers
+   * PGRST200 for that, because it disambiguates a self-join by the REFERENCING
+   * COLUMN. The foreign key existed; RLS was not involved (the service role
+   * failed identically). And because this function returns [] on error, the
+   * failure was silent: a full table rendered as an empty team.
+   *
+   * So these tests run the REAL select string, as a signed-in admin, and
+   * assert rows come back. The string is duplicated from admin.ts rather than
+   * imported because that module is `server-only` and reads cookies; the test
+   * that matters is that THIS SHAPE resolves, and the last assertion pins the
+   * two to each other by reading the source.
+   */
+  describe("listTeamMembers — the select every admin screen depends on", () => {
+    /** Verbatim from src/lib/admin.ts. */
+    const TEAM_SELECT =
+      "id, name, role, created_at, campus_id, campuses(name), created_by";
+
+    it("resolves, and returns the team, for a signed-in admin", async () => {
+      const { data, error } = await boss.db
+        .from("profiles")
+        .select(TEAM_SELECT)
+        .order("name");
+
+      // The assertion that would have caught it. PGRST200 here means the
+      // select names a relationship PostgREST cannot resolve.
+      expect(error, error ? `${error.code}: ${error.message}` : "").toBeNull();
+      // An admin sees the whole team; this suite alone has created several.
+      expect((data ?? []).length, "an admin reads every profile").toBeGreaterThan(0);
+    });
+
+    it("carries created_by, so the hierarchy has something to group on", async () => {
+      const { data, error } = await boss.db
+        .from("profiles")
+        .select(TEAM_SELECT)
+        .eq("id", boss.id)
+        .maybeSingle();
+
+      expect(error).toBeNull();
+      expect(data, "the admin reading the page is in their own list").not.toBeNull();
+      // Present as a KEY even when null — that is what the chart reads.
+      expect(data && "created_by" in data).toBe(true);
+    });
+
+    it("refuses the self-embed that shipped, which is why it is gone", async () => {
+      /*
+       * A REGRESSION GUARD, NOT A CURIOSITY. If someone reintroduces the
+       * constraint-name hint — it reads perfectly plausibly — this is what
+       * says no. Asserted as the exact code so a future PostgREST that starts
+       * supporting it makes this fail loudly and invite the simplification,
+       * rather than leaving a scar nobody dares touch.
+       */
+      const { error } = await boss.db
+        .from("profiles")
+        .select("id, creator:profiles!profiles_created_by_fkey(name)")
+        .limit(1);
+
+      expect(error?.code, "the constraint name is not a self-join hint").toBe(
+        "PGRST200",
+      );
+    });
+
+    it("keeps the app's select string and this test in step", async () => {
+      // The one thing a source-level read is good for: proving the string
+      // exercised above is the string the app ships. Imported here rather than
+      // at the top of the file: this is the only test in the suite that reads
+      // source, and admin.ts itself is `server-only` and cannot be imported.
+      const { readFileSync } = await import("node:fs");
+      const { fileURLToPath } = await import("node:url");
+      const source = readFileSync(
+        fileURLToPath(new URL("../../src/lib/admin.ts", import.meta.url)),
+        "utf8",
+      );
+      expect(source).toContain(`.select("${TEAM_SELECT}")`);
+
+      /*
+       * And that the embed has not crept back into ANY select in this file.
+       *
+       * Asked of the `.select(...)` arguments rather than of the whole source,
+       * because the comment above that select QUOTES the broken hint at length
+       * in order to explain it — and a bare `not.toContain` would read the
+       * explanation and call it the code. Same trap 0035's assertion block and
+       * log-visit-form.test.ts both document; it caught this test on its first
+       * run.
+       */
+      const selects = [...source.matchAll(/\.select\(\s*"([^"]*)"/g)].map(
+        (match) => match[1],
+      );
+      expect(selects.length, "there are selects to check").toBeGreaterThan(0);
+      for (const select of selects) {
+        expect(select, "no constraint-name hint in a select").not.toContain(
+          "profiles!profiles_created_by_fkey",
+        );
+      }
+    });
+  });
+
   describe.skipIf(!has0035)("0035 — correcting a rep's campus", () => {
     /**
      * THE CAMPUS TO MOVE TO, AND IT HAS TO BE ACTIVE.

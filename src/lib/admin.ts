@@ -302,11 +302,13 @@ export interface TeamMember {
  *
  * PostgREST returns a many-to-one embed as an OBJECT at runtime, and the type
  * supabase-js infers for it calls it an ARRAY. Both are read, so neither shape
- * can silently produce null and be mistaken for a real absence — which for the
- * two callers below would read as "this admin has no campus" and "nobody
- * created this account", both of which are meaningful answers in their own
- * right. Written once because 0034 added a second embed with exactly the same
- * problem, and two copies of a workaround is one copy too many.
+ * can silently produce null and be mistaken for a real absence — which for
+ * `campuses` would read as "this admin has no campus", a meaningful answer in
+ * its own right.
+ *
+ * ONE CALLER AGAIN. It briefly had two: 0034's creator lookup was written as a
+ * self-embed and is now resolved in TypeScript instead — see the note in
+ * listTeamMembers() for why that embed could never have worked.
  */
 function embeddedName(row: unknown, key: string): string | null {
   const embed = (row as Record<string, unknown>)[key] as
@@ -330,15 +332,41 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
   const { data: profiles, error } = await supabase
     .from("profiles")
     /*
-     * `creator:…` is a SELF-referencing embed, so it needs the explicit
-     * constraint hint — PostgREST cannot guess which side of a self-join is
-     * meant. 0034 names the foreign key rather than letting Postgres name it
-     * for exactly this reason, and its assertion block checks the name, so this
-     * string and the schema cannot drift apart silently.
+     * NO SELF-EMBED HERE, AND THAT IS A SCAR.
+     *
+     * This shipped as `creator:profiles!profiles_created_by_fkey(name)` and
+     * took every admin screen down: PostgREST answered
+     *
+     *   PGRST200 — Could not find a relationship between 'profiles' and
+     *   'profiles' in the schema cache. Searched for a foreign key
+     *   relationship between 'profiles' and 'profiles' using the hint
+     *   'profiles_created_by_fkey' … but no matches were found.
+     *
+     * and a failed query here returns [] — so the team list, Assign, Field
+     * Presence, the hierarchy and the member editor all rendered empty against
+     * a table with every row intact.
+     *
+     * THE CONSTRAINT NAME IS THE WRONG KIND OF HINT FOR A SELF-RELATION.
+     * The foreign key was there all along — a dangling `created_by` is still
+     * refused with 23503 naming `profiles_created_by_fkey` — and RLS was never
+     * involved: the service role, which bypasses policies entirely, got the
+     * identical PGRST200. PostgREST disambiguates a self-join by the
+     * REFERENCING COLUMN (`profiles!created_by`), not by the constraint.
+     *
+     * SO THE EMBED IS GONE RATHER THAN RESPELLED. `profiles!created_by` does
+     * work, but this query already fetches EVERY profile — it runs only in an
+     * admin's scope, where `profiles_select` returns the whole table — so the
+     * creator's name is already in hand and a second read of the same table to
+     * find it is a round trip to learn something we have. Resolving it in
+     * TypeScript also means no admin screen can ever again depend on
+     * PostgREST's relationship graph agreeing with the schema.
+     *
+     * The map is COMPLETE BY CONSTRUCTION, which is what makes this safe:
+     * FO028 refuses a `created_by` that is not an admin, admins are profiles,
+     * and the foreign key is ON DELETE SET NULL — so a non-null `created_by`
+     * always names a row in this very result set.
      */
-    .select(
-      "id, name, role, created_at, campus_id, campuses(name), created_by, creator:profiles!profiles_created_by_fkey(name)",
-    )
+    .select("id, name, role, created_at, campus_id, campuses(name), created_by")
     .order("name");
 
   if (error) {
@@ -385,6 +413,16 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
   const viewer = await getCurrentUser();
   const adminCount = (profiles ?? []).filter((p) => p.role === "admin").length;
 
+  /*
+   * id -> name, built from the rows already fetched. This is what replaced the
+   * self-embed; see the note on the select above for why that embed could not
+   * work and why a second query would be a round trip to learn what is already
+   * in hand.
+   */
+  const names = new Map<string, string | null>(
+    (profiles ?? []).map((profile) => [profile.id, profile.name]),
+  );
+
   const emails = new Map<string, string | null>();
   try {
     const db = createAdminClient();
@@ -409,9 +447,18 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
     campusId: profile.campus_id ?? null,
     ownedInstitutes: owned.get(profile.id) ?? 0,
     createdBy: profile.created_by ?? null,
-    // Same shape problem, same reader. Null here means "no creator recorded",
-    // which for every account made before 0034 is simply the truth.
-    createdByName: embeddedName(profile, "creator"),
+    /*
+     * Looked up in the rows we already have rather than embedded — see the
+     * select above.
+     *
+     * Null means "no creator recorded", which for every account made before
+     * 0034 is simply the truth. It cannot mean "the creator was not found":
+     * FO028 keeps `created_by` pointing at an admin, and the FK's ON DELETE SET
+     * NULL means a deleted creator leaves null rather than a dangling id.
+     */
+    createdByName: profile.created_by
+      ? (names.get(profile.created_by) ?? null)
+      : null,
     email: emails.get(profile.id) ?? null,
     createdAt: profile.created_at ?? null,
     isSelf: viewer?.id === profile.id,
