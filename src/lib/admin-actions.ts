@@ -18,6 +18,7 @@ import {
   deleteMemberSchema,
   fieldErrorsFrom,
   flushSchema,
+  memberCreatorSchema,
   newMemberSchema,
   purposeSchema,
   purposeUpdateSchema,
@@ -692,6 +693,21 @@ export async function createMember(
     name: input.name,
     role: input.role,
     campus_id: input.campus_id,
+    /*
+     * WHO MADE THIS ACCOUNT — migration 0034, and the only place in the app
+     * that writes it without being asked.
+     *
+     * Free to stamp here precisely because this insert already runs as the
+     * ADMIN rather than as the service role (see the comment above it): FO028
+     * refuses a non-admin writing the column, and `gate.user.id` is by
+     * definition the admin that check just passed. Stamping it from the
+     * service-role client instead would have had to choose an id to write,
+     * which is how a record becomes a guess.
+     *
+     * A RECORD, NOT A PERMISSION. Nothing reads this to decide what anyone may
+     * see; it feeds the hierarchy screen and nothing else.
+     */
+    created_by: gate.user.id,
   });
 
   if (profileError) {
@@ -712,6 +728,106 @@ export async function createMember(
     fieldErrors: {},
     ok: true,
     created: { name: input.name, email: input.email, role: input.role },
+  };
+}
+
+/**
+ * Recording who created an account that predates migration 0034.
+ *
+ * THE ONLY WAY A created_by IS EVER WRITTEN BY HAND, and it exists because
+ * 0034 deliberately backfills nothing. Before that column there was no record
+ * anywhere — not in `created_at`, not in an audit row — of which admin opened
+ * an account, so a backfill could only have invented one. The ~39 accounts that
+ * already existed therefore start null, and an admin who knows the answer
+ * supplies it from the hierarchy screen.
+ *
+ * A RECORD, NOT A PERMISSION. Worth stating in the one action that writes this
+ * column freely, because the last column to look like this — `registered_by`,
+ * which `reassignInstitute()` above writes — turned out to decide who can see
+ * an institute, and its action carries a warning to that effect. This one
+ * decides nothing. No policy, trigger or query reads `created_by`; changing it
+ * moves a node on a chart and grants nobody anything.
+ *
+ * THE ROLE CHECKS ARE COURTESIES, FO028 IS THE CONTROL — the same division as
+ * every other admin action in this file. The picker only offers admins, this
+ * re-asks so a tampered form gets a sentence rather than a database code, and
+ * the trigger refuses it regardless. The lookup is ONE query for both ids
+ * rather than two: they come from the same table and a round trip is a round
+ * trip.
+ */
+export async function setMemberCreator(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = memberCreatorSchema.safeParse({
+    member: textOf(formData, "member"),
+    created_by: textOf(formData, "created_by"),
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELD, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+  const { member, created_by: creator } = parsed.data;
+
+  const { data: rows, error: lookupError } = await gate.supabase
+    .from("profiles")
+    .select("id, name, role")
+    .in("id", [member, creator]);
+
+  if (lookupError) {
+    logError("admin:member-creator-lookup", lookupError);
+    return denied(
+      toFriendlyMessage(lookupError, "We could not check those two accounts."),
+    );
+  }
+
+  const target = (rows ?? []).find((row) => row.id === member);
+  const admin = (rows ?? []).find((row) => row.id === creator);
+
+  // Both must be real. A missing target would otherwise be an update that
+  // matches no row and then reports success — the failure mode reassignInstitute
+  // avoids by taking the current owner out of its picker.
+  if (!target) return denied("That person no longer has an account.");
+  if (!admin) return denied("That admin no longer has an account.");
+
+  // FO028's rep-parent refusal, asked here so it arrives as a sentence. See
+  // 0034's header for why a rep parent is refused at all: it is what keeps the
+  // model flat rather than letting this become a reports-to chain.
+  if (admin.role !== "admin") {
+    return denied(
+      `${admin.name ?? "That person"} is a rep. Only an admin can have created an account.`,
+    );
+  }
+
+  const { error } = await gate.supabase
+    .from("profiles")
+    .update({ created_by: creator })
+    .eq("id", member);
+
+  if (error) {
+    logError("admin:member-creator", error);
+    // By CODE, never by message text — the rule every action in this file
+    // follows, so no database wording reaches a screen.
+    if (error.code === "FO028") {
+      return denied(
+        "That cannot be recorded. An account is only ever created by an admin, " +
+          "and never by the person themselves.",
+      );
+    }
+    return denied(
+      toFriendlyMessage(error, "We could not record who created that account."),
+    );
+  }
+
+  revalidatePath("/team/hierarchy");
+  revalidatePath("/settings");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: `Recorded: ${admin.name ?? "that admin"} created ${target.name ?? "that account"}.`,
   };
 }
 

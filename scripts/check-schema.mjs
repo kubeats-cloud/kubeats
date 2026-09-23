@@ -112,6 +112,7 @@ const PROBES = [
   { id: "0026", table: "institute_statuses", column: "tone", needs: true },
   { id: "0026", table: "institute_statuses", column: "is_active", needs: true },
   { id: "0026", table: "institute_statuses", column: "asks_expected_date", needs: true },
+  { id: "0034", table: "profiles", column: "created_by", needs: true },
 ];
 
 /*

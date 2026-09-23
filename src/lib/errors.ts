@@ -71,11 +71,16 @@ const CODE_MESSAGES: Record<string, string> = {
    * wording is never what reaches a screen.
    */
   FO027: "That member could not be deleted. Nothing was changed.",
-  // PostgREST
-  PGRST116: "We could not find that.",
-  PGRST204: DATABASE_BEHIND,
-  PGRST205: "The app is not fully set up yet. Please contact your admin.",
-  PGRST301: "Your session has expired. Please sign in again.",
+  /*
+   * FO028 — a created_by that was refused (migration 0034).
+   *
+   * Covers three cases: a non-admin writing the column, a self-parent, and a
+   * created_by pointing at a rep. `setMemberCreator()` checks the last two
+   * itself and phrases them better, so this is the fallback for a race or a
+   * hand-made request — and, like FO027, it is deliberately generic, because
+   * the database's own wording is never what reaches a screen.
+   */
+  FO028: "That could not be recorded. Nothing was changed.",
 };
 
 /** Network and timeout failures deserve their own wording — they are retryable. */

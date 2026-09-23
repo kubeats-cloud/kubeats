@@ -174,6 +174,37 @@ export const reassignSchema = z.object({
   member: z.uuid("Choose a rep to hand it to."),
 });
 
+/**
+ * Recording, by hand, which admin created an account.
+ *
+ * FOR THE ROWS THAT PREDATE MIGRATION 0034 AND NOTHING ELSE. `createMember()`
+ * stamps `created_by` itself from the signed-in admin, so every account made
+ * from now on arrives with one. The ~39 that already existed have no record of
+ * who made them anywhere in the database, and 0034 deliberately backfills none
+ * rather than guessing — so an admin supplies the answer from the hierarchy
+ * screen, one person at a time.
+ *
+ * TWO IDS, AND ONE RULE THAT CAN BE CHECKED WITHOUT A QUERY. "The creator must
+ * be an admin" is not expressed here, for the reason `reassignSchema` above
+ * gives about campuses: a schema cannot know a role without a lookup, and a
+ * second opinion about it in the app is how it drifts from the trigger that
+ * actually decides. FO028 refuses a rep parent; the action checks it so the
+ * admin gets a sentence, and the picker only ever offers admins.
+ *
+ * What IS checked here is self-parenthood, because it needs no lookup at all —
+ * two ids and an inequality. FO028 refuses it too. This is the copy that names
+ * the field rather than arriving as a database code.
+ */
+export const memberCreatorSchema = z
+  .object({
+    member: z.uuid("That person could not be identified."),
+    created_by: z.uuid("Choose the admin who created them."),
+  })
+  .refine((v) => v.member !== v.created_by, {
+    path: ["created_by"],
+    message: "Nobody creates their own account.",
+  });
+
 export const stateSchema = z.object({
   name: name(80, "The state name"),
 });

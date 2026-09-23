@@ -1,8 +1,10 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import Link from "next/link";
 import {
   CheckCircle2Icon,
+  NetworkIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UserPlusIcon,
@@ -94,6 +96,7 @@ export function TeamPanel({
     deleteMember,
     EMPTY_DELETE_MEMBER_STATE,
   );
+
   /** The member the dialog is currently about. Null when it is closed. */
   const [confirming, setConfirming] = useState<TeamMember | null>(null);
   /** What the admin has typed into the confirmation box. */
@@ -250,12 +253,23 @@ export function TeamPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">
-          Team
-          <span className="text-muted-foreground ml-2 text-sm font-normal">
-            {members.length} {members.length === 1 ? "person" : "people"}
-          </span>
-        </CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle className="text-base">
+            Team
+            <span className="text-muted-foreground ml-2 text-sm font-normal">
+              {members.length} {members.length === 1 ? "person" : "people"}
+            </span>
+          </CardTitle>
+          {/* The second door to the hierarchy, the first being /team. It is not
+              a tab: who created which account is read a few times a year, which
+              is the distance /data and /team/report are kept at. */}
+          <Button asChild variant="outline" className="h-9">
+            <Link href="/team/hierarchy">
+              <NetworkIcon className="size-4" aria-hidden />
+              Who created whom
+            </Link>
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Phone: cards. Desktop: a table, because an admin reading this is

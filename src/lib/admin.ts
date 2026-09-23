@@ -217,6 +217,29 @@ export interface TeamMember {
   role: string;
   /** Null for an admin, who has no campus and sees every one. */
   campusName: string | null;
+  /**
+   * THE ADMIN WHO CREATED THIS ACCOUNT — `profiles.created_by`, migration 0034.
+   *
+   * A RECORD, NOT A PERMISSION, and the distinction is the whole of the
+   * feature: nothing reads this to decide what anyone may see. `registered_by`
+   * on an institute went the other way — 0028 turned an audit stamp into the
+   * column `institutes_select` keys on — so it is worth saying plainly that
+   * this one has not and must not.
+   *
+   * Null is an ordinary state, not an absence to be apologised for: every
+   * account that predates 0034 has none (that file backfills nothing rather
+   * than guessing), and the foreign key is `on delete set null`, so deleting a
+   * departed admin returns their creations to it. Those are the rows the
+   * hierarchy screen offers a picker for.
+   */
+  createdBy: string | null;
+  /**
+   * Resolved through the self-embed below. Null when `createdBy` is null, and
+   * — in principle — when the creator's row is unreadable, which cannot happen
+   * here: this function is only ever called in an admin's scope, and
+   * `profiles_select` gives an admin every row.
+   */
+  createdByName: string | null;
   /** From auth.users, which only the service-role client can read. */
   email: string | null;
   createdAt: string | null;
@@ -254,6 +277,27 @@ export interface TeamMember {
 }
 
 /**
+ * The name out of a many-to-one embed, whichever shape it arrives in.
+ *
+ * PostgREST returns a many-to-one embed as an OBJECT at runtime, and the type
+ * supabase-js infers for it calls it an ARRAY. Both are read, so neither shape
+ * can silently produce null and be mistaken for a real absence — which for the
+ * two callers below would read as "this admin has no campus" and "nobody
+ * created this account", both of which are meaningful answers in their own
+ * right. Written once because 0034 added a second embed with exactly the same
+ * problem, and two copies of a workaround is one copy too many.
+ */
+function embeddedName(row: unknown, key: string): string | null {
+  const embed = (row as Record<string, unknown>)[key] as
+    | { name: string | null }
+    | { name: string | null }[]
+    | null
+    | undefined;
+  if (!embed) return null;
+  return Array.isArray(embed) ? (embed[0]?.name ?? null) : embed.name;
+}
+
+/**
  * The team list.
  *
  * Names and roles come from `profiles` through the caller's own session, so RLS
@@ -264,7 +308,16 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
   const supabase = await createClient();
   const { data: profiles, error } = await supabase
     .from("profiles")
-    .select("id, name, role, created_at, campuses(name)")
+    /*
+     * `creator:…` is a SELF-referencing embed, so it needs the explicit
+     * constraint hint — PostgREST cannot guess which side of a self-join is
+     * meant. 0034 names the foreign key rather than letting Postgres name it
+     * for exactly this reason, and its assertion block checks the name, so this
+     * string and the schema cannot drift apart silently.
+     */
+    .select(
+      "id, name, role, created_at, campuses(name), created_by, creator:profiles!profiles_created_by_fkey(name)",
+    )
     .order("name");
 
   if (error) {
@@ -305,16 +358,11 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
     role: profile.role,
     // Embedded through the foreign key. Null is the correct answer for an
     // admin, who has no campus — not a scoping failure, so no warning here.
-    // PostgREST returns a many-to-one embed as an object at runtime, and the
-    // inferred type calls it an array. Both are read, so neither shape can
-    // silently produce null and be mistaken for "this admin has no campus".
-    campusName: (() => {
-      const embed = (profile as unknown as {
-        campuses?: { name: string | null } | { name: string | null }[] | null;
-      }).campuses;
-      if (!embed) return null;
-      return Array.isArray(embed) ? (embed[0]?.name ?? null) : embed.name;
-    })(),
+    campusName: embeddedName(profile, "campuses"),
+    createdBy: profile.created_by ?? null,
+    // Same shape problem, same reader. Null here means "no creator recorded",
+    // which for every account made before 0034 is simply the truth.
+    createdByName: embeddedName(profile, "creator"),
     email: emails.get(profile.id) ?? null,
     createdAt: profile.created_at ?? null,
     isSelf: viewer?.id === profile.id,

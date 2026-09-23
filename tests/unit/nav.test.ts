@@ -90,6 +90,33 @@ describe("path guards", () => {
     }
   });
 
+  /*
+   * THE HIERARCHY IS ADMIN-ONLY, AND IT IS GATED BY PREFIX.
+   *
+   * `/team/hierarchy` is not listed in ADMIN_ONLY_PATHS and does not need to
+   * be: `matches()` is prefix-based and `/team` is already there, so the whole
+   * subtree is covered — the same way `/team/report` has always been. Adding
+   * the child as its own entry would be a second, redundant answer to a
+   * question the list already answers, which is the kind of duplication the
+   * rest of this file's comments exist to prevent.
+   *
+   * What is NOT redundant is this assertion. The guarantee the feature needs is
+   * "a rep cannot reach the hierarchy", and that guarantee currently rests on
+   * `/team` staying on the list. If someone ever takes it off — to make the
+   * week snapshot shared, say — this fails and names what else goes with it.
+   * `profiles.created_by` is a record and not a permission, but who created
+   * whom is still the team's business and not the field's.
+   */
+  it("keeps the hierarchy behind the admin gate, through its parent", () => {
+    expect(isAdminOnlyPath("/team/hierarchy")).toBe(true);
+    expect(isRepOnlyPath("/team/hierarchy")).toBe(false);
+    // The parent is what provides it. Said out loud so the failure above is
+    // self-explanatory rather than mysterious.
+    expect(isAdminOnlyPath("/team")).toBe(true);
+    // And it is not in the bar: six tabs, and this is read a few times a year.
+    expect(ADMIN_NAV.map((i) => i.href)).not.toContain("/team/hierarchy");
+  });
+
   it("does not catch a route that merely starts with the same letters", () => {
     // "/reviewer" is not "/review", and a prefix match without the boundary
     // would quietly gate a route nobody meant to gate.

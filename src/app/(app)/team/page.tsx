@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { TableIcon } from "lucide-react";
+import { NetworkIcon, TableIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
@@ -69,6 +69,14 @@ export default async function TeamPage(props: PageProps<"/team">) {
           <Link href="/team/report">
             <TableIcon className="size-4" aria-hidden />
             Full activity report
+          </Link>
+        </Button>
+        {/* Off the bar, like the report beside it: who created which account is
+            read when somebody joins or the roster is audited, not weekly. */}
+        <Button asChild variant="outline" className="h-11">
+          <Link href="/team/hierarchy">
+            <NetworkIcon className="size-4" aria-hidden />
+            Hierarchy
           </Link>
         </Button>
         <ExportExcel {...defaultExportRange()} label="Export to Excel" />
