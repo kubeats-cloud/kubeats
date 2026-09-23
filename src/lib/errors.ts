@@ -81,6 +81,24 @@ const CODE_MESSAGES: Record<string, string> = {
    * the database's own wording is never what reaches a screen.
    */
   FO028: "That could not be recorded. Nothing was changed.",
+  /*
+   * FO029 — a campus correction that was refused (migration 0035).
+   *
+   * Five cases: no member, no campus, the target is an admin (who has no
+   * campus by FO021), the campus is inactive, and — the one an admin will
+   * actually meet — the rep is part-way through a visit.
+   *
+   * `updateMember()` maps that last one on its own with a sentence naming the
+   * remedy, because "wait until they have finished" is something the admin can
+   * act on and "nothing was changed" is not. This entry is what the other four
+   * fall back to.
+   */
+  FO029: "That campus could not be changed. Nothing was changed.",
+  // PostgREST
+  PGRST116: "We could not find that.",
+  PGRST204: DATABASE_BEHIND,
+  PGRST205: "The app is not fully set up yet. Please contact your admin.",
+  PGRST301: "Your session has expired. Please sign in again.",
 };
 
 /** Network and timeout failures deserve their own wording — they are retryable. */

@@ -569,6 +569,48 @@ if (configured && !has0032) {
 }
 
 /**
+ * Migration 0035 adds public.correct_member_campus().
+ *
+ * Probed exactly the way 0032 is, and for the same reason: the only way to
+ * prove the function RUNS is to move somebody, so it is probed by its refusal.
+ * A database without it answers PGRST202; one with it refuses this call some
+ * other way, and that is a yes.
+ *
+ * The service-role client is again the interesting caller. `is_admin()` reads
+ * `auth.uid()`, which is null for the service role, so this probe is turned
+ * away with 42501 before it reaches the member check — the function working as
+ * specified, because moving a rep between campuses moves a security boundary
+ * and has no trusted-context bypass. Every test below calls it through
+ * `boss.db`, which has a session and a profile.
+ *
+ * All three arguments are named even though `p_retag` has a default: PostgREST
+ * resolves an overload by the argument names it is given, and being explicit
+ * keeps the probe pointing at one signature.
+ */
+const has0035 = configured
+  ? await admin
+      .rpc("correct_member_campus", {
+        p_member: "00000000-0000-4000-8000-000000000000",
+        p_campus: "00000000-0000-4000-8000-000000000000",
+        p_retag: false,
+      })
+      .then(({ error }) => error?.code !== "PGRST202")
+  : false;
+
+if (configured && !has0035) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0035 is not applied to this project.",
+      "    The campus-correction suite is being SKIPPED, not passing — nothing is",
+      "    checking that moving a rep takes their pipeline with them, or that it",
+      "    refuses while they are mid-visit.",
+      "",
+    ].join(String.fromCharCode(10)),
+  );
+}
+
+/**
  * Migration 0010 adds the institute_statuses lookup and the three event
  * statuses. Like 0008's suite, this one is the only thing that can catch the
  * app's catalogue and the database's table disagreeing about which statuses
@@ -4682,6 +4724,254 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .maybeSingle();
       expect(still, "the material is still there").not.toBeNull();
       expect(still?.uploaded_by, "only the byline went").toBeNull();
+    });
+  });
+
+  describe.skipIf(!has0035)("0035 — correcting a rep's campus", () => {
+    /**
+     * THE CAMPUS TO MOVE TO, AND IT HAS TO BE ACTIVE.
+     *
+     * Every other campus this file makes is `active: false`, deliberately — the
+     * suites create and destroy institutes freely and must never touch one of
+     * the five real campuses. But `correct_member_campus()` refuses an inactive
+     * destination on purpose (0020a added the flag for the demo campus, and
+     * posting a real rep there would hide their whole pipeline behind a campus
+     * nobody looks at), so the destination here is the one that must be active.
+     *
+     * `campusA` stays inactive and is therefore free coverage for that refusal.
+     */
+    let destination: string;
+
+    beforeAll(async () => {
+      const { data, error } = await admin
+        .from("campuses")
+        /*
+         * NOT "campus B" — the campus-boundary suite above already owns that
+         * name, `campuses.name` is UNIQUE, and both suites run in one process
+         * under one TAG. Named for what it is FOR rather than by a letter, so
+         * the next suite that needs a campus collides with neither.
+         */
+        .insert({
+          name: `${TAG} correction campus`,
+          city: "Testville",
+          active: true,
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(`correction campus: ${error.message}`);
+      destination = data.id as string;
+    });
+
+    // No afterAll: the outer one deletes every campus matching the tag, LAST,
+    // after the members and institutes that reference them. A nested afterAll
+    // would run first and be refused by the foreign keys.
+
+    /**
+     * A rep on campusA with a pipeline of their own.
+     *
+     * Made fresh per test rather than shared, for the reason `makeVictim` gives
+     * above: these tests move their subject, and a shared one would only be in
+     * the starting position once.
+     */
+    const makeSubject = async (label: string, institutes = 2) => {
+      const subject = await makeMember("rep", `campus-${label}`, campusA);
+
+      const owned: string[] = [];
+      for (let n = 0; n < institutes; n += 1) {
+        owned.push(await makeInstitute(subject.id, campusA, `${label}-${n}`));
+      }
+      return { subject, owned };
+    };
+
+    /** Where the rep is, and where the institutes they own are. */
+    const placementOf = async (memberId: string) => {
+      const [profile, owned] = await Promise.all([
+        admin.from("profiles").select("campus_id").eq("id", memberId).maybeSingle(),
+        admin.from("institutes").select("id, campus_id").eq("registered_by", memberId),
+      ]);
+      return {
+        campus: (profile.data?.campus_id as string | null) ?? null,
+        institutes: (owned.data ?? []).map(
+          (row) => (row as { campus_id: string | null }).campus_id,
+        ),
+      };
+    };
+
+    it("refuses a rep outright — it is SECURITY DEFINER, so this is the whole gate", async () => {
+      const { subject } = await makeSubject("not-admin");
+      const before = await placementOf(subject.id);
+
+      const { error } = await repA.db.rpc("correct_member_campus", {
+        p_member: subject.id,
+        p_campus: destination,
+        p_retag: true,
+      });
+      expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+
+      // And nothing moved. The function bypasses RLS, so a failure here would
+      // be a rep silently re-drawing a security boundary.
+      expect(await placementOf(subject.id)).toEqual(before);
+    });
+
+    it("moves the rep when an admin asks", async () => {
+      const { subject } = await makeSubject("moves", 0);
+
+      const { error } = await boss.db.rpc("correct_member_campus", {
+        p_member: subject.id,
+        p_campus: destination,
+        p_retag: false,
+      });
+      expect(error).toBeNull();
+
+      const after = await placementOf(subject.id);
+      expect(after.campus, "profiles.campus_id follows").toBe(destination);
+    });
+
+    it("takes the institutes they own with them, and counts them", async () => {
+      const { subject, owned } = await makeSubject("retag", 2);
+
+      const before = await placementOf(subject.id);
+      expect(before.campus, "starts on campus A").toBe(campusA);
+      expect(before.institutes, "with a pipeline to move").toEqual([campusA, campusA]);
+
+      const { data, error } = await boss.db.rpc("correct_member_campus", {
+        p_member: subject.id,
+        p_campus: destination,
+        p_retag: true,
+      });
+      expect(error).toBeNull();
+
+      const after = await placementOf(subject.id);
+      expect(after.campus).toBe(destination);
+      /*
+       * THE POINT OF THE WHOLE FUNCTION. `institutes_select` (0028) is
+       * `campus_id = my_campus() AND registered_by = auth.uid()` — a strict AND
+       * — so a rep whose campus moved without their institutes can no longer
+       * see a single one of them. Both sides have to land on `destination` or
+       * the correction has created exactly the state it exists to prevent.
+       */
+      expect(after.institutes.sort()).toEqual(owned.map(() => destination));
+
+      // The receipt the admin's dialog reports, counted by the function as it
+      // went rather than promised beforehand.
+      const receipt = data as { campus: string; institutes_moved: number };
+      expect(receipt.institutes_moved).toBe(owned.length);
+      expect(receipt.campus, "named, so the dialog need not look it up").toContain(
+        "correction campus",
+      );
+    });
+
+    it("leaves them where they are when the retag is declined", async () => {
+      const { subject } = await makeSubject("no-retag", 2);
+
+      const { data, error } = await boss.db.rpc("correct_member_campus", {
+        p_member: subject.id,
+        p_campus: destination,
+        p_retag: false,
+      });
+      expect(error).toBeNull();
+
+      /*
+       * THE GENUINE-TRANSFER CASE, and the orphaning is deliberate rather than a
+       * bug this test failed to catch. They really did work campus A, so its
+       * institutes stay there — and the rep can no longer see them, which is
+       * 0028's accepted consequence of a transfer. An admin reassigns them to
+       * somebody on campus A.
+       */
+      const after = await placementOf(subject.id);
+      expect(after.campus, "the rep moved").toBe(destination);
+      expect(after.institutes, "the pipeline did not").toEqual([campusA, campusA]);
+
+      const receipt = data as { institutes_moved: number };
+      expect(receipt.institutes_moved, "and the receipt says so").toBe(0);
+    });
+
+    /**
+     * FO029's mid-visit refusal — FO025(b)'s reasoning arriving by another door.
+     *
+     * A rep checked in somewhere is holding their one open visit (FO013). Move
+     * their campus and the institute stops being readable to them, so
+     * log_visit()'s `update public.institutes` matches no row and raises FO006 —
+     * and they cannot check in anywhere else either, so they are stuck with a
+     * photograph they cannot file until the 01:30 sweep.
+     *
+     * The predicate is keyed on MEMBER alone, unlike FO025(b)'s, because this
+     * moves the whole pipeline rather than one institute: any open visit at all
+     * is a reason to wait.
+     */
+    it("refuses, and moves nothing, while the rep is part-way through a visit", async () => {
+      const { subject, owned } = await makeSubject("mid-visit", 1);
+      const before = await placementOf(subject.id);
+
+      // Arrived, not checked out, not swept — exactly what
+      // daily_plans_one_open_visit indexes.
+      await ensureArrival(subject.id, owned[0], iso());
+
+      const { error } = await boss.db.rpc("correct_member_campus", {
+        p_member: subject.id,
+        p_campus: destination,
+        p_retag: true,
+      });
+      expect(error?.code).toBe("FO029");
+      expect(error?.message, "and says what to do about it").toMatch(/finished/i);
+
+      // NEITHER HALF moved. One transaction, so a partial correction is the one
+      // outcome that must be impossible.
+      expect(await placementOf(subject.id)).toEqual(before);
+
+      // Once they are out of the school, the same call goes through — which is
+      // what proves the refusal was about the open visit and not about anything
+      // else in the fixture.
+      await admin
+        .from("daily_plans")
+        .update({ checkout_at: new Date().toISOString() })
+        .eq("member", subject.id)
+        .is("checkout_at", null);
+
+      const { error: retry } = await boss.db.rpc("correct_member_campus", {
+        p_member: subject.id,
+        p_campus: destination,
+        p_retag: true,
+      });
+      expect(retry).toBeNull();
+      expect((await placementOf(subject.id)).campus).toBe(destination);
+    });
+
+    it("refuses an admin target — an admin has no campus (FO021)", async () => {
+      const { error } = await boss.db.rpc("correct_member_campus", {
+        p_member: boss.id,
+        p_campus: destination,
+        p_retag: false,
+      });
+      expect(error?.code).toBe("FO029");
+
+      const { data } = await admin
+        .from("profiles")
+        .select("campus_id")
+        .eq("id", boss.id)
+        .maybeSingle();
+      expect(data?.campus_id, "still none").toBeNull();
+    });
+
+    it("refuses a campus that is not in use", async () => {
+      // campusA is active: false, like every fixture campus but the destination.
+      const { subject } = await makeSubject("inactive", 0);
+
+      const { error } = await boss.db.rpc("correct_member_campus", {
+        p_member: subject.id,
+        p_campus: campusA,
+        p_retag: false,
+      });
+      expect(error?.code).toBe("FO029");
+    });
+
+    it("refuses a member who is already gone", async () => {
+      const { error } = await boss.db.rpc("correct_member_campus", {
+        p_member: "00000000-0000-4000-8000-000000000000",
+        p_campus: destination,
+        p_retag: false,
+      });
+      expect(error?.code).toBe("FO029");
     });
   });
 

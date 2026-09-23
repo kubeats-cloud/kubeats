@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   CheckCircle2Icon,
   NetworkIcon,
+  PencilIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UserPlusIcon,
@@ -12,6 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -29,16 +31,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { createMember, deleteMember } from "@/lib/admin-actions";
+import { createMember, deleteMember, updateMember } from "@/lib/admin-actions";
 import {
   EMPTY_DELETE_MEMBER_STATE,
   EMPTY_MEMBER_STATE,
+  EMPTY_MEMBER_UPDATE_STATE,
   type MemberState,
 } from "@/lib/admin-form-state";
 import {
   MIN_PASSWORD,
   confirmationMatches,
   fieldErrorsFrom,
+  memberUpdateSchema,
   newMemberSchema,
 } from "@/lib/validation/admin";
 import {
@@ -97,6 +101,107 @@ export function TeamPanel({
     EMPTY_DELETE_MEMBER_STATE,
   );
 
+  /*
+   * Editing a member — one dialog for the panel, held here for exactly the
+   * reason the delete dialog above is.
+   *
+   * A successful edit revalidates the page and every row is rebuilt from fresh
+   * props, so a `useActionState` owned by the row would be torn down mid-flight
+   * and the receipt — which is the only place an admin learns how many
+   * institutes moved with the rep — would go with it.
+   *
+   * WHAT THIS EDITOR DOES NOT OFFER: email, password, the id, and the role. See
+   * `memberUpdateSchema` for why each is its own decision rather than a field
+   * beside a name.
+   */
+  const [editState, editAction, editPending] = useActionState(
+    updateMember,
+    EMPTY_MEMBER_UPDATE_STATE,
+  );
+  /** The member being edited. Null when the dialog is closed. */
+  const [editing, setEditing] = useState<TeamMember | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCampus, setEditCampus] = useState("");
+  /*
+   * THE RETAG, AND IT DEFAULTS ON.
+   *
+   * This editor exists to correct a WRONG CAMPUS ALLOCATION, which is by far
+   * the commoner of the two things a campus change can mean — and in that case
+   * the institutes the rep owns were never on the old campus either, so they
+   * have to move too. Leaving it off by default would make the ordinary
+   * correction silently produce the broken state `correct_member_campus()`
+   * (0035) exists to prevent: a rep on one campus whose whole pipeline is on
+   * another, and therefore invisible to them.
+   *
+   * Unticking it is the genuine-transfer case, where those institutes really do
+   * belong to the campus they were worked from. The dialog says what each
+   * choice will do, with the count, before anything is submitted.
+   */
+  const [editRetag, setEditRetag] = useState(true);
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  /** Same question, same answer, as `submitted` above: is this receipt ours? */
+  const [editSubmitted, setEditSubmitted] = useState(false);
+
+  const editReceipt = editSubmitted ? editState.updated : undefined;
+
+  function openEdit(member: TeamMember) {
+    setEditing(member);
+    setEditName(member.name);
+    setEditCampus(member.campusId ?? "");
+    setEditRetag(true);
+    setEditErrors({});
+    setEditSubmitted(false);
+  }
+
+  function closeEdit() {
+    setEditing(null);
+    setEditErrors({});
+    setEditSubmitted(false);
+  }
+
+  /**
+   * Dispatched by hand, like every other form in this file.
+   *
+   * There IS a Radix Select here — the campus — and it mounts holding the
+   * member's CURRENT campus. A React reset would restore that, which is a
+   * plausible value rather than an obviously empty one, so the admin could
+   * correct a campus, hit a refusal, and resubmit against the value they were
+   * trying to change. `log-visit-form.test.ts` holds this whole file to the
+   * onSubmit form for this class of bug.
+   *
+   * The FormData is captured before any state moves, so what is sent is what is
+   * on screen.
+   */
+  function handleEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editing) return;
+    const formData = new FormData(event.currentTarget);
+
+    const parsed = memberUpdateSchema.safeParse({
+      member: editing.id,
+      name: editName,
+      campus_id: editing.role === "rep" ? editCampus : "",
+      role: editing.role,
+      retag: editRetag,
+    });
+    if (!parsed.success) {
+      setEditErrors(fieldErrorsFrom(parsed.error));
+      return;
+    }
+
+    setEditErrors({});
+    setEditSubmitted(true);
+    editAction(formData);
+  }
+
+  /** Whether this edit would move the rep, which is what the warning is about. */
+  const campusMoving =
+    editing !== null &&
+    editing.role === "rep" &&
+    editCampus !== "" &&
+    editCampus !== (editing.campusId ?? "");
+
+  const movingTo = campuses.find((campus) => campus.id === editCampus);
   /** The member the dialog is currently about. Null when it is closed. */
   const [confirming, setConfirming] = useState<TeamMember | null>(null);
   /** What the admin has typed into the confirmation box. */
@@ -297,6 +402,7 @@ export function TeamPanel({
                   {member.campusName}
                 </span>
               )}
+              <EditTrigger member={member} onOpen={openEdit} />
               <DeleteTrigger member={member} onOpen={openDelete} />
             </li>
           ))}
@@ -316,8 +422,8 @@ export function TeamPanel({
                 <th scope="col" className="px-4 py-2 text-right text-xs font-medium">
                   Role
                 </th>
-                <th scope="col" className="w-10 px-2 py-2">
-                  <span className="sr-only">Remove</span>
+                <th scope="col" className="w-20 px-2 py-2">
+                  <span className="sr-only">Edit or remove</span>
                 </th>
               </tr>
             </thead>
@@ -344,7 +450,8 @@ export function TeamPanel({
                         </span>
                       )}
                   </td>
-                  <td className="px-2 py-2.5 text-right">
+                  <td className="px-2 py-2.5 text-right whitespace-nowrap">
+                    <EditTrigger member={member} onOpen={openEdit} />
                     <DeleteTrigger member={member} onOpen={openDelete} />
                   </td>
                 </tr>
@@ -543,6 +650,191 @@ export function TeamPanel({
         )}
 
         {/*
+          THE EDIT DIALOG — name and campus, and nothing else.
+
+          Outside the list for the same reason the delete dialog below is: the
+          row it was opened from is rebuilt when the edit lands, and the receipt
+          has to outlive it.
+        */}
+        <Dialog
+          open={editing !== null}
+          onOpenChange={(next) => {
+            if (!next && !editPending) closeEdit();
+          }}
+        >
+          <DialogContent className="max-w-md">
+            {editing && editReceipt ? (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-base">
+                    <CheckCircle2Icon
+                      className="text-success size-5 shrink-0"
+                      aria-hidden
+                    />
+                    Saved
+                  </DialogTitle>
+                  <DialogDescription className="text-left">
+                    {editReceipt.campus ? (
+                      <>
+                        {editReceipt.name} is now on {editReceipt.campus}.{" "}
+                        {editReceipt.institutesMoved > 0
+                          ? `${editReceipt.institutesMoved} institute${
+                              editReceipt.institutesMoved === 1 ? "" : "s"
+                            } moved with them.`
+                          : "No institutes moved."}
+                      </>
+                    ) : (
+                      <>The name was updated.</>
+                    )}
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <Button type="button" className="h-11" onClick={closeEdit}>
+                    Done
+                  </Button>
+                </DialogFooter>
+              </>
+            ) : (
+              editing && (
+                <form key={editing.id} onSubmit={handleEdit} noValidate>
+                  <DialogHeader>
+                    <DialogTitle className="text-base">
+                      Edit {editing.name}
+                    </DialogTitle>
+                    <DialogDescription className="text-left">
+                      Their name and, for a rep, which campus they work from.
+                      Their email address, password and role are not changed
+                      here.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4 py-4">
+                    <input type="hidden" name="member" value={editing.id} />
+                    <input type="hidden" name="role" value={editing.role} />
+
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-name">Name</Label>
+                      <Input
+                        id="edit-name"
+                        name="name"
+                        className="h-11"
+                        maxLength={120}
+                        autoComplete="off"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        aria-invalid={editErrors.name ? true : undefined}
+                      />
+                      {editErrors.name && (
+                        <p className="text-danger text-xs">{editErrors.name}</p>
+                      )}
+                    </div>
+
+                    {/* An admin has no campus and must not be given one —
+                        FO021 refuses it, so offering the field would be
+                        offering a choice that can only be rejected. */}
+                    {editing.role === "rep" ? (
+                      <div className="space-y-2">
+                        <Label>Campus</Label>
+                        <input
+                          type="hidden"
+                          name="campus_id"
+                          value={editCampus}
+                        />
+                        <Select value={editCampus} onValueChange={setEditCampus}>
+                          <SelectTrigger
+                            className="h-11 w-full"
+                            aria-label="Campus"
+                            aria-invalid={editErrors.campus_id ? true : undefined}
+                          >
+                            <SelectValue placeholder="Which campus do they work from?" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {campuses.map((campus) => (
+                              <SelectItem key={campus.id} value={campus.id}>
+                                {campusLabel(campus)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {editErrors.campus_id && (
+                          <p className="text-danger text-xs">
+                            {editErrors.campus_id}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground text-xs">
+                        An admin sees every campus and is not posted to one.
+                      </p>
+                    )}
+
+                    {/*
+                      THE COUNT FIRST, THE DECISION SECOND.
+
+                      Shown only once the campus has actually been changed, and
+                      only when there is a pipeline to move. An admin is about
+                      to decide what happens to every institute this rep owns,
+                      and the number is the whole of what they are deciding
+                      about — reporting it afterwards would be a receipt for a
+                      choice they were never offered.
+                    */}
+                    {campusMoving && editing.ownedInstitutes > 0 && (
+                      <div className="bg-warning-subtle text-warning-subtle-foreground space-y-2 rounded-md px-3 py-3 text-xs">
+                        <label className="flex cursor-pointer items-start gap-2">
+                          <Checkbox
+                            checked={editRetag}
+                            onCheckedChange={(next) => setEditRetag(next === true)}
+                            aria-label="Move their institutes to the new campus"
+                          />
+                          {editRetag && (
+                            <input type="hidden" name="retag" value="on" />
+                          )}
+                          <span>
+                            Move their {editing.ownedInstitutes} institute
+                            {editing.ownedInstitutes === 1 ? "" : "s"} to{" "}
+                            {movingTo ? campusLabel(movingTo) : "the new campus"}{" "}
+                            as well.
+                          </span>
+                        </label>
+                        <p>
+                          {editRetag
+                            ? "Correcting a campus that was recorded wrongly — the institutes they registered move with them and stay visible to them."
+                            : "They really did work the old campus, so its institutes stay there. They will no longer be able to see them, and an admin will need to reassign each one to a rep on that campus."}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* No pipeline to worry about, so no choice to offer. */}
+                    {campusMoving && editing.ownedInstitutes === 0 && (
+                      <p className="text-muted-foreground text-xs">
+                        They own no institutes, so nothing moves with them.
+                      </p>
+                    )}
+
+                    {editState.error && <FormNotice message={editState.error} />}
+                  </div>
+
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-11"
+                      onClick={closeEdit}
+                      disabled={editPending}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" className="h-11" disabled={editPending}>
+                      {editPending ? "Saving…" : "Save changes"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              )
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/*
           THE DELETE DIALOG — one for the panel, outside the list, so it
           survives the row it was opened from disappearing on success.
 
@@ -714,6 +1006,37 @@ export function TeamPanel({
  * disabled button with a title is better than rendering nothing: an absent
  * button looks like a bug, a disabled one with a reason looks like a rule.
  */
+/**
+ * Always available, unlike Delete.
+ *
+ * Every one of Delete's three refusals is about destroying something — your own
+ * session, the last admin account, or a member whose name the confirmation box
+ * could never match. None of them applies to changing a name or correcting a
+ * campus, and an admin editing their OWN name is an ordinary thing to do. So
+ * there is no `blocked` here and deliberately so, rather than by omission.
+ */
+function EditTrigger({
+  member,
+  onOpen,
+}: {
+  member: TeamMember;
+  onOpen: (member: TeamMember) => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="text-muted-foreground hover:text-foreground size-9 shrink-0"
+      aria-label={`Edit ${member.name}`}
+      title={`Edit ${member.name}`}
+      onClick={() => onOpen(member)}
+    >
+      <PencilIcon className="size-4" aria-hidden />
+    </Button>
+  );
+}
+
 function DeleteTrigger({
   member,
   onOpen,

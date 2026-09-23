@@ -5,6 +5,7 @@ import { DATABASE_BEHIND, GENERIC_ERROR, toFriendlyMessage } from "@/lib/errors"
 import {
   confirmationMatches,
   deleteMemberSchema,
+  memberUpdateSchema,
 } from "@/lib/validation/admin";
 
 /**
@@ -522,6 +523,238 @@ describe("migration 0032 is shaped the way a definer function has to be", () => 
   });
 });
 
+
+/* ------------------------------------------------------------------ */
+/* (4) editing a member — name and campus, and nothing else            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * THE SHAPE OF THIS EDITOR IS ITS SECURITY MODEL, so the absences are tested
+ * as carefully as the presences.
+ *
+ * Every field it does not have is a field somebody will eventually try to add
+ * — email and role most of all, because both look like ordinary columns on a
+ * row of people. Email is the sign-in credential and lives in `auth.users`;
+ * role inverts FO021's campus requirement in both directions and has
+ * `guard_profile_role` (0001) standing over it. Neither belongs beside a name.
+ */
+describe("the member editor accepts a name and a campus and nothing else", () => {
+  const CAMPUS = "8b1a9953-4c22-4d1f-9b1a-99534c224d1f";
+  // A real v4. `z.uuid()` checks the version nibble and the variant bits, so a
+  // plausible-looking "1111-2222-3333-4444" is refused by the schema itself.
+  const MEMBER = "11111111-2222-4333-8444-555555555555";
+
+  /** Which fields a refusal named. Local, because the file has no such helper. */
+  const failedOn = (result: ReturnType<typeof memberUpdateSchema.safeParse>) =>
+    result.success ? [] : result.error.issues.map((issue) => String(issue.path[0]));
+
+  const parse = (over: Record<string, unknown> = {}) =>
+    memberUpdateSchema.safeParse({
+      member: MEMBER,
+      name: "Priya Sharma",
+      campus_id: CAMPUS,
+      role: "rep",
+      retag: true,
+      ...over,
+    });
+
+  it("accepts a rep with a campus", () => {
+    const result = parse();
+    expect(result.success).toBe(true);
+  });
+
+  it("refuses a rep with no campus, mirroring FO021", () => {
+    const result = parse({ campus_id: "" });
+    expect(result.success).toBe(false);
+    expect(failedOn(result)).toContain("campus_id");
+  });
+
+  it("refuses an admin WITH a campus, which is the other half of FO021", () => {
+    // An admin sees every campus, so a campus on one would be a fact that
+    // decides nothing — and enforce_profile_campus refuses it outright.
+    const result = parse({ role: "admin", campus_id: CAMPUS });
+    expect(result.success).toBe(false);
+    expect(failedOn(result)).toContain("campus_id");
+  });
+
+  it("accepts an admin with no campus", () => {
+    expect(parse({ role: "admin", campus_id: "" }).success).toBe(true);
+  });
+
+  it("refuses a name that is only punctuation", () => {
+    expect(parse({ name: "..." }).success).toBe(false);
+  });
+
+  it("carries no email, password or id field at all", () => {
+    /*
+     * Asked of the PARSED OUTPUT rather than of the schema's shape, because
+     * that is what the action actually writes. A stripped key proves the field
+     * cannot reach `profiles` however it was submitted.
+     */
+    const result = memberUpdateSchema.safeParse({
+      member: MEMBER,
+      name: "Priya Sharma",
+      campus_id: CAMPUS,
+      role: "rep",
+      retag: false,
+      email: "someone@example.com",
+      password: "hunter2hunter2",
+      id: "99999999-9999-9999-9999-999999999999",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).not.toHaveProperty("email");
+      expect(result.data).not.toHaveProperty("password");
+      expect(result.data).not.toHaveProperty("id");
+    }
+  });
+
+  it("carries the retag flag, which is what decides the pipeline's fate", () => {
+    const on = parse({ retag: true });
+    const off = parse({ retag: false });
+    expect(on.success && on.data.retag).toBe(true);
+    expect(off.success && off.data.retag).toBe(false);
+  });
+});
+
+describe("the member editor's action writes only what it is allowed to", () => {
+  const source = read(ACTIONS);
+  const action = source.slice(source.indexOf("export async function updateMember"));
+  const body = action.slice(0, action.indexOf("\nexport async function", 1));
+
+  it("updates the name and nothing else on profiles", () => {
+    expect(body).toContain('.update({ name: input.name })');
+    // Never the credential, never the role, never the id.
+    expect(body).not.toContain("email:");
+    expect(body).not.toContain("password");
+    expect(body).not.toContain("role: input.role");
+  });
+
+  it("changes the campus through the RPC, not with a bare update", () => {
+    // A bare `update({ campus_id })` is the bug 0035 exists to prevent: the rep
+    // moves and their institutes do not, so their whole pipeline goes dark.
+    expect(body).toContain("gate.supabase.rpc(");
+    expect(body).toContain('"correct_member_campus"');
+    expect(body).not.toContain("campus_id: input.campus_id");
+  });
+
+  it("reads the role from the database rather than trusting the form", () => {
+    expect(body).toContain('.select("id, role, campus_id")');
+    expect(body).toContain("current.role !== input.role");
+  });
+
+  it("leaves the campus alone when it has not changed", () => {
+    // Otherwise renaming somebody would trip 0035's mid-visit refusal.
+    expect(body).toContain("campusChanged");
+    expect(body).toContain("input.campus_id !== current.campus_id");
+  });
+
+  it("maps FO029 by code, with a sentence naming the likely remedy", () => {
+    expect(body).toContain('campusError.code === "FO029"');
+    expect(body).toContain("part-way through a visit");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* (5) 0035 — the campus correction, read as SQL                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The same source-level reading 0032 gets above, and for the same reason: the
+ * rules live in Postgres, the integration suite needs a database, and these are
+ * the properties that must not quietly change in the file itself.
+ */
+describe("0035 corrects a campus without stranding the pipeline", () => {
+  const sql = read("supabase/migrations/0035_correct_member_campus.sql");
+
+  it("is SECURITY DEFINER with search_path pinned", () => {
+    expect(sql).toContain("security definer");
+    expect(sql).toContain("set search_path = ''");
+  });
+
+  it("checks is_admin() with no trusted-context bypass", () => {
+    // 0032's call, not the guard triggers': this is an ACTION that moves a
+    // boundary, so a null auth.uid() is refused like anyone else.
+    expect(sql).toContain("if not public.is_admin() then");
+    expect(sql).not.toContain("caller is not null and not public.is_admin()");
+  });
+
+  it("is revoked from public and anon and granted to authenticated", () => {
+    expect(sql).toContain(
+      "revoke all on function public.correct_member_campus(uuid, uuid, boolean) from public;",
+    );
+    expect(sql).toContain(
+      "revoke all on function public.correct_member_campus(uuid, uuid, boolean) from anon;",
+    );
+    expect(sql).toContain(
+      "grant execute on function public.correct_member_campus(uuid, uuid, boolean) to authenticated;",
+    );
+  });
+
+  it("refuses a rep who is part-way through a visit", () => {
+    // Exactly FO013's predicate, keyed on member alone. checkout_missing is the
+    // part that stops a swept plan blocking corrections for ever.
+    expect(sql).toContain("dp.member = p_member");
+    expect(sql).toContain("dp.checkin_at is not null");
+    expect(sql).toContain("dp.checkout_at is null");
+    expect(sql).toContain("dp.checkout_missing = false");
+  });
+
+  it("refuses an admin target and an inactive campus", () => {
+    expect(sql).toContain("v_role <> 'rep'");
+    expect(sql).toContain("if not v_active then");
+  });
+
+  it("retags by ownership, not by the old campus", () => {
+    /*
+     * The narrow `and campus_id = v_old_campus` would skip exactly the drifted
+     * row that needs fixing, so the UPDATE keys on ownership alone.
+     *
+     * Asserted on the STATEMENT rather than on the file, because the header
+     * deliberately quotes the predicate it rejects — a bare search would read
+     * the explanation and call it the code, which is the same trap
+     * log-visit-form.test.ts documents about `action={formAction}`.
+     */
+    // Anchored on `if p_retag then` rather than on the UPDATE itself: the
+    // header's prose mentions the statement before the code does, so the first
+    // match is the explanation.
+    const block = sql.slice(sql.indexOf("if p_retag then"));
+    const statement = block.slice(0, block.indexOf(";"));
+    expect(statement).toContain("update public.institutes");
+    expect(statement).toContain("where registered_by = p_member");
+    expect(statement).toContain("campus_id is distinct from p_campus");
+    expect(statement).not.toContain("v_old_campus");
+  });
+
+  it("returns a receipt counting what actually moved", () => {
+    expect(sql).toContain("get diagnostics v_moved = row_count");
+    expect(sql).toContain("'institutes_moved', v_moved");
+  });
+
+  it("deletes nothing and moves no visit", () => {
+    expect(sql).not.toContain("delete from");
+    expect(sql).not.toContain("update public.visits");
+    expect(sql).not.toContain("update public.daily_plans");
+  });
+
+  it("never touches registered_by, which is a different act", () => {
+    // Moving ownership is reassignInstitute()/FO025. A campus correction that
+    // also reassigned would move a pipeline between PEOPLE, not just campuses.
+    expect(sql).not.toContain("set registered_by");
+  });
+
+  it("asserts what it installed", () => {
+    expect(sql).toContain("0035 did not apply cleanly");
+    expect(sql).toContain("is not SECURITY DEFINER");
+    expect(sql).toContain("does not call is_admin()");
+    expect(sql).toContain("no longer reads checkout_missing");
+  });
+
+  it("warns that it must be applied before the edit UI ships", () => {
+    expect(sql).toContain("APPLY THIS BEFORE THE EDIT UI SHIPS");
+    expect(sql).toContain("PGRST202");
+  });
+});
 
 /* ------------------------------------------------------------------ */
 /* (6) editing an institute — details only                             */

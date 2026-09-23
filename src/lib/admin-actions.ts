@@ -10,6 +10,7 @@ import type {
   DeleteMemberState,
   FlushState,
   MemberState,
+  MemberUpdateState,
 } from "@/lib/admin-form-state";
 import {
   areaSchema,
@@ -19,6 +20,7 @@ import {
   fieldErrorsFrom,
   flushSchema,
   memberCreatorSchema,
+  memberUpdateSchema,
   newMemberSchema,
   purposeSchema,
   purposeUpdateSchema,
@@ -728,6 +730,179 @@ export async function createMember(
     fieldErrors: {},
     ok: true,
     created: { name: input.name, email: input.email, role: input.role },
+  };
+}
+
+/**
+ * Editing a team member: their NAME and their CAMPUS, and nothing else.
+ *
+ * See `memberUpdateSchema` for why email, password, id and role are all absent;
+ * each is a decision of its own rather than a field beside a name.
+ *
+ * TWO WRITES, AND THEY ARE NOT THE SAME KIND OF WRITE. That asymmetry is the
+ * whole shape of this action:
+ *
+ *   THE NAME is a label. Nothing reads it to decide anything, `profiles_update`
+ *            already lets an admin write it, and a plain update is the whole
+ *            job.
+ *   THE CAMPUS is a security boundary. `institutes_select` (0028) is
+ *            `campus_id = my_campus() and registered_by = auth.uid()` — a
+ *            strict AND — so moving a rep between campuses without moving the
+ *            institutes they own makes every one of them invisible to them.
+ *            That needs two tables in one transaction, which is
+ *            `correct_member_campus()` (0035), and it needs to be refused while
+ *            the rep is mid-visit, which that function does.
+ *
+ * SO THE NAME GOES FIRST, and the order matters. If the campus half is refused
+ * — the likely refusal being a rep part-way through a visit — a rename the
+ * admin also asked for has already landed and is reported, rather than being
+ * silently rolled back along with it. Two independent edits, two independent
+ * outcomes; conflating them would mean a typo in a name could not be fixed
+ * until the rep got back to the office.
+ *
+ * THE CAMPUS IS ONLY TOUCHED WHEN IT CHANGES. An admin editing a name should
+ * not trip the mid-visit refusal, and re-sending the campus a rep already has
+ * would do exactly that.
+ */
+export async function updateMember(
+  _prev: MemberUpdateState,
+  formData: FormData,
+): Promise<MemberUpdateState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = memberUpdateSchema.safeParse({
+    member: textOf(formData, "member"),
+    name: textOf(formData, "name"),
+    campus_id: textOf(formData, "campus_id"),
+    role: textOf(formData, "role"),
+    // A checkbox that is not ticked is absent from FormData entirely, so this
+    // reads "was it sent" rather than trusting a value. The form sends "on".
+    retag: formData.get("retag") !== null,
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELDS, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+  const input = parsed.data;
+
+  /*
+   * THE ROLE AND THE CURRENT CAMPUS COME FROM THE DATABASE, NEVER FROM THE FORM.
+   *
+   * The form sends a role so the schema can apply FO021's conditional rule
+   * without a round trip, but trusting it would let a tampered submission claim
+   * a rep is an admin and slip past the campus requirement. Read here, compared
+   * below, and a disagreement is a refusal.
+   */
+  const { data: current, error: lookupError } = await gate.supabase
+    .from("profiles")
+    .select("id, role, campus_id")
+    .eq("id", input.member)
+    .maybeSingle();
+
+  if (lookupError) {
+    logError("admin:update-member-lookup", lookupError);
+    return denied(toFriendlyMessage(lookupError, "We could not read that account."));
+  }
+  if (!current) return denied("That person no longer has an account.");
+
+  if (current.role !== input.role) {
+    // Not an error the admin can act on so much as a stale screen. Roles are
+    // not editable here, so the two can only disagree if somebody else changed
+    // it or the form was tampered with.
+    return denied(
+      "That account's role has changed since this screen loaded. Reopen Settings and try again.",
+    );
+  }
+
+  const { error: nameError } = await gate.supabase
+    .from("profiles")
+    .update({ name: input.name })
+    .eq("id", input.member);
+
+  if (nameError) {
+    logError("admin:update-member-name", nameError);
+    return denied(toFriendlyMessage(nameError, "We could not save that name."));
+  }
+
+  // A rename on its own, or an admin (who has no campus to correct).
+  const campusChanged =
+    input.campus_id !== null && input.campus_id !== current.campus_id;
+
+  if (!campusChanged) {
+    revalidatePath("/settings");
+    revalidatePath("/team/hierarchy");
+    revalidatePath("/");
+    return {
+      error: null,
+      fieldErrors: {},
+      ok: true,
+      updated: { name: input.name, campus: null, institutesMoved: 0 },
+    };
+  }
+
+  const { data: receipt, error: campusError } = await gate.supabase.rpc(
+    "correct_member_campus",
+    {
+      p_member: input.member,
+      p_campus: input.campus_id,
+      p_retag: input.retag,
+    },
+  );
+
+  if (campusError) {
+    logError("admin:correct-member-campus", campusError);
+    /*
+     * BY CODE, NEVER BY MESSAGE TEXT — and FO029 covers five refusals, only one
+     * of which an admin will ever meet. The database's own wording names it,
+     * but no database wording reaches a screen, so the one worth phrasing is
+     * phrased here and the rest fall back to errors.ts.
+     *
+     * The mid-visit case is singled out because it is the only one that is
+     * TEMPORARY: "wait until they have finished" is something an admin can act
+     * on, where the others mean the request was wrong. We cannot tell which
+     * FO029 it was without reading the message, so the sentence covers the
+     * likely case and stays true for the others by naming what to check.
+     */
+    if (campusError.code === "FO029") {
+      return {
+        error:
+          "The name was saved, but the campus was not. Either that rep is " +
+          "part-way through a visit — try again once they have finished — or " +
+          "that campus is not one they can be posted to.",
+        fieldErrors: {},
+      };
+    }
+    if (campusError.code === "42501") {
+      return denied("Only an admin can change which campus a rep works from.");
+    }
+    return {
+      error: toFriendlyMessage(
+        campusError,
+        "The name was saved, but the campus could not be changed.",
+      ),
+      fieldErrors: {},
+    };
+  }
+
+  const result = (receipt ?? {}) as { campus?: string; institutes_moved?: number };
+
+  // Everything a campus decides: the registry, Pending, the daily-plan picker
+  // and the admin's own team list.
+  revalidatePath("/settings");
+  revalidatePath("/team/hierarchy");
+  revalidatePath("/institutes", "layout");
+  revalidatePath("/pending");
+  revalidatePath("/");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    updated: {
+      name: input.name,
+      campus: result.campus ?? null,
+      // The number the function actually moved, not the one the dialog showed.
+      institutesMoved: result.institutes_moved ?? 0,
+    },
   };
 }
 

@@ -218,6 +218,27 @@ export interface TeamMember {
   /** Null for an admin, who has no campus and sees every one. */
   campusName: string | null;
   /**
+   * The same campus as an id, so the editor can preselect it.
+   *
+   * The name is for reading and this is for writing; keeping both means the
+   * dialog never has to match a campus by its label, which two campuses in one
+   * city could share. Null for an admin, exactly as `campusName` is.
+   */
+  campusId: string | null;
+  /**
+   * How many institutes this member OWNS — `institutes.registered_by`.
+   *
+   * Carried so the campus editor can say "this will move 14 institutes" BEFORE
+   * an admin confirms, rather than reporting it afterwards. Correcting a rep's
+   * campus without taking their pipeline with them leaves every one of these
+   * invisible to them (0028's strict AND), so the number is the whole of what
+   * the admin is deciding about.
+   *
+   * Zero for an admin, who registers nothing, and zero for a rep who has not
+   * registered anything yet.
+   */
+  ownedInstitutes: number;
+  /**
    * THE ADMIN WHO CREATED THIS ACCOUNT — `profiles.created_by`, migration 0034.
    *
    * A RECORD, NOT A PERMISSION, and the distinction is the whole of the
@@ -316,13 +337,39 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
      * string and the schema cannot drift apart silently.
      */
     .select(
-      "id, name, role, created_at, campuses(name), created_by, creator:profiles!profiles_created_by_fkey(name)",
+      "id, name, role, created_at, campus_id, campuses(name), created_by, creator:profiles!profiles_created_by_fkey(name)",
     )
     .order("name");
 
   if (error) {
     logError("admin:team", error);
     return [];
+  }
+
+  /*
+   * Who owns how many institutes, for the campus editor's "this will move N".
+   *
+   * ONE COLUMN FOR THE WHOLE REGISTRY and tallied here, rather than a grouped
+   * query per member — the same call `listStatusRows()` above makes about its
+   * usage counts, and for the same reason: the volumes are small and a
+   * group-by would need a view. This runs in an admin's scope, where
+   * `institutes_select` is `is_admin() or …`, so the count is the true one
+   * rather than the caller's slice of it.
+   *
+   * A failure is a missing NUMBER, not a broken list. The editor then shows no
+   * count and says so, which is better than a team screen that will not load.
+   */
+  const owned = new Map<string, number>();
+  const { data: institutes, error: ownedError } = await supabase
+    .from("institutes")
+    .select("registered_by")
+    .not("registered_by", "is", null);
+
+  if (ownedError) logError("admin:team-owned-institutes", ownedError);
+  for (const row of institutes ?? []) {
+    if (row.registered_by) {
+      owned.set(row.registered_by, (owned.get(row.registered_by) ?? 0) + 1);
+    }
   }
 
   /*
@@ -359,6 +406,8 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
     // Embedded through the foreign key. Null is the correct answer for an
     // admin, who has no campus — not a scoping failure, so no warning here.
     campusName: embeddedName(profile, "campuses"),
+    campusId: profile.campus_id ?? null,
+    ownedInstitutes: owned.get(profile.id) ?? 0,
     createdBy: profile.created_by ?? null,
     // Same shape problem, same reader. Null here means "no creator recorded",
     // which for every account made before 0034 is simply the truth.

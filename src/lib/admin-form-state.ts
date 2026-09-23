@@ -36,6 +36,35 @@ export interface MemberState extends AdminState {
 export const EMPTY_MEMBER_STATE: MemberState = { error: null, fieldErrors: {} };
 
 /**
+ * The outcome of editing a member — their name, their campus, or both.
+ *
+ * `updated` is a RECEIPT AND NOT A PROMISE, the same call `DeleteMemberState`
+ * makes below. `institutesMoved` comes back from `correct_member_campus()`
+ * (0035) counting what it actually retagged, not from the count the dialog
+ * showed beforehand: an admin who has just moved a rep's whole pipeline between
+ * campuses deserves the real number, and the two can legitimately differ if
+ * somebody registered an institute while the dialog was open.
+ *
+ * `campus` is null when the campus was not touched — a rename on its own is a
+ * perfectly ordinary edit and should not report a campus move that did not
+ * happen.
+ */
+export interface MemberUpdateState extends AdminState {
+  updated?: {
+    name: string;
+    /** The campus they are now on, or null when only the name changed. */
+    campus: string | null;
+    /** How many institutes moved with them. Zero when the retag was declined. */
+    institutesMoved: number;
+  };
+}
+
+export const EMPTY_MEMBER_UPDATE_STATE: MemberUpdateState = {
+  error: null,
+  fieldErrors: {},
+};
+
+/**
  * The outcome of a member deletion.
  *
  * `removed` is what the RPC counted as it went, not what the form promised
