@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { attributeToCurrentStatus } from "@/lib/visits";
 import {
   SEED_STATUS_CATALOGUE,
   isOpenStatus,
@@ -202,5 +203,109 @@ describe("the interrupted-visit recovery path survives", () => {
 
   it("says why it cannot be deleted, for whoever tries next", () => {
     expect(page).toMatch(/ONLY thing in the app that produces/i);
+  });
+});
+
+/**
+ * The attribution rule, now that two screens share it.
+ *
+ * `attributeToCurrentStatus()` was the loop inside `getOpenFollowUps()` until
+ * Review needed the same per-institute follow-up date for its register. Both
+ * read it through this one function so the two screens cannot disagree about a
+ * school — which is precisely why it is worth testing directly: a change made
+ * for one caller now lands on the other.
+ *
+ * It is pure, so unlike the queries around it this needs no database.
+ */
+describe("which visit left an institute at the status it holds now", () => {
+  const visit = (
+    institute_id: string,
+    status_set_to: string | null,
+    follow_up_date: string | null = null,
+  ) => ({ institute_id, status_set_to, follow_up_date });
+
+  it("takes the visit that set the CURRENT status, not the newest visit", () => {
+    // The case the rule exists for: a session was scheduled in March, a first
+    // meeting logged in April. The institute is at "First meeting done", so the
+    // date that means anything is April's — even though March's visit is the
+    // one that carries the more urgent-looking promise.
+    const found = attributeToCurrentStatus(
+      [
+        visit("i1", "First meeting done", "2026-05-01"),
+        visit("i1", "Session scheduled", "2026-03-20"),
+      ],
+      new Map([["i1", "First meeting done"]]),
+    );
+    expect(found.get("i1")?.follow_up_date).toBe("2026-05-01");
+  });
+
+  it("ignores a visit that set no status at all", () => {
+    const found = attributeToCurrentStatus(
+      [visit("i1", null, "2026-05-01"), visit("i1", "Session done", "2026-04-01")],
+      new Map([["i1", "Session done"]]),
+    );
+    expect(found.get("i1")?.follow_up_date).toBe("2026-04-01");
+  });
+
+  it("takes the FIRST match, which is why the caller must order newest-first", () => {
+    /*
+     * THE PRECONDITION, PINNED. Both callers order by date then created_at, and
+     * a reversal here does not throw or return nothing — it returns the OLDEST
+     * qualifying visit, a wrong answer shaped exactly like a right one. Since
+     * 0033 a rep can visit one institute twice in a day, so `created_at`
+     * breaking a same-day tie is reachable rather than theoretical.
+     */
+    const newestFirst = [
+      visit("i1", "Session done", "2026-06-01"),
+      visit("i1", "Session done", "2026-01-01"),
+    ];
+    const current = new Map([["i1", "Session done"]]);
+
+    expect(attributeToCurrentStatus(newestFirst, current).get("i1")?.follow_up_date)
+      .toBe("2026-06-01");
+    // Reversed, it answers with the oldest. Asserted so the precondition is a
+    // documented property rather than an assumption nobody wrote down.
+    expect(
+      attributeToCurrentStatus(newestFirst.toReversed(), current).get("i1")
+        ?.follow_up_date,
+    ).toBe("2026-01-01");
+  });
+
+  it("skips an institute it was not asked about, rather than matching null", () => {
+    // "Not on this page" and "has no status" are different questions, and only
+    // the second is a null. A visit that set no status at an institute nobody
+    // asked about must not be attributed to it.
+    const found = attributeToCurrentStatus(
+      [visit("other", null, "2026-05-01")],
+      new Map([["i1", "Session done"]]),
+    );
+    expect(found.has("other")).toBe(false);
+    expect(found.size).toBe(0);
+  });
+
+  it("keeps institutes apart, and answers for each on its own status", () => {
+    const found = attributeToCurrentStatus(
+      [
+        visit("i1", "Session done", "2026-06-01"),
+        visit("i2", "Session done", "2026-06-02"),
+        visit("i2", "First meeting done", "2026-02-02"),
+      ],
+      new Map([
+        ["i1", "Session done"],
+        ["i2", "First meeting done"],
+      ]),
+    );
+    expect(found.get("i1")?.follow_up_date).toBe("2026-06-01");
+    expect(found.get("i2")?.follow_up_date).toBe("2026-02-02");
+  });
+
+  it("answers for nobody when no visit explains the status", () => {
+    // Real and ordinary: an admin set the status directly, or the only visit
+    // that did is one this caller cannot read. The screens render a dash.
+    const found = attributeToCurrentStatus(
+      [visit("i1", "First meeting done", "2026-05-01")],
+      new Map([["i1", "Session done"]]),
+    );
+    expect(found.size).toBe(0);
   });
 });

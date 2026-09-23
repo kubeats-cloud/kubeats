@@ -279,6 +279,54 @@ export interface FollowUp {
 }
 
 /**
+ * Which visit left each institute at the status it currently holds.
+ *
+ * MATCHED ON THE CURRENT STATUS, NOT ON RECENCY, and that is the whole rule. A
+ * rep who logged "Session scheduled" in March and "First meeting done" in April
+ * leaves the institute at the second, so the follow-up date that means anything
+ * is the one recorded beside THAT visit — not the newest visit's, which may
+ * have set a status that has since been superseded, and not the newest visit
+ * overall, which may have set no status this institute still carries.
+ *
+ * It also collapses correctly across reps. Two reps share a campus; if A logs
+ * "Session scheduled" and B later logs "Session done", the institute is at B's
+ * status and A's row is simply not the answer any more.
+ *
+ * PRECONDITION: `visits` MUST ALREADY BE NEWEST-FIRST. The first match wins, so
+ * the caller's `.order()` is load-bearing — reverse it and this silently
+ * returns the OLDEST qualifying visit, which is a wrong answer that looks
+ * exactly like a right one. Both callers order by `date` then `created_at`, so
+ * two visits on one day still resolve in the order they happened rather than
+ * arbitrarily — which matters more since 0033 let a rep visit one institute
+ * twice in a day.
+ *
+ * An institute absent from `currentStatus` is skipped rather than matched
+ * against undefined: "not on this page" and "has no status" are different
+ * questions, and only the second is a null.
+ *
+ * Shared by `getOpenFollowUps()` below and by `listTeamVisits()` in
+ * admin-workspace.ts, which needs the same per-institute follow-up date for the
+ * Review register. One rule, one home — a second copy would be free to drift
+ * from this one, and the two screens would disagree about the same school.
+ */
+export function attributeToCurrentStatus<
+  T extends { institute_id: string; status_set_to: string | null },
+>(
+  visits: readonly T[],
+  currentStatus: ReadonlyMap<string, string | null>,
+): Map<string, T> {
+  const attribution = new Map<string, T>();
+  for (const visit of visits) {
+    if (!currentStatus.has(visit.institute_id)) continue;
+    if (visit.status_set_to !== currentStatus.get(visit.institute_id)) continue;
+    if (!attribution.has(visit.institute_id)) {
+      attribution.set(visit.institute_id, visit);
+    }
+  }
+  return attribution;
+}
+
+/**
  * What is still owed: every institute whose CURRENT status is OPEN.
  *
  * THIS IS NOT WHAT PENDING USED TO ASK. It listed visits sitting at
@@ -359,23 +407,12 @@ export async function getOpenFollowUps(
     return { ok: false };
   }
 
-  /**
-   * The visit that left each institute where it is.
-   *
-   * Matched on the institute's CURRENT status, not merely on being the latest
-   * visit: a rep who logged "Session scheduled" and then, later, "First meeting
-   * done" leaves the institute at the second, and the follow-up date that
-   * matters is the one recorded with it. The list is already newest-first, so
-   * the first match wins.
-   */
-  const attribution = new Map<string, (typeof visits)[number]>();
-  for (const visit of visits ?? []) {
-    const institute = rows.find((r) => r.id === visit.institute_id);
-    if (!institute || visit.status_set_to !== institute.status) continue;
-    if (!attribution.has(visit.institute_id)) {
-      attribution.set(visit.institute_id, visit);
-    }
-  }
+  // The visit that left each institute where it is. See the helper's own note
+  // for why it is matched on the CURRENT status rather than on recency alone.
+  const attribution = attributeToCurrentStatus(
+    visits ?? [],
+    new Map(rows.map((row) => [row.id, row.status])),
+  );
 
   // Both sets of names in one lookup: whoever logged the visit, and whoever
   // owns the institute now. Usually the same person, occasionally not.

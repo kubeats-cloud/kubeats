@@ -4,6 +4,7 @@ import { VisitReview } from "@/components/admin/visit-review";
 import { requireAdmin } from "@/lib/admin";
 import { listTeamVisits, REVIEW_PAGE_SIZE } from "@/lib/admin-workspace";
 import { listReps } from "@/lib/closing-report";
+import { listStatusCatalogue } from "@/lib/statuses";
 import { listInstitutesForPicker } from "@/lib/visits";
 
 export const metadata = { title: "Review" };
@@ -38,12 +39,25 @@ export default async function ReviewPage(props: PageProps<"/review">) {
     from: first(searchParams.from),
     to: first(searchParams.to),
     reported: first(searchParams.reported),
+    instituteStatus: first(searchParams.status),
   };
 
-  const [result, reps, institutes] = await Promise.all([
+  const [result, reps, institutes, catalogue] = await Promise.all([
     listTeamVisits(filters),
     listReps(),
     listInstitutesForPicker(),
+    /*
+     * The WHOLE vocabulary, retired statuses included — `listStatusCatalogue()`
+     * and not `selectableStatuses()`, which filters to the active ones for a
+     * rep's picker. An admin filtering the register is searching HISTORY, and
+     * retiring a status takes it out of the picker without taking it off the
+     * visits that already carry it. Filtering by it is exactly how you find
+     * them. The panel marks them so nobody wonders why it is offered.
+     *
+     * Read from the database, never from SEED_STATUS_CATALOGUE: a status an
+     * admin added last week has to be filterable this week.
+     */
+    listStatusCatalogue(),
   ]);
 
   return (
@@ -59,6 +73,10 @@ export default async function ReviewPage(props: PageProps<"/review">) {
           total={result.total}
           reps={reps.map((r) => ({ id: r.id, name: r.name }))}
           institutes={institutes.map((i) => ({ id: i.id, name: i.name }))}
+          statuses={catalogue.map((s) => ({
+            status: s.status,
+            isActive: s.isActive,
+          }))}
           pageSize={REVIEW_PAGE_SIZE}
         />
       ) : (

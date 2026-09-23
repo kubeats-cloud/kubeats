@@ -42,17 +42,26 @@ interface Option {
   name: string;
 }
 
+interface StatusOption {
+  status: string;
+  /** False once an admin has retired it. Still filterable — see the panel. */
+  isActive: boolean;
+}
+
 export function VisitReview({
   visits,
   total,
   reps,
   institutes,
+  statuses,
   pageSize,
 }: {
   visits: VisitRow[];
   total: number;
   reps: Option[];
   institutes: Option[];
+  /** The whole vocabulary in display order, retired statuses included. */
+  statuses: StatusOption[];
   pageSize: number;
 }) {
   const router = useRouter();
@@ -68,15 +77,23 @@ export function VisitReview({
     startTransition(() => router.push(`/review?${search.toString()}`));
   }
 
-  const activeCount = ["member", "institute", "activity", "from", "to", "reported"].filter(
-    (k) => params.get(k),
-  ).length;
+  const activeCount = [
+    "member",
+    "institute",
+    "activity",
+    "from",
+    "to",
+    "reported",
+    "status",
+  ].filter((k) => params.get(k)).length;
 
   return (
     <div className="space-y-5">
       {/* Filters ---------------------------------------------------------- */}
       <Card className="p-4 md:p-5">
-        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+        {/* Four across rather than six: seven fields over six columns leaves
+            one stranded on a row of its own. */}
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
           <Field label="Rep">
             <Select value={value("member") || ALL} onValueChange={(v) => apply("member", v)}>
               <SelectTrigger className="h-10 w-full">
@@ -164,6 +181,45 @@ export function VisitReview({
               </SelectContent>
             </Select>
           </Field>
+
+          {/*
+            "INSTITUTE STATUS NOW", AND THE WORDING IS THE POINT.
+
+            This filters on `institutes.status` — where the school stands today,
+            the same value the badge on /institutes shows and the same one
+            Pending keys on. The register's own "Status" column is
+            `visits.status_set_to`: where THAT visit left the institute, which a
+            later visit may since have superseded. Two different questions, and
+            a filter labelled plain "Status" beside a column labelled "Status"
+            would look like it filtered the column and quietly would not.
+
+            So filtering to "Session done" lists every visit ever made to a
+            school that is at "Session done" now — including the early meetings
+            that happened long before it got there. That is the question an
+            admin is actually asking when they reach for this.
+          */}
+          <Field label="Institute status now">
+            <Select
+              value={value("status") || ALL}
+              onValueChange={(v) => apply("status", v)}
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="Any status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any status</SelectItem>
+                {statuses.map((entry) => (
+                  <SelectItem key={entry.status} value={entry.status}>
+                    {/* Retired ones are still offered: an admin filtering the
+                        register is searching history, and the visits that
+                        carry a retired status are exactly what they are
+                        looking for. Marked so it does not read as a mistake. */}
+                    {entry.isActive ? entry.status : `${entry.status} (retired)`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-3">
@@ -236,6 +292,30 @@ export function VisitReview({
                       {visit.reportedAt ? "Report filed" : "No report"}
                     </Badge>
                   </div>
+                  {/*
+                    ONE LINE ON A PHONE, NOT TWO COLUMNS. Seven columns is the
+                    ceiling on the desktop table and there is no room for either
+                    of them on a card, so both facts share a sentence — and the
+                    sentence names the institute, which is what stops them being
+                    read as this visit's own dates.
+
+                    Rendered only when there is something to say. A card with
+                    "Follow-up — · Status changed —" on it is noise on the one
+                    layout with no room to spare.
+                  */}
+                  {(visit.instituteFollowUpDate ||
+                    visit.instituteStatusUpdatedAt) && (
+                    <p className="text-muted-foreground mt-2 text-xs">
+                      This institute:
+                      {visit.instituteFollowUpDate &&
+                        ` follow up ${formatDate(visit.instituteFollowUpDate)}`}
+                      {visit.instituteFollowUpDate &&
+                        visit.instituteStatusUpdatedAt &&
+                        " ·"}
+                      {visit.instituteStatusUpdatedAt &&
+                        ` status changed ${formatDate(visit.instituteStatusUpdatedAt)}`}
+                    </p>
+                  )}
                 </Card>
               </li>
             ))}
@@ -246,7 +326,10 @@ export function VisitReview({
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
                 <caption className="sr-only">
-                  Every visit the team has logged, newest first
+                  Every visit the team has logged, newest first. Status is where
+                  that visit left the institute; Follow-up and Status changed
+                  describe the institute as it stands now, so they repeat across
+                  a school&rsquo;s visits.
                 </caption>
                 <thead>
                   <tr className="border-border bg-secondary/40 text-muted-foreground border-b text-left">
@@ -256,6 +339,26 @@ export function VisitReview({
                     <Th>Institute</Th>
                     <Th>Activity</Th>
                     <Th>Status</Th>
+                    {/*
+                      The two per-institute columns. They repeat down a run of
+                      visits to one school, which is accepted: they answer
+                      "where does this school stand", not "what happened on this
+                      visit".
+
+                      Both carry a second line, because both would be read as
+                      per-visit otherwise — "Follow-up" beside a visit row looks
+                      like that visit's follow-up, and "Status changed" looks
+                      like the moment this visit changed it. The subtitle is the
+                      cheapest place to say which question is being answered.
+                    */}
+                    <Th>
+                      Follow-up
+                      <span className="block font-normal">at this institute</span>
+                    </Th>
+                    <Th>
+                      Status changed
+                      <span className="block font-normal">last actual change</span>
+                    </Th>
                     <Th>Report</Th>
                     <th className="w-10 px-2 py-2.5">
                       <span className="sr-only">Open</span>
@@ -309,6 +412,16 @@ export function VisitReview({
                       </td>
                       <td className="text-muted-foreground px-5 py-3">
                         {visit.standing ?? "—"}
+                      </td>
+                      <td className="text-muted-foreground px-5 py-3 whitespace-nowrap tabular-nums">
+                        {visit.instituteFollowUpDate
+                          ? formatDate(visit.instituteFollowUpDate)
+                          : "—"}
+                      </td>
+                      <td className="text-muted-foreground px-5 py-3 whitespace-nowrap tabular-nums">
+                        {visit.instituteStatusUpdatedAt
+                          ? formatDate(visit.instituteStatusUpdatedAt)
+                          : "—"}
                       </td>
                       <td className="px-5 py-3">
                         <Badge variant={visit.reportedAt ? "success" : "neutral"}>

@@ -4684,4 +4684,228 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(still?.uploaded_by, "only the byline went").toBeNull();
     });
   });
+
+  /* ------------------------------------------------------------------ */
+  /* Review — filtering the register by the institute's CURRENT status    */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * THE FIRST INTEGRATION COVERAGE THE REVIEW SCREEN HAS HAD, and it is here
+   * rather than in a unit test because the thing being proved is a PostgREST
+   * behaviour, not ours.
+   *
+   * WHAT CAN GO WRONG. `listTeamVisits()` filters on `institutes.status` — a
+   * dotted path into an embedded resource. PostgREST applies such a filter to
+   * the PARENT rows only when the embed is an INNER join. With the ordinary
+   * outer embed the same query returns EVERY visit and merely nulls out the
+   * embed on the ones that do not match, so a filtered register would quietly
+   * list the whole team's work with blank institute names — a failure that
+   * looks like a rendering bug and is a query bug.
+   *
+   * That is why `admin-workspace.ts` carries two select literals rather than
+   * one, and why the inner join is used only when the status filter is on. The
+   * two are spelled out in full because supabase-js can only infer a row type
+   * from a literal — so they are exactly the kind of pair somebody tidies into
+   * one, and the failure would not show up in the type system, in lint, or in
+   * any unit test this project can run.
+   *
+   * SO BOTH HALVES ARE ASSERTED: the inner join restricts, and the outer one
+   * does not. The second is not a redundant control — it is the statement of
+   * what the bug looks like, so a future reader can see why the two constants
+   * exist at all.
+   *
+   * ALSO PROVED, and the more interesting half for the product: the filter
+   * reads where the INSTITUTE stands NOW, not where a given visit left it.
+   * A school currently at "Session done" lists every visit ever made to it,
+   * including the early meetings logged long before it got there. That is the
+   * question an admin is actually asking, and it is the difference between this
+   * filter and the register's existing "Status" column (`visits.status_set_to`).
+   */
+  describe("Review — the institute-status filter restricts rows", () => {
+    /** VISIT_SELECT in admin-workspace.ts: the ordinary, OUTER embed. */
+    const OUTER =
+      "id, institute_id, status_set_to, institutes(name, status, status_updated_at)";
+    /** VISIT_SELECT_STATUS: the same columns, inner-joined. */
+    const INNER =
+      "id, institute_id, status_set_to, institutes!inner(name, status, status_updated_at)";
+
+    /** Currently at "Session done" — a CLOSED status. */
+    let atSessionDone: string;
+    /** Currently at "First meeting done" — an OPEN one. */
+    let atFirstMeeting: string;
+
+    /** The visit whose own status_set_to matches its institute's. */
+    let matching: string;
+    /**
+     * A visit at the SAME institute that set a DIFFERENT status, since
+     * superseded. It must come back under the filter, because the filter is
+     * about the institute and not about the visit.
+     */
+    let superseded: string;
+    /** A visit at the other institute. It must not come back at all. */
+    let elsewhere: string;
+
+    beforeAll(async () => {
+      atSessionDone = await makeInstitute(repA.id, campusA, "review-filter-A");
+      atFirstMeeting = await makeInstitute(repA.id, campusA, "review-filter-B");
+
+      const today = iso();
+
+      /*
+       * FO009's presence guarantee covers every activity since stage 3, so a
+       * direct insert needs an arrival behind it; `ensureArrival` also closes
+       * whatever was open, which FO013 requires before the next one.
+       */
+      await ensureArrival(repA.id, atSessionDone, today);
+      const first = await admin
+        .from("visits")
+        .insert(
+          visitRow({
+            member: repA.id,
+            institute_id: atSessionDone,
+            date: today,
+            status_set_to: "Session done",
+          }),
+        )
+        .select("id")
+        .single();
+      if (first.error) throw new Error(`visit A1: ${first.error.message}`);
+      matching = first.data.id as string;
+
+      await ensureArrival(repA.id, atSessionDone, today);
+      const second = await admin
+        .from("visits")
+        .insert(
+          visitRow({
+            member: repA.id,
+            institute_id: atSessionDone,
+            date: today,
+            // An OPEN status, so FO016 demands a follow-up date with it.
+            status_set_to: "First meeting done",
+            follow_up_date: iso(7),
+          }),
+        )
+        .select("id")
+        .single();
+      if (second.error) throw new Error(`visit A2: ${second.error.message}`);
+      superseded = second.data.id as string;
+
+      await ensureArrival(repA.id, atFirstMeeting, today);
+      const third = await admin
+        .from("visits")
+        .insert(
+          visitRow({
+            member: repA.id,
+            institute_id: atFirstMeeting,
+            date: today,
+            status_set_to: "First meeting done",
+            follow_up_date: iso(7),
+          }),
+        )
+        .select("id")
+        .single();
+      if (third.error) throw new Error(`visit B1: ${third.error.message}`);
+      elsewhere = third.data.id as string;
+
+      /*
+       * The institutes' CURRENT statuses, set last and on purpose.
+       *
+       * The inserts above do not move them — `institutes.status` is written by
+       * log_visit(), and these are direct inserts — so the two institutes are
+       * put where the test needs them explicitly. That also makes the point the
+       * suite is about: institute A ends at "Session done" even though the LAST
+       * visit logged there set "First meeting done".
+       */
+      await admin
+        .from("institutes")
+        .update({ status: "Session done" })
+        .eq("id", atSessionDone);
+      await admin
+        .from("institutes")
+        .update({ status: "First meeting done" })
+        .eq("id", atFirstMeeting);
+    });
+
+    /**
+     * The register's own query, read as the signed-in admin exactly as the
+     * screen does.
+     *
+     * `select` is a parameter so one helper can run both literals, which means
+     * supabase-js cannot infer a row type from it — it only ever infers from a
+     * LITERAL, and anything else comes back as GenericStringError. That is the
+     * very trap admin-workspace.ts's comment describes, and it is met
+     * deliberately here: `rows()` below reads each result through `unknown`,
+     * once, rather than every assertion doing its own cast.
+     */
+    const review = (select: string, status: string) =>
+      boss.db
+        .from("visits")
+        .select(select)
+        .in("id", [matching, superseded, elsewhere])
+        .eq("institutes.status", status);
+
+    interface ReviewRow {
+      id: string;
+      status_set_to: string | null;
+      institutes: { name: string; status: string } | null;
+    }
+
+    const rows = (data: unknown): ReviewRow[] => (data ?? []) as ReviewRow[];
+
+    it("returns only visits whose institute currently has that status", async () => {
+      const { data, error } = await review(INNER, "Session done");
+      expect(error, error?.message).toBeNull();
+
+      const ids = rows(data)
+        .map((row) => row.id)
+        .sort();
+      expect(ids).toEqual([matching, superseded].sort());
+      expect(ids, "the other institute's visit is excluded").not.toContain(elsewhere);
+    });
+
+    it("keeps a visit whose OWN status was superseded", async () => {
+      // The whole point of filtering on the institute rather than on the visit:
+      // this row set "First meeting done" and comes back under "Session done",
+      // because that is where the school stands now.
+      const { data } = await review(INNER, "Session done");
+      const row = rows(data).find((r) => r.id === superseded);
+      expect(row, "the superseded visit is listed").toBeDefined();
+      expect(row?.status_set_to).toBe("First meeting done");
+    });
+
+    it("filters the other way round too, with no leakage", async () => {
+      const { data, error } = await review(INNER, "First meeting done");
+      expect(error, error?.message).toBeNull();
+      const ids = rows(data).map((row) => row.id);
+      expect(ids).toEqual([elsewhere]);
+    });
+
+    it("returns nothing for a status no institute on the page holds", async () => {
+      const { data, error } = await review(INNER, "Will not come");
+      expect(error, error?.message).toBeNull();
+      expect(data ?? []).toHaveLength(0);
+    });
+
+    it("WITHOUT !inner the same filter restricts nothing — the bug, stated", async () => {
+      /*
+       * The control, and the reason admin-workspace.ts carries two literals.
+       * With an outer embed PostgREST filters the EMBED: every visit still comes
+       * back, and the ones that do not match simply arrive with `institutes`
+       * null. On the screen that is a register that ignored its filter and lost
+       * its institute names.
+       */
+      const { data, error } = await review(OUTER, "Session done");
+      expect(error, error?.message).toBeNull();
+
+      const all = rows(data);
+      expect(all, "every row still comes back").toHaveLength(3);
+
+      const missed = all.find((row) => row.id === elsewhere);
+      expect(missed, "including the one that should have been excluded").toBeDefined();
+      expect(
+        missed?.institutes,
+        "and its institute is nulled out rather than the row being dropped",
+      ).toBeNull();
+    });
+  });
 });

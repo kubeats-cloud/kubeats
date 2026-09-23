@@ -4,6 +4,7 @@ import { instituteNameOr } from "@/lib/institute-scope";
 import { signVisitPhotos } from "@/lib/photos";
 import type { VisitPhoto } from "@/lib/photos";
 import { activityLabelFor } from "@/lib/validation/visit";
+import { attributeToCurrentStatus } from "@/lib/visits";
 import { mondayOf, weekCountEnd } from "@/lib/weeks";
 import { todayISO } from "@/lib/dates";
 
@@ -40,6 +41,49 @@ export interface VisitRow {
   instituteName: string;
   city: string | null;
   photo: VisitPhoto | null;
+  /**
+   * PER-INSTITUTE, NOT PER-VISIT, and both of the fields below are.
+   *
+   * They answer "where does this school stand now", which is a different
+   * question from everything else on the row — so ten visits to one school
+   * repeat the same two values ten times down the column. That repetition is
+   * accepted rather than designed around: the alternative is grouping the
+   * register by institute, which would stop it being a register of visits.
+   */
+
+  /**
+   * When the institute's status last actually CHANGED —
+   * `institutes.status_updated_at`, maintained by the `institutes_touch_status`
+   * trigger (0001) on every path that writes a status.
+   *
+   * AUTHORITATIVE, and deliberately not `max(institute_status_history.
+   * changed_at)`. The two cannot disagree — `record_institute_status_change()`
+   * (0011) fires on exactly the same condition, and its backfill seeded itself
+   * from this column — but this one is a value on a row already being joined,
+   * where the other is an aggregate over a second table. History stays the
+   * source for the TIMELINE on the institute's own page; that is a different
+   * question and it has a different shape.
+   *
+   * Null when the institute has never had a status set. Both triggers skip a
+   * re-set of the SAME status, so this is the last real change rather than the
+   * last write.
+   */
+  instituteStatusUpdatedAt: string | null;
+  /**
+   * The follow-up date owed at this INSTITUTE — derived, because there is no
+   * such column.
+   *
+   * `follow_up_date` lives on `visits` (date only since 0023), so a
+   * per-institute answer has to be chosen from among them:
+   * `attributeToCurrentStatus()` picks the newest visit whose `status_set_to`
+   * is the status the institute currently holds. Pending reads the same rule
+   * through the same helper, so the two screens cannot disagree about a school.
+   *
+   * Null is ordinary and means one of three things, none of them an error: the
+   * institute has no status, no visit accounts for the status it has, or the
+   * visit that does was logged before Rule 5 began asking for a date.
+   */
+  instituteFollowUpDate: string | null;
 }
 
 export interface VisitFilters {
@@ -50,17 +94,48 @@ export interface VisitFilters {
   to?: string;
   /** "reported" | "unreported" — whether a closing report has been filed. */
   reported?: string;
+  /**
+   * The institute's CURRENT status — `institutes.status`, the same value the
+   * badge on /institutes shows and the same one Pending keys on.
+   *
+   * NOT `visits.status_set_to`, which is what the register's existing "Status"
+   * column renders. Those are two different questions and the screen labels
+   * them differently on purpose: `status_set_to` is where THIS visit left the
+   * institute, which a later visit may since have superseded; this is where the
+   * institute stands today.
+   */
+  instituteStatus?: string;
 }
 
 /**
- * One literal select string.
+ * TWO literal select strings, and they must stay literals.
  *
- * supabase-js can only infer a row type from a literal, so building this by
- * concatenation would hand back GenericStringError instead of a row — the same
- * trap that has caught this codebase before.
+ * supabase-js can only infer a row type from a literal, so building either by
+ * concatenation — or deriving the second from the first — would hand back
+ * GenericStringError instead of a row, the trap that has caught this codebase
+ * before. The cost is that the shared columns are written out twice and have to
+ * be kept in step by hand.
+ *
+ * WHY TWO RATHER THAN ONE `!inner`. PostgREST filters on an embedded resource
+ * restrict the PARENT only when the embed is an inner join, so the institute
+ * status filter needs `institutes!inner`. Making that unconditional would
+ * change the semantics of every other call: an inner join drops any visit whose
+ * institute the caller cannot read. Today that would drop nothing — both
+ * callers are admin-only and `institutes_select` is `is_admin() or …` — but
+ * that is a property of who happens to call this function, not of the function,
+ * and a register that silently omitted rows would be the hardest kind of bug to
+ * notice. So the inner join is used only where it is asked for.
+ *
+ * `status` and `status_updated_at` ride in BOTH: `status_updated_at` is the
+ * Last status update column, and `status` is what the per-institute follow-up
+ * is derived against below. Neither depends on the filter being active.
  */
 const VISIT_SELECT =
-  "id, date, activity, lifecycle_status, status_set_to, notes, reported_at, visit_outcome, institute_interested, photo_url, member, institute_id, profiles!visits_member_fkey(name), institutes(name, city)";
+  "id, date, activity, lifecycle_status, status_set_to, notes, reported_at, visit_outcome, institute_interested, photo_url, member, institute_id, profiles!visits_member_fkey(name), institutes(name, city, status, status_updated_at)";
+
+/** VISIT_SELECT with the institute embed made inner. Nothing else differs. */
+const VISIT_SELECT_STATUS =
+  "id, date, activity, lifecycle_status, status_set_to, notes, reported_at, visit_outcome, institute_interested, photo_url, member, institute_id, profiles!visits_member_fkey(name), institutes!inner(name, city, status, status_updated_at)";
 
 interface RawVisit {
   id: string;
@@ -76,7 +151,12 @@ interface RawVisit {
   member: string;
   institute_id: string;
   profiles: { name: string | null } | null;
-  institutes: { name: string | null; city: string | null } | null;
+  institutes: {
+    name: string | null;
+    city: string | null;
+    status: string | null;
+    status_updated_at: string | null;
+  } | null;
 }
 
 /** Keeps one page of results honest about how much there is behind it. */
@@ -89,9 +169,16 @@ export async function listTeamVisits(
 > {
   const supabase = await createClient();
 
+  /*
+   * The inner-join variant ONLY when the status filter is on. See the note on
+   * the two constants: an unconditional inner join would change what this
+   * function returns for every other caller, and it would do it silently.
+   */
   let query = supabase
     .from("visits")
-    .select(VISIT_SELECT, { count: "exact" })
+    .select(filters.instituteStatus ? VISIT_SELECT_STATUS : VISIT_SELECT, {
+      count: "exact",
+    })
     .order("date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(REVIEW_PAGE_SIZE);
@@ -105,6 +192,13 @@ export async function listTeamVisits(
   if (filters.to) query = query.lte("date", filters.to);
   if (filters.reported === "reported") query = query.not("reported_at", "is", null);
   if (filters.reported === "unreported") query = query.is("reported_at", null);
+  // Dotted path, and it only restricts the rows because the embed above is
+  // inner. With the outer embed this would filter the EMBED — every visit would
+  // still come back, just with `institutes: null` on the ones that did not
+  // match — which is the trap the two constants exist to avoid.
+  if (filters.instituteStatus) {
+    query = query.eq("institutes.status", filters.instituteStatus);
+  }
 
   const { data, error, count } = await query;
 
@@ -114,7 +208,10 @@ export async function listTeamVisits(
   }
 
   const rows = (data ?? []) as unknown as RawVisit[];
-  const photos = await signVisitPhotos(rows.map((r) => r.photo_url));
+  const [photos, followUps] = await Promise.all([
+    signVisitPhotos(rows.map((r) => r.photo_url)),
+    instituteFollowUps(rows),
+  ]);
 
   return {
     ok: true,
@@ -160,8 +257,86 @@ export async function listTeamVisits(
       instituteName: instituteNameOr(row.institutes?.name, "admin-workspace"),
       city: row.institutes?.city ?? null,
       photo: row.photo_url ? (photos.get(row.photo_url) ?? { status: "expired" }) : null,
+      instituteStatusUpdatedAt: row.institutes?.status_updated_at ?? null,
+      instituteFollowUpDate: followUps.get(row.institute_id) ?? null,
     })),
   };
+}
+
+/**
+ * The follow-up date owed at each institute on this page of the register.
+ *
+ * ONE EXTRA QUERY, and it has to be a query rather than a column: nothing
+ * carries a per-institute follow-up date. `visits.follow_up_date` is per-visit,
+ * so the per-institute answer is CHOSEN from among them by
+ * `attributeToCurrentStatus()` — the newest visit whose `status_set_to` is the
+ * status the institute holds now. Pending derives it the same way through the
+ * same helper, which is the point of the helper.
+ *
+ * Bounded by the page rather than by the table: at most REVIEW_PAGE_SIZE rows
+ * arrive, so at most that many distinct institutes are asked about, and
+ * `visits_institute_id_idx` and `visits_status_set_to_idx` both already exist.
+ * The `.in()` on status narrows it further — only the statuses actually present
+ * on this page can produce a match, so a register filtered to one school does
+ * not read every visit that ever set any status.
+ *
+ * A FAILURE IS A MISSING COLUMN, NOT A BROKEN SCREEN. The register's job is to
+ * show the team's visits; a derived convenience that could not be computed
+ * returns an empty map and every cell renders as "—". Logged, so it is not
+ * silent.
+ *
+ * Runs as the signed-in admin like everything else here, so RLS decides what it
+ * sees — which for an admin is every visit, and is what makes the answer
+ * correct across reps: if A set "Session scheduled" and B later set "Session
+ * done", B's visit is the one that matches and A's is rightly ignored.
+ */
+async function instituteFollowUps(
+  rows: readonly RawVisit[],
+): Promise<Map<string, string | null>> {
+  const empty = new Map<string, string | null>();
+
+  /*
+   * Only institutes that actually HAVE a current status can be matched — a null
+   * status has no visit to attribute it to, by definition. Built as a Map so
+   * the helper can answer "what is this institute at" without a scan.
+   */
+  const currentStatus = new Map<string, string | null>();
+  for (const row of rows) {
+    const status = row.institutes?.status ?? null;
+    if (status) currentStatus.set(row.institute_id, status);
+  }
+  if (currentStatus.size === 0) return empty;
+
+  const statuses = [...new Set(currentStatus.values())].filter(
+    (status): status is string => status !== null,
+  );
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("visits")
+    .select("institute_id, status_set_to, follow_up_date")
+    .in("institute_id", [...currentStatus.keys()])
+    .in("status_set_to", statuses)
+    // NEWEST FIRST, and this is the helper's precondition rather than a
+    // presentation choice: it takes the first match, so reversing this returns
+    // the oldest qualifying visit. `created_at` breaks a same-day tie in the
+    // order things happened, which 0033 made reachable by letting a rep visit
+    // one institute twice in a day.
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    logError("admin:visit-follow-ups", error);
+    return empty;
+  }
+
+  const attribution = attributeToCurrentStatus(data ?? [], currentStatus);
+  return new Map(
+    [...attribution].map(([instituteId, visit]) => [
+      instituteId,
+      visit.follow_up_date ?? null,
+    ]),
+  );
 }
 
 /**
