@@ -521,3 +521,58 @@ describe("migration 0032 is shaped the way a definer function has to be", () => 
     expect(sql).toContain("does not raise FO027");
   });
 });
+
+
+/* ------------------------------------------------------------------ */
+/* (6) editing an institute — details only                             */
+/* ------------------------------------------------------------------ */
+
+describe("the institute editor leaves the load-bearing columns alone", () => {
+  const source = read("src/lib/institute-actions.ts");
+  const action = source.slice(source.indexOf("export async function updateInstitute"));
+  const body = action.slice(0, action.indexOf("\nexport ", 1));
+
+  it("starts with requireAdmin(), not with a role check in the page alone", () => {
+    // Deleting a button never closes the path behind it — the lesson FO020
+    // records. The action is the boundary; the hidden link is the courtesy.
+    expect(body).toContain("await requireAdmin()");
+  });
+
+  it("re-parses with the SHARED schema rather than a second one", () => {
+    expect(body).toContain("instituteSchema.safeParse(instituteFormDataToInput(formData))");
+  });
+
+  it("writes the validated details object and nothing beside it", () => {
+    // One `.update(institute)`, where `institute` is the parsed data minus the
+    // campus. Asserted this way rather than by hunting for column names: the
+    // destructure that REMOVES campus_id necessarily mentions it.
+    expect(body).toContain(".update(institute)");
+    expect(body).not.toContain("registered_by");
+    expect(body).not.toContain("status:");
+  });
+
+  it("refuses a submitted campus rather than dropping it quietly", () => {
+    expect(body).toContain("submittedCampus !== null");
+  });
+
+  it("checks the update actually matched a row", () => {
+    // Without the select, a policy that matched nothing reports success.
+    expect(body).toContain('.select("id")');
+    expect(body).toContain("if (!data)");
+  });
+});
+
+describe("the institute form is reused rather than copied", () => {
+  const form = read("src/components/institutes/institute-form.tsx");
+
+  it("drives both actions from one component", () => {
+    expect(form).toContain("editing ? updateInstitute : createInstitute");
+  });
+
+  it("still submits itself rather than handing React the action", () => {
+    // It is in log-visit-form.test.ts's FIXED list; asserted here too because
+    // adding an edit mode is exactly the kind of change that would undo it.
+    expect(form).toContain("event.preventDefault()");
+    expect(form).not.toMatch(/<form\b[^>]*\baction=/);
+  });
+});

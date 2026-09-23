@@ -47,19 +47,49 @@ interface PincodeFailure {
   message: string;
 }
 
+/** What an institute already holds, when this picker is editing one. */
+export interface InitialLocation {
+  state: string | null;
+  city: string | null;
+  area: string | null;
+  pincode: string | null;
+}
+
 export function LocationPicker({
   tree,
   fieldErrors,
+  initial,
 }: {
   tree: StateNode[];
   fieldErrors: Record<string, string>;
+  /**
+   * Absent when registering, present when editing.
+   *
+   * RESOLVED BY NAME, because that is what the institute stores. `institutes`
+   * keeps location as TEXT — `state`, `city`, `area` — while this picker is
+   * keyed on the location tree's ids, so preselecting means walking the tree to
+   * find the rows those names came from. Done once at mount, in the useState
+   * initialisers below, so the lookup cannot re-run and fight the PIN auto-fill.
+   *
+   * A name that is no longer in the tree resolves to nothing and the field
+   * comes up empty — visible, and refused by the schema until it is answered,
+   * rather than silently submitting a location the pickers never showed.
+   */
+  initial?: InitialLocation;
 }) {
-  const [states, setStates] = useState<StateNode[]>(tree);
-  const [stateId, setStateId] = useState("");
-  const [cityId, setCityId] = useState("");
-  const [area, setArea] = useState("");
+  const initialState = initial?.state
+    ? tree.find((s) => s.name === initial.state)
+    : undefined;
+  const initialCity = initial?.city
+    ? initialState?.cities.find((c) => c.name === initial.city)
+    : undefined;
 
-  const [pincode, setPincode] = useState("");
+  const [states, setStates] = useState<StateNode[]>(tree);
+  const [stateId, setStateId] = useState(initialState?.id ?? "");
+  const [cityId, setCityId] = useState(initialCity?.id ?? "");
+  const [area, setArea] = useState(initial?.area ?? "");
+
+  const [pincode, setPincode] = useState(initial?.pincode ?? "");
   const [lookup, setLookup] = useState<LookupState>({ status: "idle" });
 
   const [addingArea, setAddingArea] = useState(false);

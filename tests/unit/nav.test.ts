@@ -117,6 +117,38 @@ describe("path guards", () => {
     expect(ADMIN_NAV.map((i) => i.href)).not.toContain("/team/hierarchy");
   });
 
+  /*
+   * THE INSTITUTE EDITOR, WHICH NO PREFIX CAN REACH.
+   *
+   * `/institutes` is SHARED — a rep browses their own and opens their detail
+   * pages — and only the editor at the far end is an admin's. That shape is the
+   * reason `ADMIN_ONLY_PATTERNS` exists beside the two lists: putting
+   * "/institutes" on the admin list would take the registry away from every
+   * rep, and leaving it off would leave the editor gated by the page alone,
+   * with `proxy.ts` waving it through at the edge.
+   */
+  it("gates the institute editor, which sits behind a dynamic segment", () => {
+    const id = "8b1a9953-4c22-4d1f-9b1a-99534c224d1f";
+    expect(isAdminOnlyPath(`/institutes/${id}/edit`)).toBe(true);
+    expect(isRepOnlyPath(`/institutes/${id}/edit`)).toBe(false);
+    // And the registry either side of it stays shared.
+    expect(isAdminOnlyPath("/institutes")).toBe(false);
+    expect(isAdminOnlyPath(`/institutes/${id}`)).toBe(false);
+    expect(isAdminOnlyPath("/institutes/new")).toBe(false);
+  });
+
+  it("anchors the editor pattern at both ends, like the prefix lists", () => {
+    const id = "8b1a9953-4c22-4d1f-9b1a-99534c224d1f";
+    // The same boundary trap the lists document: "editor" is not "edit".
+    expect(isAdminOnlyPath(`/institutes/${id}/editor`)).toBe(false);
+    expect(isAdminOnlyPath(`/institutes/${id}/edit-history`)).toBe(false);
+    // A child of the editor is still the editor.
+    expect(isAdminOnlyPath(`/institutes/${id}/edit/anything`)).toBe(true);
+    // And it must not match one segment up or somewhere else entirely.
+    expect(isAdminOnlyPath("/institutes/edit")).toBe(false);
+    expect(isAdminOnlyPath("/materials/x/edit")).toBe(false);
+  });
+
   it("does not catch a route that merely starts with the same letters", () => {
     // "/reviewer" is not "/review", and a prefix match without the boundary
     // would quietly gate a route nobody meant to gate.

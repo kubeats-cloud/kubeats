@@ -2,7 +2,7 @@ import Link from "next/link";
 import { formatDate } from "@/lib/dates";
 import { PageColumn } from "@/components/layout/page-column";
 import { notFound } from "next/navigation";
-import { ArrowLeftIcon, HistoryIcon, MilestoneIcon } from "lucide-react";
+import { ArrowLeftIcon, HistoryIcon, MilestoneIcon, PencilIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormSection } from "@/components/form-section";
@@ -73,12 +73,25 @@ export default async function InstituteDetailPage(
           .filter(Boolean)
           .join(", ")}
         action={
-          <Button asChild variant="ghost" className="h-11">
-            <Link href="/institutes">
-              <ArrowLeftIcon className="size-4" aria-hidden />
-              Back
-            </Link>
-          </Button>
+          <div className="flex items-center gap-1">
+            {/* Admin-only, and hidden rather than disabled for a rep: the
+                editor is theirs alone, proxy.ts redirects a rep off it, and
+                updateInstitute() refuses one regardless. */}
+            {admin && (
+              <Button asChild variant="ghost" className="h-11">
+                <Link href={`/institutes/${institute.id}/edit`}>
+                  <PencilIcon className="size-4" aria-hidden />
+                  Edit
+                </Link>
+              </Button>
+            )}
+            <Button asChild variant="ghost" className="h-11">
+              <Link href="/institutes">
+                <ArrowLeftIcon className="size-4" aria-hidden />
+                Back
+              </Link>
+            </Button>
+          </div>
         }
       />
 

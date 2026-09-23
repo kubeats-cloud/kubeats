@@ -15,11 +15,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { LocationPicker } from "@/components/institutes/location-picker";
-import { createInstitute } from "@/lib/institute-actions";
+import { createInstitute, updateInstitute } from "@/lib/institute-actions";
 import {
   EMPTY_FORM_STATE,
   type InstituteFormState,
 } from "@/lib/institute-form-state";
+import type { Institute } from "@/lib/institutes";
 import type { StateNode } from "@/lib/locations";
 import {
   BOARD_OPTIONS,
@@ -44,6 +45,7 @@ function digits(value: string, max: number) {
 export function InstituteForm({
   tree,
   campuses = [],
+  initial,
 }: {
   tree: StateNode[];
   /**
@@ -51,21 +53,66 @@ export function InstituteForm({
    * is asked for and required, so the role is expressed once — by the page
    * that knows it — rather than being passed around as a second flag that
    * could disagree with this list.
+   *
+   * ALWAYS EMPTY WHEN EDITING, and that is a rule rather than a convenience —
+   * see `initial` below.
    */
   campuses?: Campus[];
+  /**
+   * The institute being edited. Absent when registering a new one.
+   *
+   * ONE FORM, TWO JOBS, and deliberately not two forms. Everything this asks —
+   * the name, the type, the address, the location, the boards, the two
+   * contacts, the streams and their head counts — is the same question in both
+   * modes, and a second copy would be free to drift field by field until the
+   * editor quietly stopped asking for something the registry expects.
+   *
+   * WHAT THE EDITOR DOES NOT TOUCH, and each for its own reason:
+   *
+   *   STATUS  is a rep's decision, made per visit and recorded with the
+   *           evidence for it (Rule 4). An admin overwriting it here would
+   *           append a row to the institute's status history with no visit
+   *           behind it, and Pending and the badge would both start reading
+   *           from a change nobody can account for.
+   *   CAMPUS  moves with the REP, not with the institute. Correcting a campus
+   *           allocation is `correct_member_campus()` (0035) and it moves a
+   *           whole pipeline in one transaction; letting a rename drag one
+   *           institute across the boundary would make the two disagree.
+   *           `campuses` is therefore always empty in edit mode, which is what
+   *           takes the field off the form.
+   *   OWNER   is `reassignInstitute()` — a permissions change guarded by FO010
+   *           and FO025, with its own card on the institute's page.
+   */
+  initial?: Institute;
 }) {
+  const editing = initial !== undefined;
   const asksForCampus = campuses.length > 0;
   const [state, formAction, isPending] = useActionState(
-    createInstitute,
+    editing ? updateInstitute : createInstitute,
     EMPTY_FORM_STATE,
   );
   const [clientState, setClientState] = useState<InstituteFormState>(EMPTY_FORM_STATE);
 
-  const [boards, setBoards] = useState<string[]>([]);
+  const [boards, setBoards] = useState<string[]>(initial?.boards ?? []);
   const [customBoard, setCustomBoard] = useState("");
-  const [class11, setClass11] = useState<Stream[]>([]);
-  const [class12, setClass12] = useState<Stream[]>([]);
-  const [type, setType] = useState<string>("school");
+  const [class11, setClass11] = useState<Stream[]>(
+    (initial?.class11 ?? []).filter((s): s is Stream =>
+      (STREAMS as readonly string[]).includes(s),
+    ),
+  );
+  /*
+   * Class 12 arrives as an object of stream -> count, and the form holds the
+   * TICKS and the COUNTS separately: the ticks decide which number inputs
+   * render, and each input carries its own count as a defaultValue. Keys that
+   * are not one of the three streams are dropped rather than rendered, since
+   * nothing could edit them.
+   */
+  const [class12, setClass12] = useState<Stream[]>(
+    Object.keys(initial?.class12 ?? {}).filter((s): s is Stream =>
+      (STREAMS as readonly string[]).includes(s),
+    ),
+  );
+  const [type, setType] = useState<string>(initial?.type ?? "school");
   const [campusId, setCampusId] = useState("");
 
   // Server errors win once a submission has come back.
@@ -143,6 +190,10 @@ export function InstituteForm({
   // the field is mandatory, and only the browser's error UI is being dropped.
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-4">
+      {/* Which institute is being edited. Absent when registering, and the
+          action refuses a submission with no id rather than inventing one. */}
+      {initial && <input type="hidden" name="institute_id" value={initial.id} />}
+
       <FormSection
         title="The basics"
         description="What it is called and what kind of place it is."
@@ -155,6 +206,7 @@ export function InstituteForm({
               className="h-11"
               maxLength={200}
               required
+              defaultValue={initial?.name ?? ""}
               aria-invalid={fieldErrors.name ? true : undefined}
               placeholder="e.g. Delhi Public School"
             />
@@ -219,6 +271,7 @@ export function InstituteForm({
               name="address"
               className="h-11"
               maxLength={500}
+              defaultValue={initial?.address ?? ""}
               placeholder="Street address"
             />
             {fieldError("address")}
@@ -229,7 +282,18 @@ export function InstituteForm({
         title="Location"
         description="A PIN code fills the rest in; the pickers are there when it cannot."
       >
-          <LocationPicker tree={tree} fieldErrors={fieldErrors} />
+          <LocationPicker
+            tree={tree}
+            fieldErrors={fieldErrors}
+            initial={
+              initial && {
+                state: initial.state,
+                city: initial.city,
+                area: initial.area,
+                pincode: initial.pincode,
+              }
+            }
+          />
       </FormSection>
 
       <FormSection
@@ -324,9 +388,14 @@ export function InstituteForm({
                 name="principal_name"
                 className="h-11"
                 maxLength={120}
+                defaultValue={initial?.principal_name ?? ""}
                 placeholder="Name"
               />
-              <MobileInput name="principal_mobile" placeholder="10-digit mobile" />
+              <MobileInput
+                name="principal_mobile"
+                placeholder="10-digit mobile"
+                initial={initial?.principal_mobile ?? ""}
+              />
             </div>
             {fieldError("principal_name")}
             {fieldError("principal_mobile")}
@@ -340,17 +409,20 @@ export function InstituteForm({
                 name="decision_maker_name"
                 className="h-11"
                 maxLength={120}
+                defaultValue={initial?.decision_maker_name ?? ""}
                 placeholder="Name"
               />
               <Input
                 name="decision_maker_designation"
                 className="h-11"
                 maxLength={120}
+                defaultValue={initial?.decision_maker_designation ?? ""}
                 placeholder="Designation"
               />
               <MobileInput
                 name="decision_maker_mobile"
                 placeholder="10-digit mobile"
+                initial={initial?.decision_maker_mobile ?? ""}
               />
             </div>
             {fieldError("decision_maker_name")}
@@ -411,6 +483,11 @@ export function InstituteForm({
                           name={`class12_${stream}`}
                           className="h-11"
                           inputMode="numeric"
+                          defaultValue={
+                            initial?.class12?.[stream]
+                              ? String(initial.class12[stream])
+                              : ""
+                          }
                           placeholder="Approx. students"
                           aria-label={`Approximate class 12 ${stream} students`}
                           onChange={(e) => {
@@ -436,7 +513,13 @@ export function InstituteForm({
       {error && <FormNotice message={error} fieldErrors={fieldErrors} />}
 
       <Button type="submit" className="h-11 w-full" disabled={isPending}>
-        {isPending ? "Registering…" : "Register institute"}
+        {editing
+          ? isPending
+            ? "Saving…"
+            : "Save changes"
+          : isPending
+            ? "Registering…"
+            : "Register institute"}
       </Button>
     </form>
   );
@@ -445,11 +528,18 @@ export function InstituteForm({
 function MobileInput({
   name,
   placeholder,
+  initial = "",
 }: {
   name: string;
   placeholder: string;
+  /** The number already recorded, when editing. Empty when registering. */
+  initial?: string;
 }) {
-  const [value, setValue] = useState("");
+  // Controlled, so the digits-only filter applies to what is already there as
+  // well as to what is typed — a legacy value that somehow held punctuation
+  // would otherwise sit in the box and be refused on submit with no way to see
+  // why.
+  const [value, setValue] = useState(digits(initial, 10));
   return (
     <Input
       name={name}

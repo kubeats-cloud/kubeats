@@ -154,6 +154,30 @@ export const ADMIN_ONLY_PATHS = [
   "/materials/manage",
 ] as const;
 
+/**
+ * Admin-only routes whose admin-ness sits AFTER a dynamic segment.
+ *
+ * A SECOND MECHANISM, AND ONLY BECAUSE A PREFIX CANNOT REACH. Every entry in
+ * the two lists above gates a whole subtree from its first segment, which is
+ * what `matches()` is for. `/institutes/<id>/edit` is not that shape: the
+ * registry itself is SHARED — a rep browses their own institutes and opens
+ * their detail pages — and only the editor at the far end is an admin's. No
+ * prefix of a shared route can express "and the leaf is not".
+ *
+ * Kept deliberately small, and in this file rather than in the page, because
+ * this module is still the single place every route-visibility question is
+ * answered: `proxy.ts` reads `isAdminOnlyPath()` and nothing else, so anything
+ * that does not appear here is not gated at the edge at all.
+ *
+ * Anchored at both ends. A pattern that matched loosely would be the prefix
+ * trap the tests already guard for the lists — `/institutes/x/editor` is not
+ * `/institutes/x/edit` — so the tail is `(?:/|$)`, which allows a child of the
+ * editor and refuses a route that merely starts with the same letters.
+ */
+const ADMIN_ONLY_PATTERNS: readonly RegExp[] = [
+  /^\/institutes\/[^/]+\/edit(?:\/|$)/,
+];
+
 function matches(pathname: string, paths: readonly string[]): boolean {
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
@@ -163,7 +187,10 @@ export function isRepOnlyPath(pathname: string): boolean {
 }
 
 export function isAdminOnlyPath(pathname: string): boolean {
-  return matches(pathname, ADMIN_ONLY_PATHS);
+  return (
+    matches(pathname, ADMIN_ONLY_PATHS) ||
+    ADMIN_ONLY_PATTERNS.some((pattern) => pattern.test(pathname))
+  );
 }
 
 export function isPublicPath(pathname: string): boolean {
