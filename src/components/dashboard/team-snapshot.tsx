@@ -70,7 +70,19 @@ function rowsFrom(
           : member.record.locked
             ? "Submitted"
             : "In progress",
-      href: `/targets?week=${weekStart}&member=${member.member}`,
+      /*
+       * THE NAME NOW OPENS THE MEMBER HUB, not the Targets screen.
+       *
+       * It went to `/targets?week=&member=` because that was the only per-rep
+       * screen an admin could reach. The hub is the one-place view — the week
+       * (including this same target-vs-achieved block), their pipeline, their
+       * visits, what they owe — and it links ON to /targets, which is still the
+       * only place a locked week is reopened.
+       *
+       * So this is a door in front of a door rather than a replacement: nothing
+       * became unreachable, and the row's chevron opens the same hub.
+       */
+      href: `/team/${member.member}?week=${weekStart}`,
       // /team and /report answer different questions — all reps for one week
       // against one rep over months — so they stay separate screens. What they
       // needed was a door between them, which is this.

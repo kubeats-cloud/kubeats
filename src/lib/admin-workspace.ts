@@ -348,6 +348,12 @@ async function instituteFollowUps(
  */
 export interface OpenCheckIn {
   planId: string;
+  /**
+   * Added so one rep's open visits can be asked for. The Overview shows the
+   * whole team and never needed it; the member hub does, and matching on
+   * `memberName` instead would break on two reps sharing a name.
+   */
+  memberId: string;
   memberName: string;
   instituteName: string;
   checkinAt: string;
@@ -374,6 +380,71 @@ export interface Overview {
  * needs "how many", not "which", and pulling a thousand rows to call .length on
  * them is how a dashboard becomes the slowest screen in an app.
  */
+/**
+ * Everyone currently inside a visit, or just one rep's.
+ *
+ * The predicate is the one `daily_plans_one_open_visit` indexes — checked in,
+ * not checked out, not swept — so it asks exactly the question that decides
+ * whether a rep is blocked from starting anywhere else.
+ *
+ * ONE DEFINITION, TWO CALLERS. The Overview asks for the whole team and the
+ * member hub asks for one rep; before this was extracted the hub would either
+ * have had to load the entire Overview to reach it, or keep a second copy of
+ * the predicate that could drift from the index it mirrors.
+ *
+ * `stale` is relative to `todayISO()`, never a fresh Date: the app and
+ * `app_today()` share one definition of the day (migration 0008), and a visit
+ * counted as yesterday's by one and today's by the other is how a rep gets
+ * told they are stuck when they are not.
+ *
+ * A failure is an EMPTY LIST, not a throw. This panel says "nobody is
+ * mid-visit"; being wrong about that is better than taking down the screen it
+ * sits on — the same call every other read on the Overview makes.
+ */
+export async function listOpenCheckIns(memberId?: string): Promise<OpenCheckIn[]> {
+  const supabase = await createClient();
+  const today = todayISO();
+
+  let query = supabase
+    .from("daily_plans")
+    .select(
+      "id, member, date, checkin_at, checkin_location_manual, profiles!daily_plans_member_fkey(name), institutes(name)",
+    )
+    .not("checkin_at", "is", null)
+    .is("checkout_at", null)
+    .eq("checkout_missing", false)
+    .order("checkin_at", { ascending: true });
+
+  if (memberId) query = query.eq("member", memberId);
+
+  const { data, error } = await query;
+
+  if (error) {
+    logError("admin:open-checkins", error);
+    return [];
+  }
+
+  return (
+    (data ?? []) as unknown as {
+      id: string;
+      member: string;
+      date: string;
+      checkin_at: string;
+      checkin_location_manual: boolean | null;
+      profiles: { name: string | null } | null;
+      institutes: { name: string | null } | null;
+    }[]
+  ).map((row) => ({
+    planId: row.id,
+    memberId: row.member,
+    memberName: row.profiles?.name ?? "Unknown",
+    instituteName: instituteNameOr(row.institutes?.name, "admin-workspace"),
+    checkinAt: row.checkin_at,
+    stale: row.date < today,
+    locationManual: row.checkin_location_manual ?? false,
+  }));
+}
+
 export async function getOverview(): Promise<
   { ok: true; data: Overview } | { ok: false }
 > {
@@ -415,18 +486,9 @@ export async function getOverview(): Promise<
         .from("visits")
         .select("member, profiles!visits_member_fkey(name)")
         .eq("date", today),
-      // Everyone currently inside a visit. The predicate is the same one
-      // daily_plans_one_open_visit indexes, so this asks exactly the question
-      // that decides whether a rep is blocked.
-      supabase
-        .from("daily_plans")
-        .select(
-          "id, date, checkin_at, checkin_location_manual, profiles!daily_plans_member_fkey(name), institutes(name)",
-        )
-        .not("checkin_at", "is", null)
-        .is("checkout_at", null)
-        .eq("checkout_missing", false)
-        .order("checkin_at", { ascending: true }),
+      // Everyone currently inside a visit. One definition, shared with the
+      // member hub — see listOpenCheckIns().
+      listOpenCheckIns(),
     ]);
 
   if (todayCount.error || weekCount.error || !recent.ok) {
@@ -451,24 +513,6 @@ export async function getOverview(): Promise<
       });
   }
 
-  const openCheckIns: OpenCheckIn[] = (
-    (openIns.data ?? []) as unknown as {
-      id: string;
-      date: string;
-      checkin_at: string;
-      checkin_location_manual: boolean | null;
-      profiles: { name: string | null } | null;
-      institutes: { name: string | null } | null;
-    }[]
-  ).map((row) => ({
-    planId: row.id,
-    memberName: row.profiles?.name ?? "Unknown",
-    instituteName: instituteNameOr(row.institutes?.name, "admin-workspace"),
-    checkinAt: row.checkin_at,
-    stale: row.date < today,
-    locationManual: row.checkin_location_manual ?? false,
-  }));
-
   return {
     ok: true,
     data: {
@@ -478,7 +522,7 @@ export async function getOverview(): Promise<
       photosThisWeek: photos.count ?? 0,
       openLoops: loops.count ?? 0,
       activeToday: [...tally.values()].sort((a, b) => b.visits - a.visits),
-      openCheckIns,
+      openCheckIns: openIns,
       recent: recent.visits.slice(0, 8),
     },
   };
