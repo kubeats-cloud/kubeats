@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ActivityIcon,
+  Building2Icon,
   CalendarRangeIcon,
   ChartColumnIcon,
   CameraIcon,
@@ -178,6 +179,14 @@ export function AdminOverview({ data }: { data: OverviewData }) {
               */}
               <Shortcut href="/pending" icon={ClockIcon} label="Follow-ups owed" />
               <Shortcut href="/team" icon={UsersIcon} label="Team progress" />
+              {/* The pipeline snapshot. Beside Team progress because the two
+                  are the same question asked of different things: how is the
+                  team doing, and where has their pipeline got to. */}
+              <Shortcut
+                href="/institutes/report"
+                icon={Building2Icon}
+                label="Pipeline by rep"
+              />
               <Shortcut href="/data" icon={DatabaseIcon} label="Data and backups" />
               <Shortcut href="/report" icon={ChartColumnIcon} label="Activity report" />
               <Shortcut

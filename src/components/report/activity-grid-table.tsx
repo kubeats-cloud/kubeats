@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { buildActivityGrid, type GridInput } from "@/lib/exports/activity-grid";
 import { cn } from "@/lib/utils";
 
@@ -40,8 +41,10 @@ export function ActivityGridTable({
   compact?: boolean;
   caption: string;
 }) {
-  const { rows, merges } = buildActivityGrid(data);
+  const { rows, merges, hrefs } = buildActivityGrid(data);
   const [groupRow, labelRow, ...bodyRows] = rows;
+  // Same shape as `rows`, so the header rows are dropped in step with them.
+  const [, , ...bodyHrefs] = hrefs;
 
   // The merges say how far each group header reaches. Read rather than
   // recomputed, so the colspans here and the merged cells in the workbook come
@@ -117,24 +120,45 @@ export function ActivityGridTable({
               key={r}
               className="group border-border hover:bg-accent/40 border-b transition-colors last:border-0"
             >
-              {row.map((value, c) => (
-                <td
-                  key={c}
-                  className={cn(
-                    cell,
-                    c === 0
-                      ? cn(
-                          sticky,
-                          "bg-card group-hover:bg-accent/40 font-medium whitespace-nowrap",
-                        )
-                      : "text-right tabular-nums",
-                    // A zero is real data, but it is not what the eye is for.
-                    c > 0 && value === 0 && "text-muted-foreground/60",
-                  )}
-                >
-                  {String(value ?? "")}
-                </td>
-              ))}
+              {row.map((value, c) => {
+                const href = bodyHrefs[r]?.[c] ?? null;
+                return (
+                  <td
+                    key={c}
+                    className={cn(
+                      cell,
+                      c === 0
+                        ? cn(
+                            sticky,
+                            "bg-card group-hover:bg-accent/40 font-medium whitespace-nowrap",
+                          )
+                        : "text-right tabular-nums",
+                      // A zero is real data, but it is not what the eye is for.
+                      c > 0 && value === 0 && "text-muted-foreground/60",
+                    )}
+                  >
+                    {href ? (
+                      /*
+                        A COUNT THAT IS A DOOR.
+                        Dotted underline at rest and solid on hover: in a grid
+                        this dense, permanently underlining every number reads
+                        as a link farm, while no affordance at all leaves the
+                        drill-down undiscoverable. The label says what it
+                        opens, because "3" is useless to a screen reader.
+                      */
+                      <Link
+                        href={href}
+                        aria-label={`${value} — open these for ${String(row[0] ?? "")}, ${String(labelRow[c] ?? "")}`}
+                        className="decoration-muted-foreground/40 hover:text-primary focus-visible:ring-ring rounded-sm underline decoration-dotted underline-offset-4 hover:decoration-solid focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        {String(value ?? "")}
+                      </Link>
+                    ) : (
+                      String(value ?? "")
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

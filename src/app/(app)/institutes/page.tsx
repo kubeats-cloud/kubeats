@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, TableIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
@@ -67,12 +67,24 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
             : "The schools, coaching centres and consultants you registered."
         }
         action={
-          <Button asChild className="h-11">
-            <Link href="/institutes/new">
-              <PlusIcon className="size-4" aria-hidden />
-              Register
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Admin only, and off the nav bar: the pipeline is read weekly,
+                not daily. A rep has no team-wide pipeline to read. */}
+            {admin && (
+              <Button asChild variant="outline" className="h-11">
+                <Link href="/institutes/report">
+                  <TableIcon className="size-4" aria-hidden />
+                  Pipeline by rep
+                </Link>
+              </Button>
+            )}
+            <Button asChild className="h-11">
+              <Link href="/institutes/new">
+                <PlusIcon className="size-4" aria-hidden />
+                Register
+              </Link>
+            </Button>
+          </div>
         }
       />
 

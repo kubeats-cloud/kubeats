@@ -14,7 +14,7 @@ import {
 } from "@/lib/exports/activity-grid";
 import { METRICS, ZERO_COUNTS } from "@/lib/validation/weekly";
 import type { StatusCatalogue, StatusRow } from "@/lib/validation/institute";
-import { buildWorkbook } from "@/lib/xlsx";
+import { buildWorkbook, type CellValue } from "@/lib/xlsx";
 
 /**
  * DASHBOARD ACTIVITIES comes off the SCREEN and stays in the SPREADSHEET.
@@ -241,6 +241,114 @@ describe("what B must not have disturbed", () => {
       "Session scheduled",
       "First meeting done",
     ]);
+  });
+});
+
+describe("the NO STATUS band and cell links (report b)", () => {
+  const unsetColumn = { status: "__none__", label: "No status yet", retired: false };
+
+  /** Rows carrying an id and a null-status count, as report (b) builds them. */
+  const owners: RepRow[] = [
+    {
+      id: "rep-1",
+      name: "Asha Rao",
+      activities: { ...ZERO_COUNTS },
+      statuses: { "Session done": 2, "Session scheduled": 3, __none__: 1 },
+    },
+    {
+      id: "__unassigned__",
+      name: "Unassigned",
+      activities: { ...ZERO_COUNTS },
+      statuses: { __none__: 4 },
+    },
+  ];
+
+  const grid = buildActivityGrid({
+    reps: owners,
+    columns,
+    showActivities: false,
+    unsetColumn,
+    hrefFor: (rep, status) => `/institutes?owner=${rep.id}&status=${status}`,
+  });
+
+  it("adds NO STATUS as its own band, after the vocabulary", () => {
+    const [groupRow, labelRow] = grid.rows;
+    expect(groupRow).toContain(GROUP_HEADERS.unset);
+    // Last column, so the template's bands keep their positions.
+    expect(labelRow[labelRow.length - 1]).toBe("No status yet");
+  });
+
+  it("counts null-status institutes in that column", () => {
+    const [, , asha, unassigned] = grid.rows;
+    expect(asha[asha.length - 1]).toBe(1);
+    expect(unassigned[unassigned.length - 1]).toBe(4);
+  });
+
+  /** The reconciliation requirement: the cells ARE the registry. */
+  it("sums to the number of institutes behind it", () => {
+    const [, , ...body] = grid.rows;
+    const numeric = (value: CellValue) => (typeof value === "number" ? value : 0);
+    const total = body.reduce(
+      (sum, row) => sum + row.slice(1).reduce<number>((n, v) => n + numeric(v), 0),
+      0,
+    );
+    expect(total).toBe(2 + 3 + 1 + 4);
+  });
+
+  it("links every non-zero cell and no zero one", () => {
+    const [, , ...body] = grid.rows;
+    const [, , ...hrefs] = grid.hrefs;
+
+    for (let r = 0; r < body.length; r += 1) {
+      for (let c = 1; c < body[r].length; c += 1) {
+        const count = body[r][c];
+        if (count === 0) expect(hrefs[r][c], `row ${r} col ${c}`).toBeNull();
+        else expect(hrefs[r][c], `row ${r} col ${c}`).toBeTruthy();
+      }
+    }
+  });
+
+  it("points each cell at that owner's institutes at that status", () => {
+    const [, labelRow, ...body] = grid.rows;
+    const [, , ...hrefs] = grid.hrefs;
+
+    const col = labelRow.indexOf("Session scheduled");
+    expect(body[0][col]).toBe(3);
+    expect(hrefs[0][col]).toBe(
+      "/institutes?owner=rep-1&status=Session scheduled",
+    );
+
+    // The Unassigned row keeps its sentinel, and so does the null column.
+    const last = labelRow.length - 1;
+    expect(hrefs[1][last]).toBe(
+      "/institutes?owner=__unassigned__&status=__none__",
+    );
+  });
+
+  it("never links column A, which is the row's own name", () => {
+    const [, , ...hrefs] = grid.hrefs;
+    for (const row of hrefs) expect(row[0]).toBeNull();
+  });
+
+  it("keeps hrefs the same shape as rows, header rows included", () => {
+    expect(grid.hrefs).toHaveLength(grid.rows.length);
+    grid.rows.forEach((row, i) => expect(grid.hrefs[i]).toHaveLength(row.length));
+    // The two header rows carry no links.
+    expect(grid.hrefs[0].every((h) => h === null)).toBe(true);
+    expect(grid.hrefs[1].every((h) => h === null)).toBe(true);
+  });
+});
+
+describe("the activity report is untouched by all of it", () => {
+  it("emits no NO STATUS band when no unsetColumn is given", () => {
+    const { rows } = buildActivityGrid({ reps, columns });
+    expect(rows[0]).not.toContain(GROUP_HEADERS.unset);
+    expect(rows[1]).not.toContain("No status yet");
+  });
+
+  it("emits no links when no hrefFor is given", () => {
+    const { hrefs } = buildActivityGrid({ reps, columns });
+    expect(hrefs.every((row) => row.every((h) => h === null))).toBe(true);
   });
 });
 

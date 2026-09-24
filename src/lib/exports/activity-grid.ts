@@ -242,6 +242,16 @@ export function statusesWithoutColumns(
 /* ------------------------------------------------------------------ */
 
 export interface RepRow {
+  /**
+   * OPTIONAL, because the .xlsx has no use for it.
+   *
+   * Set only when a grid's cells link somewhere — the per-institute status
+   * report keys its hrefs on it. `buildActivityGrid()` reads `name`,
+   * `activities` and `statuses` and nothing else, so adding this changes no
+   * cell of the workbook; the byte-identity test in activity-grid-bands proves
+   * that rather than asserting it.
+   */
+  id?: string;
   name: string;
   activities: MetricCounts;
   /** Visits in range by `status_set_to`. Absent key means zero. */
@@ -272,6 +282,25 @@ export interface GridInput {
    * client's spreadsheet.
    */
   showActivities?: boolean;
+  /**
+   * A third band, for institutes that have no status at all.
+   *
+   * Its own band rather than an extra entry in OPEN or CLOSED, because null is
+   * neither — "registered and not yet reached" is not a stage of the process,
+   * it is the absence of one, and folding it into CLOSED would say the
+   * opposite of the truth. Omitted entirely by the activity report, whose
+   * counts come from `visits.status_set_to` where FO024 makes a null
+   * impossible.
+   */
+  unsetColumn?: StatusColumn;
+  /**
+   * Turns a NON-ZERO status cell into a link to the rows behind it.
+   *
+   * Returning null leaves the cell as plain text. Zero cells never ask: there
+   * is nothing behind them, and a link that lands on an empty list is a broken
+   * promise rather than a drill-down.
+   */
+  hrefFor?: (rep: RepRow, status: string) => string | null;
 }
 
 export const GROUP_HEADERS = {
@@ -279,6 +308,7 @@ export const GROUP_HEADERS = {
   activities: "DASHBOARD ACTIVITIES",
   closed: "CLOSED STATUS",
   open: "OPEN STATUS",
+  unset: "NO STATUS",
 } as const;
 
 /**
@@ -292,8 +322,16 @@ export const GROUP_HEADERS = {
 export function buildActivityGrid(input: GridInput): {
   rows: CellValue[][];
   merges: SheetMerge[];
+  /**
+   * Parallel to `rows`, cell for cell — header rows included, filled with
+   * nulls. Emitted here rather than recomputed by the renderer for the same
+   * reason `merges` is: the column order is decided in this function, and a
+   * second place that worked out which column is which status would be the
+   * seam the links and the headers could drift through.
+   */
+  hrefs: (string | null)[][];
 } {
-  const { reps, columns, showActivities = true } = input;
+  const { reps, columns, showActivities = true, unsetColumn, hrefFor } = input;
 
   /*
    * ONE list, read by BOTH the header band and the body cells below.
@@ -315,6 +353,8 @@ export function buildActivityGrid(input: GridInput): {
     },
     { title: GROUP_HEADERS.closed, labels: columns.closed.map((c) => c.label) },
     { title: GROUP_HEADERS.open, labels: columns.open.map((c) => c.label) },
+    // Last, so the template's bands keep the positions they already have.
+    { title: GROUP_HEADERS.unset, labels: unsetColumn ? [unsetColumn.label] : [] },
   ].filter((band) => band.labels.length > 0);
 
   const groupRow: CellValue[] = [GROUP_HEADERS.representative];
@@ -334,18 +374,44 @@ export function buildActivityGrid(input: GridInput): {
     col += band.labels.length;
   }
 
-  const bodyRows = reps.map((rep) => {
+  const statusColumns = [
+    ...columns.closed,
+    ...columns.open,
+    ...(unsetColumn ? [unsetColumn] : []),
+  ];
+
+  const bodyRows: CellValue[][] = [];
+  const bodyHrefs: (string | null)[][] = [];
+
+  for (const rep of reps) {
     const row: CellValue[] = [rep.name];
+    // Column A never links: the row already belongs to that person, and the
+    // report's own caller decides whether a name goes anywhere.
+    const hrefRow: (string | null)[] = [null];
+
     for (const column of activityColumns) {
       row.push(activityCount(rep.activities, column));
+      hrefRow.push(null);
     }
-    for (const column of [...columns.closed, ...columns.open]) {
-      row.push(rep.statuses[column.status] ?? 0);
-    }
-    return row;
-  });
 
-  return { rows: [groupRow, labelRow, ...bodyRows], merges };
+    for (const column of statusColumns) {
+      const count = rep.statuses[column.status] ?? 0;
+      row.push(count);
+      // Zero is real data and is not a door. See `hrefFor`.
+      hrefRow.push(count > 0 && hrefFor ? hrefFor(rep, column.status) : null);
+    }
+
+    bodyRows.push(row);
+    bodyHrefs.push(hrefRow);
+  }
+
+  const blank = (row: CellValue[]) => row.map(() => null);
+
+  return {
+    rows: [groupRow, labelRow, ...bodyRows],
+    merges,
+    hrefs: [blank(groupRow), blank(labelRow), ...bodyHrefs],
+  };
 }
 
 /** Column A wide enough for a name; the count columns sized for their header. */

@@ -149,6 +149,37 @@ describe("path guards", () => {
     expect(isAdminOnlyPath("/materials/x/edit")).toBe(false);
   });
 
+  /*
+   * THE PIPELINE REPORT, the second leaf of the same shape.
+   *
+   * `/institutes/report` is an admin's report of the WHOLE TEAM's pipeline
+   * hanging off a registry every rep can open. RLS would empty it for a rep,
+   * but "arrives and sees nothing" is not the same as "never arrives", and the
+   * first is how a screen gets mistaken for broken.
+   */
+  it("gates the pipeline report, which hangs off the shared registry", () => {
+    expect(isAdminOnlyPath("/institutes/report")).toBe(true);
+    expect(isRepOnlyPath("/institutes/report")).toBe(false);
+
+    // The registry around it stays shared.
+    expect(isAdminOnlyPath("/institutes")).toBe(false);
+    expect(isAdminOnlyPath("/institutes/new")).toBe(false);
+
+    // Anchored at both ends, like every other pattern here.
+    expect(isAdminOnlyPath("/institutes/reporting")).toBe(false);
+    expect(isAdminOnlyPath("/institutes/report-card")).toBe(false);
+    expect(isAdminOnlyPath("/institutes/report/anything")).toBe(true);
+    expect(isAdminOnlyPath("/report")).toBe(false);
+
+    /*
+     * AND IT MUST NOT SWALLOW AN INSTITUTE DETAIL PAGE. Next resolves the
+     * static segment first, so /institutes/report is the report — but an id
+     * that is not the literal word must stay a rep's to open.
+     */
+    const id = "8b1a9953-4c22-4d1f-9b1a-99534c224d1f";
+    expect(isAdminOnlyPath(`/institutes/${id}`)).toBe(false);
+  });
+
   it("does not catch a route that merely starts with the same letters", () => {
     // "/reviewer" is not "/review", and a prefix match without the boundary
     // would quietly gate a route nobody meant to gate.

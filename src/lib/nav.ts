@@ -176,6 +176,19 @@ export const ADMIN_ONLY_PATHS = [
  */
 const ADMIN_ONLY_PATTERNS: readonly RegExp[] = [
   /^\/institutes\/[^/]+\/edit(?:\/|$)/,
+  /*
+   * The pipeline report. Same shape as the editor above and here for the same
+   * reason: the registry is shared, and only this leaf is an admin's.
+   *
+   * It must come BEFORE nothing and AFTER nothing — order is irrelevant, the
+   * patterns are tested with `.some()`. What matters is that `/institutes` and
+   * `/institutes/<id>` stay OUT of it, which the anchored `^` guarantees and
+   * nav.test.ts pins.
+   *
+   * Next resolves a static segment ahead of a dynamic one, so /institutes/report
+   * reaches this page rather than the detail page with an id of "report".
+   */
+  /^\/institutes\/report(?:\/|$)/,
 ];
 
 function matches(pathname: string, paths: readonly string[]): boolean {
