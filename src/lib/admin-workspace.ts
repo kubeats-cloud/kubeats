@@ -399,7 +399,17 @@ export async function getOverview(): Promise<
       countOf((q) =>
         q.gte("date", weekStart).lte("date", weekEnd).not("photo_url", "is", null),
       ),
-      countOf((q) => q.eq("lifecycle_status", "Set")),
+      /*
+       * Open loops: still "Set", and not yet closed by a later visit.
+       *
+       * `closed_at` IS NOT OPTIONAL HERE. Stage 3 closes a loop with a SECOND
+       * visit and leaves this row at `lifecycle_status = 'Set'` for ever, so
+       * without it this counted every Set ever logged and the tile could only
+       * ever go up. Same predicate as `isPending()` in activity-report.ts and
+       * `openLoopsAt()` in visits.ts — all three must agree, or two "open"
+       * numbers disagree under one word.
+       */
+      countOf((q) => q.eq("lifecycle_status", "Set").is("closed_at", null)),
       listTeamVisits({}),
       supabase
         .from("visits")

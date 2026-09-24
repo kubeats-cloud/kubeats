@@ -136,6 +136,16 @@ interface RawVisit {
   date: string;
   activity: string;
   lifecycle_status: string | null;
+  /**
+   * Stamped by `close_visit()` when a LATER visit closes this "Set".
+   *
+   * The row keeps `lifecycle_status = 'Set'` for ever — Stage 3 closes a loop
+   * by visiting again rather than by flipping this row, so that week 1 keeps
+   * its Sessions Set and week 3 earns its Sessions Done. That is exactly what
+   * makes the lifecycle alone unable to say whether a loop is still open, and
+   * why `isPending()` has to read both fields.
+   */
+  closed_at: string | null;
   reported_at: string | null;
   institute_id: string;
   /**
@@ -171,11 +181,30 @@ interface RawPlan {
 
 /**
  * Rule 3: only a session or a campus visit can be pending, and only while it
- * says "Set". Written as a predicate rather than inline so the report and any
- * later screen answer it the same way.
+ * still says "Set" AND nothing has closed it. Written as a predicate rather
+ * than inline so the report and any later screen answer it the same way.
+ *
+ * BOTH HALVES ARE LOAD-BEARING, AND THE SECOND ONE WAS MISSING.
+ *
+ * Stage 3 stopped closing a loop by flipping the row. A session set in week 1
+ * and held in week 3 is now TWO visits: the completing row carries
+ * `closes_visit_id`, and the original keeps `lifecycle_status = 'Set'` so that
+ * week 1 keeps its Sessions Set rather than having the credit moved. A
+ * `closed_at` stamp is the only thing that ever comes back to mark it done.
+ *
+ * Reading the lifecycle alone therefore counted every "Set" ever logged,
+ * closed or not — a number that could only rise, printed under a label reading
+ * "Set, not yet Done". `openLoopsAt()` in visits.ts has always asked both
+ * questions; this and the Overview tile now match it. The three must agree.
+ *
+ * Exported so the rule can be tested without a database, which is the only way
+ * to prove a CLOSED "Set" is not counted.
  */
-function isPending(visit: { lifecycle_status: string | null }): boolean {
-  return visit.lifecycle_status === "Set";
+export function isPending(visit: {
+  lifecycle_status: string | null;
+  closed_at: string | null;
+}): boolean {
+  return visit.lifecycle_status === "Set" && visit.closed_at === null;
 }
 
 export async function getActivityReport(
@@ -193,7 +222,7 @@ export async function getActivityReport(
     supabase
       .from("visits")
       .select(
-        "date, activity, lifecycle_status, reported_at, institute_id, daily_plan_id, institutes(name, type)",
+        "date, activity, lifecycle_status, closed_at, reported_at, institute_id, daily_plan_id, institutes(name, type)",
       )
       .eq("member", memberId)
       .gte("date", start)

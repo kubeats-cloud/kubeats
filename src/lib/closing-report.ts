@@ -231,12 +231,24 @@ export async function getVisitReport(visitId: string): Promise<VisitReport | nul
   };
 }
 
-/** The team, for the admin's assign form. */
+/**
+ * The reps — for the admin's assign form, and the Review and report pickers.
+ *
+ * AN ADMIN IS NEVER IN THIS LIST, the same rule `listRepsForCampus()` states
+ * and for the same reason: field work is a rep's thing. An admin has no campus
+ * (`enforce_profile_campus`, FO021) and logs no visits, so offering one here
+ * only ever produced a dead end. The activity report selects `role = 'rep'`
+ * (`activity-export.ts`), so picking an admin on /report rendered a grid with
+ * no rows and no explanation; assigning a visit to one would have had nowhere
+ * to land. Filtering here is what keeps the picker and the report agreeing on
+ * who exists.
+ */
 export async function listReps(): Promise<{ id: string; name: string }[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("profiles")
     .select("id, name")
+    .eq("role", "rep")
     .order("name");
 
   if (error) {
