@@ -2,7 +2,14 @@ import Link from "next/link";
 import { formatDate } from "@/lib/dates";
 import { PageColumn } from "@/components/layout/page-column";
 import { notFound } from "next/navigation";
-import { ArrowLeftIcon, HistoryIcon, MilestoneIcon, PencilIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChevronRightIcon,
+  HistoryIcon,
+  MilestoneIcon,
+  PencilIcon,
+  UsersIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormSection } from "@/components/form-section";
@@ -20,9 +27,14 @@ import {
 import { activityLabel } from "@/lib/activities";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getOpenFollowUps } from "@/lib/visits";
+import { instituteCounts, workedItBy } from "@/lib/institute-hub";
+import { isOpenStatus } from "@/lib/validation/institute";
+import { Card } from "@/components/ui/card";
 import { listRepsForCampus } from "@/lib/admin";
 import { ReassignOwner } from "@/components/institutes/reassign-owner";
 import { class12Total, STREAMS, TYPE_LABELS } from "@/lib/validation/institute";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Institute" };
 
@@ -31,6 +43,43 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     <div className="flex items-start justify-between gap-4 py-2">
       <dt className="text-muted-foreground shrink-0 text-sm">{label}</dt>
       <dd className="text-right text-sm break-words">{children}</dd>
+    </div>
+  );
+}
+
+/** One of the three numbers in the counts header. */
+function Fact({
+  value,
+  label,
+}: {
+  value: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <Card className="gap-0 p-4">
+      <p
+        className={cn(
+          "leading-none font-semibold tracking-tight tabular-nums",
+          typeof value === "number" ? "text-[26px]" : "text-base",
+        )}
+      >
+        {value}
+      </p>
+      <p className="text-muted-foreground mt-2 text-[11px] font-medium tracking-wide">
+        {label}
+      </p>
+    </Card>
+  );
+}
+
+/** A line in the follow-up panel. Absent values say so rather than vanishing. */
+function FollowUpFact({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="text-muted-foreground shrink-0 text-xs">{label}</dt>
+      <dd className="text-right text-xs break-words">
+        {value ?? <span className="text-muted-foreground">Not recorded</span>}
+      </dd>
     </div>
   );
 }
@@ -52,7 +101,8 @@ export default async function InstituteDetailPage(
   const institute = await getInstitute(id);
   if (!institute) notFound();
 
-  const admin = isAdmin(await getCurrentUser());
+  const user = await getCurrentUser();
+  const admin = isAdmin(user);
 
   // Independent reads, so the slower one does not hold up the others. The reps
   // list is fetched for an ADMIN only: it is the reassign picker's, and a rep
@@ -64,6 +114,51 @@ export default async function InstituteDetailPage(
     admin ? listRepsForCampus(institute.campus_id) : Promise.resolve([]),
   ]);
   const total = class12Total(institute.class12);
+
+  const visits = history.ok ? history.visits : [];
+  const counts = instituteCounts(visits, institute.status_updated_at);
+
+  /*
+   * WHO HAS WORKED IT — admin-only, and for a DATA reason rather than a
+   * permissions one.
+   *
+   * `getInstituteVisits()` is scoped by RLS to `member = auth.uid() or
+   * is_admin()`, so a rep's copy of this tally is always exactly one row:
+   * themselves. A panel headed "Who's worked it" showing one name is not
+   * partial information, it is misleading information — it says nobody else
+   * has been here, which is the opposite of what RLS actually means. So the
+   * panel is the admin's, whose copy is the whole team's and is true.
+   *
+   * The counts above are shown to BOTH and are labelled by role instead:
+   * "Visits" for an admin, "Your visits" for a rep. A number with an honest
+   * name is worth keeping; a list that implies completeness is not.
+   */
+  const workedIt = admin ? workedItBy(visits) : [];
+
+  /*
+   * FOLLOW-UP OWED — asked only when the status is actually OPEN.
+   *
+   * Rule 5: an OPEN status needs a follow-up date, a CLOSED one merely permits
+   * one. `getOpenFollowUps()` reads every open institute and the visits that
+   * explain them, which is the right answer and the wrong amount of work for
+   * one school — so the cheap local question is asked first and the expensive
+   * shared one only when it can return something.
+   *
+   * Reused rather than reimplemented so this panel and /pending cannot
+   * disagree about what is owed: they are the same computation, filtered.
+   */
+  const statusIsOpen = isOpenStatus(catalogue, institute.status);
+  const openStatuses = catalogue
+    .filter((row) => row.category === "open")
+    .map((row) => row.status);
+
+  const followUps =
+    statusIsOpen && user
+      ? await getOpenFollowUps(openStatuses, user.id)
+      : ({ ok: true, items: [] } as const);
+  const owed = followUps.ok
+    ? (followUps.items.find((item) => item.instituteId === id) ?? null)
+    : null;
 
   return (
     <PageColumn>
@@ -104,6 +199,88 @@ export default async function InstituteDetailPage(
           </span>
         )}
       </div>
+
+      {/*
+        THE THREE NUMBERS, and the first two are labelled by ROLE.
+
+        `getInstituteVisits()` is RLS-scoped, so "visits" means the whole
+        team's to an admin and only their own to a rep. Printing "3 visits" to
+        a rep who cannot see their colleague's seven would be a number that
+        reads as a fact about the school and is actually a fact about them —
+        so for a rep it says "Your visits" and means it.
+
+        Days at status is NOT scoped: `status_updated_at` is a column on the
+        institute, so it is the same number for everyone who can open the page.
+      */}
+      <div className="mb-6 grid grid-cols-3 gap-3">
+        <Fact
+          value={counts.visits}
+          label={admin ? "Visits" : "Your visits"}
+        />
+        <Fact
+          value={counts.lastVisit ? formatDate(counts.lastVisit) : "—"}
+          label={admin ? "Last visit" : "Your last visit"}
+        />
+        <Fact
+          value={counts.daysAtStatus === null ? "—" : counts.daysAtStatus}
+          label={
+            counts.daysAtStatus === null
+              ? "Days at status"
+              : counts.daysAtStatus === 1
+                ? "Day at this status"
+                : "Days at this status"
+          }
+        />
+      </div>
+
+      {/*
+        WHAT IS OWED. Shown only when the current status is OPEN, because that
+        is the whole of Rule 5: an open status requires a follow-up date, a
+        closed one merely permits one. A closed institute with a stale date on
+        it is not owed anything, and saying so would put this screen at odds
+        with Pending.
+      */}
+      {statusIsOpen && (
+        <div className="mb-6">
+          <SectionTitle>Follow-up owed</SectionTitle>
+          <Card className="p-4">
+            <p className="text-sm">
+              This institute is{" "}
+              <span className="font-medium">{institute.status}</span>, which is
+              an open status — someone still owes it a visit.
+            </p>
+            <dl className="mt-3 space-y-1.5">
+              <FollowUpFact
+                label="Follow up by"
+                value={owed?.followUpDate ? formatDate(owed.followUpDate) : null}
+              />
+              {owed?.expectedDate && (
+                <FollowUpFact
+                  label="Expected on"
+                  value={formatDate(owed.expectedDate)}
+                />
+              )}
+              <FollowUpFact
+                label="Left open by"
+                value={owed?.memberName ?? null}
+              />
+              <FollowUpFact
+                label="Set on"
+                value={owed?.setOn ? formatDate(owed.setOn) : null}
+              />
+            </dl>
+            {!owed && (
+              /* Reachable: the status is open but no VISIBLE visit explains
+                 it — a rep looking at a colleague's work, or a status set
+                 directly by an admin edit. The status is still the fact; the
+                 explanation simply is not this reader's to see. */
+              <p className="text-muted-foreground mt-3 text-xs">
+                No visit visible to you explains this status.
+              </p>
+            )}
+          </Card>
+        </div>
+      )}
 
       <FormSection
         title="Details"
@@ -234,6 +411,48 @@ export default async function InstituteDetailPage(
         </div>
       )}
 
+      {/*
+        WHO HAS WORKED IT. Admin-only — see the note where `workedIt` is built:
+        a rep's copy would always be one row, themselves, under a heading that
+        implies it is everyone.
+
+        Each name opens that rep's hub. Gated with the panel rather than
+        separately, because /team/[memberId] is admin-only at the proxy and a
+        rep following one would be 307'd to the dashboard.
+      */}
+      {admin && workedIt.length > 0 && (
+        <>
+          <SectionTitle>Who&rsquo;s worked it</SectionTitle>
+          <Card className="divide-border mb-6 gap-0 divide-y p-0 shadow-xs">
+            {workedIt.map((rep) => (
+              <Link
+                key={rep.memberId}
+                href={`/team/${rep.memberId}`}
+                className="hover:bg-accent/50 focus-visible:ring-ring flex items-center gap-3 px-4 py-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              >
+                <UsersIcon
+                  className="text-muted-foreground size-4 shrink-0"
+                  aria-hidden
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{rep.name}</p>
+                  <p className="text-muted-foreground mt-0.5 text-xs">
+                    last visit {formatDate(rep.lastVisit)}
+                  </p>
+                </div>
+                <Badge variant="secondary" className="shrink-0 tabular-nums">
+                  {rep.visits} visit{rep.visits === 1 ? "" : "s"}
+                </Badge>
+                <ChevronRightIcon
+                  className="text-muted-foreground size-4 shrink-0"
+                  aria-hidden
+                />
+              </Link>
+            ))}
+          </Card>
+        </>
+      )}
+
       <SectionTitle>Visit history</SectionTitle>
       {!history.ok ? (
         <ErrorState message="We could not load this institute's history just now." />
@@ -308,16 +527,32 @@ export default async function InstituteDetailPage(
                     )}
 
                     {/*
-                      ONE LINK FOR BOTH ROLES. `/pending/[id]` is the report
-                      reader, and it has always ended its ownership check with
-                      `if (!mine && !isAdmin(user)) notFound()` — an admin was
-                      meant to open it. Until `/pending` left `REP_ONLY_PATHS`
-                      the proxy sent them to `/` instead, which made this button
-                      dead on the one screen where reassignment lives. It is not
-                      branched by role because it does not need to be.
+                      ONE LINK, TWO DESTINATIONS — and it IS branched by role
+                      now, which reverses what stood here.
+
+                      `/pending/[id]` works for both and always did: its
+                      ownership check ends `if (!mine && !isAdmin(user))
+                      notFound()`, so an admin was always meant to be able to
+                      open it. That is still true and is why the rep's half is
+                      unchanged.
+
+                      What changed is that an admin has a BETTER page. Since
+                      `/pending` left `REP_ONLY_PATHS` this button worked for
+                      them, but it landed them in the rep-facing report reader —
+                      a screen built around "what do I still owe" — when the
+                      admin's own visit view at `/review/[id]` shows the same
+                      report with the photo, the presence record and the way
+                      back into the filtered register. Sending a supervisor to
+                      the worker's screen was a missed door, not a broken one.
                     */}
                     <Button asChild variant="outline" className="mt-1 h-9">
-                      <Link href={`/pending/${visit.id}`}>Open the full report</Link>
+                      <Link
+                        href={
+                          admin ? `/review/${visit.id}` : `/pending/${visit.id}`
+                        }
+                      >
+                        Open the full report
+                      </Link>
                     </Button>
                   </div>
                 )}
