@@ -34,18 +34,59 @@ import { formatDate } from "@/lib/dates";
  * number, and a sparkline of five data points is decoration pretending to be
  * analysis.
  */
-export function AdminOverview({ data }: { data: OverviewData }) {
+export function AdminOverview({
+  data,
+  today,
+}: {
+  data: OverviewData;
+  /**
+   * The app's definition of today, passed in rather than computed here.
+   *
+   * `todayISO()` is a server helper and this is the component that renders the
+   * link; taking the value from the page means the tile's numbers and the
+   * range its link opens come from ONE reading of the day. Asking again here
+   * could, at midnight IST, produce a link to a different day than the one
+   * counted.
+   */
+  today: string;
+}) {
   const stuck = data.openCheckIns.filter((v) => v.stale).length;
 
   return (
     <>
       <SectionTitle>Today and this week</SectionTitle>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {/*
+          ONE TILE, THREE FACTS — and still the fourth of four, because the row
+          is `grid-cols-2 md:grid-cols-4` and a fifth tile would break it.
+
+          It read "Visits today: 7", which is the answer to a question nobody
+          asks first. The morning question is "twelve planned, how many done",
+          and since 0033 there is a third number behind it: one institute can be
+          visited twice in a day, so visits and institutes reached are no longer
+          the same count. All three live in the space the one used to.
+        */}
         <Stat
           icon={ActivityIcon}
-          value={data.visitsToday}
-          label="Visits today"
+          value={
+            data.plannedToday === null ? (
+              data.visitsToday
+            ) : (
+              <>
+                {data.visitsToday}
+                <span className="text-muted-foreground text-[20px] font-medium">
+                  {" / "}
+                  {data.plannedToday}
+                </span>
+              </>
+            )
+          }
+          label={
+            data.plannedToday === null ? "Visits today" : "Visits today · of planned"
+          }
+          sub={`${data.institutesToday} institute${data.institutesToday === 1 ? "" : "s"}`}
           tone={data.visitsToday > 0 ? "good" : "quiet"}
+          href={`/review?from=${today}&to=${today}`}
         />
         <Stat icon={CalendarRangeIcon} value={data.visitsThisWeek} label="Visits this week" />
         <Stat
@@ -207,16 +248,23 @@ function Stat({
   value,
   label,
   hint,
+  sub,
+  href,
   tone = "quiet",
 }: {
   icon: typeof ActivityIcon;
-  value: number;
+  /** A node rather than a number, so a tile can carry "7 / 12". */
+  value: React.ReactNode;
   label: string;
   hint?: string;
+  /** A third line under the label — a second, smaller fact. */
+  sub?: string;
+  /** Makes the whole tile a link to the rows behind it. */
+  href?: string;
   tone?: "good" | "quiet";
 }) {
-  return (
-    <Card className="gap-0 p-4">
+  const body = (
+    <>
       <Icon
         className={
           tone === "good" ? "text-primary size-4" : "text-muted-foreground size-4"
@@ -230,6 +278,33 @@ function Stat({
         {label}
         {hint && <span className="ml-1 opacity-70">{hint}</span>}
       </p>
+      {sub && (
+        <p className="text-muted-foreground mt-1 text-[11px] tabular-nums opacity-70">
+          {sub}
+        </p>
+      )}
+    </>
+  );
+
+  if (!href) return <Card className="gap-0 p-4">{body}</Card>;
+
+  /*
+   * THE WHOLE TILE IS THE TARGET, not the number inside it.
+   *
+   * A 26px figure is a small tap target and the card around it is not; on a
+   * phone the card is what a thumb lands on anyway. The affordance is the
+   * hover lift rather than an underline — underlining a headline number makes
+   * a dashboard look like a link farm, which is the same call the report grid
+   * makes in the other direction for its dense little counts.
+   */
+  return (
+    <Card className="gap-0 p-0">
+      <Link
+        href={href}
+        className="hover:bg-accent/40 focus-visible:ring-ring block rounded-xl p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      >
+        {body}
+      </Link>
     </Card>
   );
 }

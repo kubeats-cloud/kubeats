@@ -364,6 +364,32 @@ export interface OpenCheckIn {
 
 export interface Overview {
   visitsToday: number;
+  /**
+   * Plan rows for today, held or not — the denominator "visits today" never
+   * had. A morning's real question is "twelve planned, how many done", and a
+   * bare count of visits cannot answer it.
+   *
+   * It can legitimately be SMALLER than `visitsToday`: a rep may add a row to
+   * their own plan and walk it immediately, so the day ends with more visits
+   * than were planned at any point. That is not an error and is not flagged as
+   * one.
+   *
+   * NULL MEANS THE COUNT COULD NOT BE READ, and is not the same as zero —
+   * which is itself a real answer on a day nobody planned anything. The tile
+   * drops the denominator entirely rather than printing "7 / 0", which would
+   * be a lie about the plan rather than an admission about the query.
+   */
+  plannedToday: number | null;
+  /**
+   * DISTINCT institutes among today's visits, which is NOT `visitsToday`.
+   *
+   * Migration 0033 dropped `daily_plans_unique_per_day`, so a morning meeting
+   * and an afternoon session at one school are two plan rows, two check-ins and
+   * two visits. From that point "institute visits today" became genuinely two
+   * numbers, and showing only the row count overstates reach on exactly the
+   * days a rep worked one school hard.
+   */
+  institutesToday: number;
   visitsThisWeek: number;
   reportsThisWeek: number;
   photosThisWeek: number;
@@ -460,8 +486,17 @@ export async function getOverview(): Promise<
     return supabase.from("visits").select("id", { count: "exact", head: true });
   }
 
-  const [todayCount, weekCount, reported, photos, loops, recent, actives, openIns] =
-    await Promise.all([
+  const [
+    todayCount,
+    weekCount,
+    reported,
+    photos,
+    loops,
+    recent,
+    actives,
+    openIns,
+    plannedToday,
+  ] = await Promise.all([
       countOf((q) => q.eq("date", today)),
       countOf((q) => q.gte("date", weekStart).lte("date", weekEnd)),
       countOf((q) =>
@@ -482,13 +517,39 @@ export async function getOverview(): Promise<
        */
       countOf((q) => q.eq("lifecycle_status", "Set").is("closed_at", null)),
       listTeamVisits({}),
+      /*
+       * Today's visits, row by row — and `institute_id` rides along.
+       *
+       * This query already existed to build "out today"; the distinct-institute
+       * count comes off the SAME rows rather than from a second read. PostgREST
+       * has no `count(distinct …)`, so it would have had to be derived in
+       * TypeScript from a list of ids either way — and the list is already here.
+       */
       supabase
         .from("visits")
-        .select("member, profiles!visits_member_fkey(name)")
+        .select("member, institute_id, profiles!visits_member_fkey(name)")
         .eq("date", today),
       // Everyone currently inside a visit. One definition, shared with the
       // member hub — see listOpenCheckIns().
       listOpenCheckIns(),
+      /*
+       * What was PLANNED for today, across the team.
+       *
+       * `daily_plans`, not `visits`: a plan row exists from the moment a rep
+       * adds it or an admin assigns it, whether or not anybody went. That is
+       * the denominator, and it is the one thing on this tile that cannot be
+       * derived from the visits log.
+       *
+       * Keyed on the same `today` as every query above — `todayISO()`, whose
+       * twin in the database is `public.app_today()` (migration 0008). Reading
+       * the day from the runtime's own clock instead would turn the day over at
+       * 05:30 IST and put this count a day out of step with the plan rows
+       * `log_visit()` is matching against.
+       */
+      supabase
+        .from("daily_plans")
+        .select("id", { count: "exact", head: true })
+        .eq("date", today),
     ]);
 
   if (todayCount.error || weekCount.error || !recent.ok) {
@@ -496,13 +557,23 @@ export async function getOverview(): Promise<
     return { ok: false };
   }
 
+  // Not fatal — see `plannedToday` on the interface. One number goes missing
+  // from one tile; the rest of the screen is unaffected.
+  if (plannedToday.error) logError("admin:overview-planned", plannedToday.error);
+
   // Who was out today, and how much they logged. Built here rather than in SQL
   // because it is a handful of rows and a group-by would need a view.
   const tally = new Map<string, { id: string; name: string; visits: number }>();
+  // Distinct institutes reached today, derived from the rows already fetched.
+  const institutesToday = new Set<string>();
+
   for (const row of (actives.data ?? []) as unknown as {
     member: string;
+    institute_id: string | null;
     profiles: { name: string | null } | null;
   }[]) {
+    if (row.institute_id) institutesToday.add(row.institute_id);
+
     const found = tally.get(row.member);
     if (found) found.visits += 1;
     else
@@ -517,6 +588,10 @@ export async function getOverview(): Promise<
     ok: true,
     data: {
       visitsToday: todayCount.count ?? 0,
+      // A failed plan count is a missing DENOMINATOR, not a broken screen: the
+      // tile falls back to showing visits alone rather than claiming 0 planned.
+      plannedToday: plannedToday.error ? null : (plannedToday.count ?? 0),
+      institutesToday: institutesToday.size,
       visitsThisWeek: weekCount.count ?? 0,
       reportsThisWeek: reported.count ?? 0,
       photosThisWeek: photos.count ?? 0,
