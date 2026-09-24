@@ -91,12 +91,19 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
 
       {/* The screen about what you are aiming for is the natural place to ask
           what you actually did. /report is out of the nav bar on purpose — see
-          lib/nav.ts — so this is how a rep reaches their own history. */}
+          lib/nav.ts — so this is how a rep reaches their own history.
+
+          TWO DESTINATIONS, because the two readers are not the same person.
+          A rep goes to /report, which is their own activity and always was.
+          An admin looking at somebody else's week goes to that rep's HUB —
+          /report?member= would only have redirected there anyway, and the hub
+          answers the question the button asks plus the four an admin asks
+          next. */}
       <Button asChild variant="outline" className="mb-4 h-11">
         <Link
           href={
             viewingOther
-              ? `/report?period=monthly&member=${memberId}`
+              ? `/team/${memberId}?period=monthly`
               : "/report?period=monthly"
           }
         >

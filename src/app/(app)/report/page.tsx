@@ -1,16 +1,12 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PageColumn } from "@/components/layout/page-column";
 import { PageHeader } from "@/components/page-header";
-import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
 import { ActivitySummary } from "@/components/report/activity-summary";
 import { PeriodControls } from "@/components/weekly/period-controls";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { ExportExcel } from "@/components/report/export-excel";
 import { getActivityReport } from "@/lib/activity-report";
-import { listReps } from "@/lib/closing-report";
-import { memberName } from "@/lib/week-summary";
 import {
   REPORT_PERIODS,
   isReportPeriod,
@@ -49,63 +45,58 @@ export default async function ReportPage(props: PageProps<"/report">) {
 
   const admin = isAdmin(user);
   const requested = first(searchParams.member);
-  const viewingOther = admin && !!requested && requested !== user.id;
-  const memberId = viewingOther ? requested! : user.id;
 
-  const [result, name, reps] = await Promise.all([
-    getActivityReport(memberId, "", period, periodStart),
-    viewingOther ? memberName(memberId) : Promise.resolve(user.name),
-    admin ? listReps() : Promise.resolve([]),
-  ]);
-
-  const displayName = name ?? "this member";
-
-  const repLink = (id: string) => {
+  /*
+   * ?member= IS THE REP HUB'S QUESTION NOW, so an admin asking it here is sent
+   * there instead of being answered twice.
+   *
+   * /team/[memberId] shows this report AND the week, the pipeline, the
+   * register and what is owed — everything /report?member= showed plus the
+   * five screens an admin used to visit afterwards. Keeping both would leave
+   * two pages answering "how is this rep doing" with different amounts of the
+   * answer, and the weaker one reachable from links already in the wild.
+   *
+   * A REDIRECT RATHER THAN A DELETED PARAMETER, because those links exist: in
+   * bookmarks, in the export button's history, and in anything the client has
+   * sent each other. They keep working and land somewhere better.
+   *
+   * ONLY FOR AN ADMIN. A rep has no business reading another rep's activity
+   * and /team is closed to them, so for them ?member= is ignored exactly as it
+   * always was — silently, landing on their own report rather than on an
+   * error, which is the existing behaviour and the right one for a URL they
+   * may have been sent by mistake.
+   */
+  if (admin && requested && requested !== user.id) {
     const params = new URLSearchParams({ period, start: periodStart });
-    if (id !== user.id) params.set("member", id);
-    return `/report?${params.toString()}`;
-  };
+    redirect(`/team/${requested}?${params.toString()}`);
+  }
+
+  const memberId = user.id;
+
+  const result = await getActivityReport(memberId, "", period, periodStart);
+  const displayName = user.name;
 
   return (
     <PageColumn>
       <PageHeader
-        eyebrow={viewingOther ? "Team member" : undefined}
-        title={viewingOther ? displayName : "Activity report"}
-        description={
-          viewingOther
-            ? "Their complete field activity for the period."
-            : "Your visits and what came of them, by day, month or year."
-        }
+        title="Activity report"
+        description="Your visits and what came of them, by day, month or year."
       />
 
-      {/* An admin picks a rep. Rendered as links rather than a dropdown so the
-          screen works before any JavaScript arrives, the same reasoning as the
-          period controls. */}
-      {admin && reps.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          {reps.map((rep) => {
-            const active = rep.id === memberId;
-            return (
-              <Button
-                key={rep.id}
-                asChild
-                variant={active ? "default" : "outline"}
-                className="h-9"
-              >
-                <Link href={repLink(rep.id)} aria-current={active ? "page" : undefined}>
-                  {rep.name}
-                </Link>
-              </Button>
-            );
-          })}
-        </div>
-      )}
+      {/*
+        THE CHIP GRID IS GONE — ~47 name buttons above a report about one of
+        them, which was the only way to pick a rep before /team's names opened
+        anything. Choosing a person is /team's job and switching between them
+        is the rep hub's; this screen is one person's own activity and says so
+        in its title again.
 
+        No `member` prop on the controls either: this page only ever renders
+        the signed-in user now, so there is nothing to carry.
+      */}
       <PeriodControls
         period={period}
         periodStart={periodStart}
         options={REPORT_PERIODS}
-        member={viewingOther ? memberId : undefined}
         basePath="/report"
       />
 
@@ -125,6 +116,7 @@ export default async function ReportPage(props: PageProps<"/report">) {
           />
         </div>
       )}
+
 
       {!result.ok ? (
         <ErrorState message="We could not load this activity report. Please try again in a moment." />

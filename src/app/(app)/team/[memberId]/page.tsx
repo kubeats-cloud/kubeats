@@ -18,9 +18,11 @@ import {
   TheirInstitutes,
   TodayCard,
 } from "@/components/team/member-hub";
+import { RepSwitcher } from "@/components/team/rep-switcher";
 import { requireAdmin } from "@/lib/admin";
 import { listTeamMembers } from "@/lib/admin";
 import { listOpenCheckIns, listTeamVisits } from "@/lib/admin-workspace";
+import { listReps } from "@/lib/closing-report";
 import { getActivityReport } from "@/lib/activity-report";
 import { getWeekSummary, memberName } from "@/lib/week-summary";
 import { listInstitutes } from "@/lib/institutes";
@@ -164,7 +166,7 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
    * of the hub. Each fallback is the helper's OWN, so nothing downstream can
    * tell the two routes apart.
    */
-  const [catalogue, week, report, visits, registry, today, openCheckIns] =
+  const [catalogue, week, report, visits, registry, today, openCheckIns, reps] =
     await Promise.all([
       settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "team-hub:statuses"),
       settled(getWeekSummary(memberId, weekStart), { ok: false as const }, "team-hub:week"),
@@ -177,6 +179,9 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
       settled(listInstitutes(), { ok: false as const }, "team-hub:institutes"),
       settled(getMemberToday(memberId), { planned: 0, visited: 0, institutes: 0 }, "team-hub:today"),
       settled(listOpenCheckIns(memberId), [], "team-hub:checkins"),
+      /* Reps only — `listReps()` filters `role = 'rep'`, so the switcher
+         cannot offer an admin whose hub would have nothing on it. */
+      settled(listReps(), [], "team-hub:reps"),
     ]);
 
   /*
@@ -240,6 +245,27 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
           </Button>
         }
       />
+
+      {/*
+        SWITCH REP, then the links out.
+
+        The switcher carries the CURRENT query string across, so an admin
+        comparing two people over the same month stays in that month rather
+        than being dropped back to the default on every switch.
+      */}
+      {reps.length > 1 && (
+        <div className="mb-4">
+          <RepSwitcher
+            reps={reps.map((rep) => ({ value: rep.id, label: rep.name }))}
+            current={memberId}
+            search={new URLSearchParams(
+              Object.entries(searchParams).flatMap(([key, value]) =>
+                typeof value === "string" ? [[key, value] as [string, string]] : [],
+              ),
+            ).toString()}
+          />
+        </div>
+      )}
 
       {/* Links OUT to the screens that own what they own. /targets is where a
           locked week is reopened — a second reopen control here would be a

@@ -83,10 +83,20 @@ function rowsFrom(
        * became unreachable, and the row's chevron opens the same hub.
        */
       href: `/team/${member.member}?week=${weekStart}`,
-      // /team and /report answer different questions — all reps for one week
-      // against one rep over months — so they stay separate screens. What they
-      // needed was a door between them, which is this.
-      reportHref: `/report?period=monthly&member=${member.member}`,
+      /*
+       * THE REPORT LINK NOW GOES TO THE HUB TOO.
+       *
+       * It pointed at `/report?period=monthly&member=`, which is the URL an
+       * admin no longer has: /report is the signed-in user's OWN activity now,
+       * and an admin asking it about somebody else is redirected to this very
+       * hub. Pointing straight here saves the round trip; the redirect stays
+       * as the backstop for links already in the wild.
+       *
+       * `period=monthly` is carried so the cell keeps its own meaning —
+       * "their activity, by month" — rather than inheriting whichever period
+       * was last in play.
+       */
+      reportHref: `/team/${member.member}?period=monthly`,
     };
   });
 }
