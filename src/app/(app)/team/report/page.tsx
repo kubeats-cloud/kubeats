@@ -105,16 +105,32 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
           </SectionTitle>
 
           <div className="mt-3">
+            {/* Status bands only — `showActivities: false`. The six activity
+                counts are what /team and /report already report, so on screen
+                they crowded out the status columns this report exists for. The
+                Excel export keeps all six: the flag is passed here, never by
+                `activitySheet()`. See GridInput in activity-grid.ts. */}
             <ActivityGridTable
-              data={{ reps: result.model.reps, columns: result.model.columns }}
+              data={{
+                reps: result.model.reps,
+                columns: result.model.columns,
+                showActivities: false,
+              }}
               caption={`Activity by rep from ${start} to ${end}`}
             />
           </div>
 
+          {/* The first sentence described the six activity columns, which are
+              no longer on screen. The second is still what a reader needs.
+
+              The third is new and earns its place: the Export button is
+              directly above this, and the file it produces still carries the
+              six activity columns. An admin comparing the two would otherwise
+              have no way to know that is deliberate. */}
           <p className="text-muted-foreground mt-3 text-xs">
-            Counts are the same figures the Team and report screens show:
-            meetings from the daily plan, everything else from the visits log.
-            Status columns are the vocabulary as it stands now.
+            Status columns are the vocabulary as it stands now, counted from
+            where each visit left the institute. The Excel export also includes
+            the six activity columns, which the Team and report screens show.
           </p>
         </>
       )}

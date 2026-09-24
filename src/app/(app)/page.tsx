@@ -121,10 +121,20 @@ export default async function DashboardPage() {
             <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />
           )}
 
-          {/* THE SAME TABLE THE REPORT PAGE SHOWS, compact. Every column is
-              here — it scrolls sideways rather than dropping the wide end,
-              because a status column invisible on the dashboard is one nobody
-              knows to look for. The card is a summary by SIZE, not by content. */}
+          {/* THE SAME TABLE THE REPORT PAGE SHOWS, compact — and the same
+              columns as it, so the card and the full report cannot say
+              different things.
+
+              The STATUS bands only: `showActivities: false` drops DASHBOARD
+              ACTIVITIES, whose six counts repeated what /team and /report
+              already show and pushed the status columns — the ones an admin
+              opens this card to read — off the right-hand edge. Every status
+              column is still here and still scrolls sideways rather than being
+              dropped, because a status column invisible on the dashboard is one
+              nobody knows to look for.
+
+              The .xlsx is UNAFFECTED: the flag lives at the caller and the
+              export never passes it. See GridInput in activity-grid.ts. */}
           <SectionTitle className="mt-8">
             Activity this month
             <span className="text-muted-foreground ml-2 text-xs font-normal">
@@ -136,7 +146,11 @@ export default async function DashboardPage() {
             <>
               <div className="mt-3">
                 <ActivityGridTable
-                  data={{ reps: report.model.reps, columns: report.model.columns }}
+                  data={{
+                    reps: report.model.reps,
+                    columns: report.model.columns,
+                    showActivities: false,
+                  }}
                   compact
                   caption="Activity by rep this month"
                 />

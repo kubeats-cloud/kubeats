@@ -251,6 +251,27 @@ export interface RepRow {
 export interface GridInput {
   reps: RepRow[];
   columns: StatusColumns;
+  /**
+   * Whether to draw the DASHBOARD ACTIVITIES band. Defaults to TRUE, and the
+   * default is the load-bearing part.
+   *
+   * The client asked for the six activity columns to come off the SCREEN — they
+   * read the status bands, and the activity counts were repeating what /team
+   * and /report already say. They did NOT ask for them to leave the .xlsx,
+   * which is their own template with formulas and pivots written against it
+   * (see TEMPLATE_COLUMN_ORDER below for why column positions are load-bearing
+   * in that file).
+   *
+   * So this is the ONE place the "the table and the download are two renderings
+   * of one array" invariant at the head of this file is deliberately broken,
+   * and it is broken by OMISSION AT THE CALLER rather than by a second code
+   * path: `activitySheet()` never passes it, so the export takes the default
+   * and is byte-for-byte what it was. Only the two screen callers opt out.
+   * Anything that forgets to pass it gets the full grid, which is the safe way
+   * round for a flag whose wrong value silently deletes six columns from a
+   * client's spreadsheet.
+   */
+  showActivities?: boolean;
 }
 
 export const GROUP_HEADERS = {
@@ -272,12 +293,25 @@ export function buildActivityGrid(input: GridInput): {
   rows: CellValue[][];
   merges: SheetMerge[];
 } {
-  const { reps, columns } = input;
+  const { reps, columns, showActivities = true } = input;
+
+  /*
+   * ONE list, read by BOTH the header band and the body cells below.
+   *
+   * This is why it is a variable rather than two conditions. The band headers
+   * and the row cells are built by separate loops, so dropping the band from
+   * one and not the other would not fail — it would silently shift every
+   * status count six columns out of line with its own header, which is a
+   * report that looks fine and is wrong. Deriving both from this makes that
+   * particular mistake unspellable.
+   */
+  const activityColumns: readonly (typeof ACTIVITY_COLUMNS)[number][] =
+    showActivities ? ACTIVITY_COLUMNS : [];
 
   const bands: { title: string; labels: string[] }[] = [
     {
       title: GROUP_HEADERS.activities,
-      labels: ACTIVITY_COLUMNS.map((c) => c.label),
+      labels: activityColumns.map((c) => c.label),
     },
     { title: GROUP_HEADERS.closed, labels: columns.closed.map((c) => c.label) },
     { title: GROUP_HEADERS.open, labels: columns.open.map((c) => c.label) },
@@ -302,7 +336,7 @@ export function buildActivityGrid(input: GridInput): {
 
   const bodyRows = reps.map((rep) => {
     const row: CellValue[] = [rep.name];
-    for (const column of ACTIVITY_COLUMNS) {
+    for (const column of activityColumns) {
       row.push(activityCount(rep.activities, column));
     }
     for (const column of [...columns.closed, ...columns.open]) {
