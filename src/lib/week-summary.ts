@@ -210,7 +210,19 @@ export async function getTeamWeek(
 
   const [profilesResult, targetsResult, plansResult, visitsResult] =
     await Promise.all([
-      supabase.from("profiles").select("id, name, role").order("name"),
+      /*
+       * REPS ONLY. This is the team's PROGRESS chart — commitment against
+       * achievement — and an admin has neither: no campus (FO021), no
+       * institutes (0028), so no visits and no weekly target. They appeared as
+       * a row of zeroes with an "Admin" badge, which reads as a rep who has
+       * done nothing rather than as somebody the question does not apply to.
+       *
+       * It also made every admin a link to a rep hub that could only ever be
+       * empty. Settings still lists them — that screen is about accounts, not
+       * activity — and the hierarchy still groups by them, because "which
+       * admin created this account" is exactly what admins are there for.
+       */
+      supabase.from("profiles").select("id, name, role").eq("role", "rep").order("name"),
       supabase
         .from("targets")
         .select(ROW_COLUMNS)

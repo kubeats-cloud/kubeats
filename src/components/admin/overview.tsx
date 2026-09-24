@@ -229,7 +229,15 @@ export function AdminOverview({
                 label="Pipeline by rep"
               />
               <Shortcut href="/data" icon={DatabaseIcon} label="Data and backups" />
-              <Shortcut href="/report" icon={ChartColumnIcon} label="Activity report" />
+              {/* /team/report, NOT /report. /report is a rep's own activity and
+                  an admin has none — following it only to be redirected would
+                  work, but pointing at the destination is what stops the
+                  Overview implying an admin has activity of their own. */}
+              <Shortcut
+                href="/team/report"
+                icon={ChartColumnIcon}
+                label="Activity report"
+              />
               <Shortcut
                 href="/materials/manage"
                 icon={FileTextIcon}

@@ -71,6 +71,27 @@ export default async function ReportPage(props: PageProps<"/report">) {
     redirect(`/team/${requested}?${params.toString()}`);
   }
 
+  /*
+   * AN ADMIN IS NEVER THE SUBJECT OF AN ACTIVITY REPORT.
+   *
+   * Without this, an admin reaching /report with no ?member= fell through to
+   * `memberId = user.id` and got their OWN activity — "Pavan's activity",
+   * every panel empty, as though they were a rep who had done nothing. They
+   * are not: FO021 gives an admin no campus and 0028 no institutes, so they
+   * log no visits and never will. The screen was answering a question that
+   * cannot have an answer.
+   *
+   * It became reachable when the chip grid came off this page: that grid was
+   * the admin's way to pick somebody, and with it gone /report had no meaning
+   * for them at all. Sending them to the TEAM's activity is the nearest true
+   * answer to what they clicked — "activity report" — and /team/report is the
+   * screen that owns it.
+   *
+   * Placed after the ?member= redirect above so an admin who names a rep still
+   * reaches that rep's hub; only the subject-less case lands here.
+   */
+  if (admin) redirect("/team/report");
+
   const memberId = user.id;
 
   const result = await getActivityReport(memberId, "", period, periodStart);
