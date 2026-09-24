@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Building2Icon, ChevronRightIcon, SearchIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -28,6 +29,26 @@ import { cn } from "@/lib/utils";
 const ALL = "__all__";
 /** Its own sentinel, because "no owner" is a real filter and not the absence of one. */
 const UNASSIGNED = "__unassigned__";
+/**
+ * "No status yet" — `institutes.status IS NULL`.
+ *
+ * Null is its own state and not the absence of a filter: an institute
+ * registered and never reached is neither open nor closed, and it is often the
+ * most interesting row on the screen. It needs a sentinel for the same reason
+ * UNASSIGNED does — a Radix Select cannot hold an empty string as a value.
+ */
+const NO_STATUS = "__none__";
+
+/** The filters this screen understands, as URL parameters. */
+export interface InstituteFilters {
+  q?: string;
+  status?: string;
+  owner?: string;
+  state?: string;
+  city?: string;
+  area?: string;
+  type?: string;
+}
 
 /**
  * Search and filtering run in the browser over the list the server already
@@ -36,12 +57,25 @@ const UNASSIGNED = "__unassigned__";
  * put a network round trip between a rep and every character they type.
  *
  * Filter options are derived from the institutes actually present, so the
- * dropdowns never offer a state with nothing in it.
+ * dropdowns never offer a state with nothing in it. STATUS IS THE EXCEPTION and
+ * is offered from the whole vocabulary — see the control for why.
+ *
+ * THE FILTERS ARE IN THE URL, so a filtered registry is a link. That is what
+ * makes "click 3 scheduled, open those three institutes" possible from
+ * anywhere else in the admin portal: a count elsewhere becomes an href here.
+ * State is SEEDED from the URL once and then MIRRORED back to it.
+ *
+ * MIRRORED, NOT DRIVEN. The filtering itself still runs over the array in
+ * memory — the URL is an output, not an input, after the first render. That is
+ * what keeps the instant-response property above: were the URL the source of
+ * truth, every keystroke would be a server round trip and this component would
+ * be the thing its own opening paragraph says it deliberately is not.
  */
 export function InstitutesBrowser({
   institutes,
   catalogue,
   showOwner = false,
+  initial = {},
 }: {
   institutes: Institute[];
   /** The status vocabulary, loaded by the page that renders this. */
@@ -56,13 +90,105 @@ export function InstitutesBrowser({
    * information.
    */
   showOwner?: boolean;
+  /**
+   * The filters as they arrived in the URL. SEED ONLY — read on the first
+   * render and never again, which is what lets typing stay instant.
+   */
+  initial?: InstituteFilters;
 }) {
-  const [search, setSearch] = useState("");
-  const [state, setState] = useState(ALL);
-  const [city, setCity] = useState(ALL);
-  const [type, setType] = useState(ALL);
+  const router = useRouter();
+
+  const [search, setSearch] = useState(initial.q ?? "");
+  const [status, setStatus] = useState(initial.status ?? ALL);
+  const [state, setState] = useState(initial.state ?? ALL);
+  const [city, setCity] = useState(initial.city ?? ALL);
+  const [area, setArea] = useState(initial.area ?? ALL);
+  const [type, setType] = useState(initial.type ?? ALL);
   const [boards, setBoards] = useState<string[]>([]);
-  const [owner, setOwner] = useState(ALL);
+  /*
+   * OWNER IS IGNORED FOR A REP, even when it is in the URL.
+   *
+   * The control is admin-only, so a rep given an `?owner=` link would hold a
+   * filter they can neither see nor clear — a registry that looks empty for no
+   * stated reason. RLS already limits them to their own institutes, so the
+   * parameter is redundant for them rather than dangerous: dropping it costs
+   * nothing and removes a dead end.
+   */
+  const [owner, setOwner] = useState(showOwner ? (initial.owner ?? ALL) : ALL);
+
+  /*
+   * THE URL IS WRITTEN FROM STATE, never read back after the seed.
+   *
+   * Two mechanisms, deliberately, and the split is about cost:
+   *
+   *   router.replace          the discrete controls. `replace` and not `push`
+   *                           so a filter session leaves ONE history entry and
+   *                           Back returns where the reader came from rather
+   *                           than walking them out through six dropdowns.
+   *
+   *   history.replaceState    the SEARCH BOX only. `router.replace` re-runs the
+   *                           server component, so mirroring a text field that
+   *                           way would put `listInstitutes()` behind every
+   *                           character typed — exactly the round trip the
+   *                           opening comment says this component exists to
+   *                           avoid. `replaceState` updates the address bar and
+   *                           nothing else, which is all the URL is for here.
+   *
+   * Both are replace-shaped, so neither floods history.
+   */
+  /*
+   * Plain closures rather than memoised callbacks with a ref behind them.
+   *
+   * They are only ever called from event handlers, where the render that
+   * created them is the current one — so closing over the state values
+   * directly is both correct and the whole of it. The first attempt kept a
+   * ref of "the filters as they stand" and assigned it during render, which
+   * is a write to a ref in render: React may discard or re-run that render,
+   * and the lint rule that caught it is right to.
+   */
+  function buildQuery(next: InstituteFilters) {
+    const params = new URLSearchParams();
+    const put = (key: string, value: string | undefined) => {
+      if (value && value !== ALL) params.set(key, value);
+    };
+    put("q", next.q?.trim());
+    put("status", next.status);
+    put("state", next.state);
+    put("city", next.city);
+    put("area", next.area);
+    put("type", next.type);
+    // Never written for a rep: they have no control to clear it with.
+    if (showOwner) put("owner", next.owner);
+    const query = params.toString();
+    return query ? `/institutes?${query}` : "/institutes";
+  }
+
+  /** The patch, applied over the filters as they stand in THIS render. */
+  function mirror(patch: InstituteFilters, viaRouter: boolean) {
+    const url = buildQuery({
+      q: search,
+      status,
+      state,
+      city,
+      area,
+      type,
+      owner,
+      ...patch,
+    });
+    if (viaRouter) router.replace(url, { scroll: false });
+    else window.history.replaceState(null, "", url);
+  }
+
+  /** A discrete control changed: set it, and put it in the URL. */
+  function pick(
+    key: keyof InstituteFilters,
+    value: string,
+    set: (v: string) => void,
+    also?: InstituteFilters,
+  ) {
+    set(value);
+    mirror({ [key]: value, ...also }, true);
+  }
 
   const availableStates = useMemo(
     () => [...new Set(institutes.map((i) => i.state).filter(Boolean))].sort() as string[],
@@ -80,6 +206,20 @@ export function InstitutesBrowser({
         ),
       ].sort() as string[],
     [institutes, state],
+  );
+
+  const availableAreas = useMemo(
+    () =>
+      [
+        ...new Set(
+          institutes
+            .filter((i) => state === ALL || i.state === state)
+            .filter((i) => city === ALL || i.city === city)
+            .map((i) => i.area)
+            .filter(Boolean),
+        ),
+      ].sort() as string[],
+    [institutes, state, city],
   );
 
   const availableBoards = useMemo(
@@ -127,7 +267,12 @@ export function InstitutesBrowser({
       }
       if (state !== ALL && i.state !== state) return false;
       if (city !== ALL && i.city !== city) return false;
+      if (area !== ALL && i.area !== area) return false;
       if (type !== ALL && i.type !== type) return false;
+      // NO_STATUS is `status IS NULL`, which is a real answer and not "any".
+      if (status === NO_STATUS && i.status !== null) return false;
+      if (status !== ALL && status !== NO_STATUS && i.status !== status)
+        return false;
       if (boards.length > 0 && !(i.boards ?? []).some((b) => boards.includes(b)))
         return false;
       if (owner === UNASSIGNED && i.registered_by) return false;
@@ -135,7 +280,7 @@ export function InstitutesBrowser({
         return false;
       return true;
     });
-  }, [institutes, search, state, city, type, boards, owner]);
+  }, [institutes, search, status, state, city, area, type, boards, owner]);
 
   function toggleBoard(board: string) {
     setBoards((current) =>
@@ -166,17 +311,24 @@ export function InstitutesBrowser({
           className="h-11 pl-9"
           placeholder="Search by name, city or area"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            // replaceState, not router.replace — see the note where `mirror`
+            // is defined. A text field must not refetch the registry per key.
+            mirror({ q: e.target.value }, false);
+          }}
           aria-label="Search institutes"
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-2 md:max-w-2xl">
+      <div className="grid grid-cols-2 gap-2 md:max-w-4xl md:grid-cols-3">
         <Select
           value={state}
           onValueChange={(v) => {
-            setState(v);
+            // Narrowing the state invalidates the city and the area under it.
             setCity(ALL);
+            setArea(ALL);
+            pick("state", v, setState, { city: ALL, area: ALL });
           }}
         >
           <SelectTrigger className="h-11 w-full" aria-label="Filter by state">
@@ -192,7 +344,13 @@ export function InstitutesBrowser({
           </SelectContent>
         </Select>
 
-        <Select value={city} onValueChange={setCity}>
+        <Select
+          value={city}
+          onValueChange={(v) => {
+            setArea(ALL);
+            pick("city", v, setCity, { area: ALL });
+          }}
+        >
           <SelectTrigger className="h-11 w-full" aria-label="Filter by city">
             <SelectValue />
           </SelectTrigger>
@@ -206,7 +364,24 @@ export function InstitutesBrowser({
           </SelectContent>
         </Select>
 
-        <Select value={type} onValueChange={setType}>
+        {/* Area, the third rung of the location tree. It had no control at all
+            and was only reachable through the free-text search, which is not
+            something another screen can link to. */}
+        <Select value={area} onValueChange={(v) => pick("area", v, setArea)}>
+          <SelectTrigger className="h-11 w-full" aria-label="Filter by area">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All areas</SelectItem>
+            {availableAreas.map((a) => (
+              <SelectItem key={a} value={a}>
+                {a}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={type} onValueChange={(v) => pick("type", v, setType)}>
           <SelectTrigger className="h-11 w-full" aria-label="Filter by type">
             <SelectValue />
           </SelectTrigger>
@@ -215,6 +390,38 @@ export function InstitutesBrowser({
             {(Object.keys(TYPE_LABELS) as InstituteType[]).map((t) => (
               <SelectItem key={t} value={t}>
                 {TYPE_LABELS[t]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/*
+          STATUS — the control this screen never had, and the one the whole
+          drill-down depends on: "3 scheduled" elsewhere becomes a link here.
+
+          OFFERED FROM THE WHOLE VOCABULARY, not from the statuses present,
+          which is the one place this screen departs from its own "never offer
+          an option with nothing behind it" rule. A deep link may name a status
+          no institute currently holds — that is a real and useful answer
+          ("none any more") — and a control that silently dropped the value it
+          was given would show "All statuses" over an empty list, which reads
+          as a bug rather than as a result.
+
+          Retired statuses are included for the same reason /review includes
+          them: retiring is this app's only removal path, so old institutes go
+          on pointing at them and filtering by one is exactly how they are
+          found. Marked, so nobody wonders why it is offered.
+        */}
+        <Select value={status} onValueChange={(v) => pick("status", v, setStatus)}>
+          <SelectTrigger className="h-11 w-full" aria-label="Filter by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All statuses</SelectItem>
+            <SelectItem value={NO_STATUS}>No status yet</SelectItem>
+            {catalogue.map((entry) => (
+              <SelectItem key={entry.status} value={entry.status}>
+                {entry.isActive ? entry.status : `${entry.status} (retired)`}
               </SelectItem>
             ))}
           </SelectContent>
@@ -247,7 +454,7 @@ export function InstitutesBrowser({
 
       {showOwner && (ownerOptions.reps.length > 0 || ownerOptions.anyUnassigned) && (
         <div className="md:max-w-xs">
-          <Select value={owner} onValueChange={setOwner}>
+          <Select value={owner} onValueChange={(v) => pick("owner", v, setOwner)}>
             <SelectTrigger className="h-11 w-full" aria-label="Filter by owner">
               <SelectValue />
             </SelectTrigger>
