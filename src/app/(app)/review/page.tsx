@@ -40,6 +40,17 @@ export default async function ReviewPage(props: PageProps<"/review">) {
     to: first(searchParams.to),
     reported: first(searchParams.reported),
     instituteStatus: first(searchParams.status),
+    /*
+     * TWO STATUS PARAMS, DELIBERATELY UNMERGED.
+     *
+     * `?status=` has always meant the INSTITUTE's current status and keeps
+     * meaning exactly that — every link already in the wild still resolves the
+     * same way. `?visitStatus=` is the new one and means the visit's own. See
+     * VisitFilters for why aliasing them would answer the wrong question
+     * quietly.
+     */
+    visitStatus: first(searchParams.visitStatus),
+    lifecycle: first(searchParams.lifecycle),
   };
 
   const [result, reps, institutes, catalogue] = await Promise.all([

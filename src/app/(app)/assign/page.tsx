@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { CalendarClockIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -106,8 +107,22 @@ export default async function AssignPage() {
                         <td className="px-5 py-3 whitespace-nowrap tabular-nums">
                           {row.date}
                         </td>
-                        <td className="px-5 py-3">{row.memberName}</td>
-                        <td className="px-5 py-3 font-medium">{row.instituteName}</td>
+                        <td className="px-5 py-3">
+                          <Link
+                            href={`/team/${row.memberId}`}
+                            className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          >
+                            {row.memberName}
+                          </Link>
+                        </td>
+                        <td className="px-5 py-3 font-medium">
+                          <Link
+                            href={`/institutes/${row.instituteId}`}
+                            className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          >
+                            {row.instituteName}
+                          </Link>
+                        </td>
                         <td className="text-muted-foreground px-5 py-3">
                           {row.purpose}
                         </td>

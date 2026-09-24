@@ -19,6 +19,7 @@ import { SectionTitle } from "@/components/section-title";
 import { OpenCheckIns } from "@/components/admin/open-checkins";
 import { EmptyState } from "@/components/states";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
+import { CountLink } from "@/components/ui/count-link";
 import type { Overview as OverviewData } from "@/lib/admin-workspace";
 import { formatDate } from "@/lib/dates";
 
@@ -37,6 +38,8 @@ import { formatDate } from "@/lib/dates";
 export function AdminOverview({
   data,
   today,
+  weekStart,
+  weekEnd,
 }: {
   data: OverviewData;
   /**
@@ -49,6 +52,15 @@ export function AdminOverview({
    * counted.
    */
   today: string;
+  /**
+   * The week getOverview() counted, passed in for the same reason `today` is:
+   * the tiles' numbers and the ranges their links open must come from ONE
+   * reading of the calendar. `weekEnd` is `weekCountEnd()` — the Sunday every
+   * rollup counts to, not the Saturday a rep is shown — so the link returns
+   * exactly the rows the tile counted.
+   */
+  weekStart: string;
+  weekEnd: string;
 }) {
   const stuck = data.openCheckIns.filter((v) => v.stale).length;
 
@@ -88,7 +100,12 @@ export function AdminOverview({
           tone={data.visitsToday > 0 ? "good" : "quiet"}
           href={`/review?from=${today}&to=${today}`}
         />
-        <Stat icon={CalendarRangeIcon} value={data.visitsThisWeek} label="Visits this week" />
+        <Stat
+          icon={CalendarRangeIcon}
+          value={data.visitsThisWeek}
+          label="Visits this week"
+          href={`/review?from=${weekStart}&to=${weekEnd}`}
+        />
         <Stat
           icon={ClipboardCheckIcon}
           value={data.reportsThisWeek}
@@ -98,7 +115,11 @@ export function AdminOverview({
               ? `of ${data.visitsThisWeek}`
               : undefined
           }
+          href={`/review?reported=reported&from=${weekStart}&to=${weekEnd}`}
         />
+        {/* No link: there is no photo filter on Review, and a tile that
+            opened "this week's visits" under the word "photos" would be
+            answering a question nobody asked. */}
         <Stat icon={CameraIcon} value={data.photosThisWeek} label="Photos in" />
       </div>
 
@@ -141,7 +162,13 @@ export function AdminOverview({
                       {visit.instituteName}
                     </Link>
                     <p className="text-muted-foreground mt-0.5 truncate text-xs">
-                      {visit.memberName} · {formatDate(visit.date)} · {visit.activityLabel}
+                      <Link
+                        href={`/team/${visit.memberId}`}
+                        className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        {visit.memberName}
+                      </Link>{" "}
+                      · {formatDate(visit.date)} · {visit.activityLabel}
                     </p>
                   </div>
                   <Badge
@@ -173,9 +200,19 @@ export function AdminOverview({
                     key={rep.id}
                     className="flex items-center justify-between gap-3 px-4 py-2.5"
                   >
-                    <span className="truncate text-sm font-medium">{rep.name}</span>
+                    <Link
+                      href={`/team/${rep.id}`}
+                      className="focus-visible:ring-ring truncate rounded-sm text-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                    >
+                      {rep.name}
+                    </Link>
                     <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                      {rep.visits} visit{rep.visits === 1 ? "" : "s"}
+                      <CountLink
+                        value={rep.visits}
+                        href={`/review?member=${rep.id}&from=${today}&to=${today}`}
+                        label={`Open ${rep.name}'s ${rep.visits} visit${rep.visits === 1 ? "" : "s"} today`}
+                      />{" "}
+                      visit{rep.visits === 1 ? "" : "s"}
                     </span>
                   </div>
                 ))}
@@ -200,7 +237,16 @@ export function AdminOverview({
           <div>
             <SectionTitle>Open loops</SectionTitle>
             <Card className="p-4">
-              <p className="text-2xl font-semibold tabular-nums">{data.openLoops}</p>
+              {/* ?lifecycle=Set is the SAME predicate this number counts —
+                  still "Set", not yet closed — so the list cannot disagree
+                  with the tile above it. */}
+              <p className="text-2xl font-semibold tabular-nums">
+                <CountLink
+                  value={data.openLoops}
+                  href="/review?lifecycle=Set"
+                  label={`Open the ${data.openLoops} loop${data.openLoops === 1 ? "" : "s"} the team has not closed`}
+                />
+              </p>
               <p className="text-muted-foreground mt-1 text-xs">
                 Sessions and campus visits the team has set but not yet closed.
               </p>

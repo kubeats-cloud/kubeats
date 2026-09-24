@@ -19,7 +19,7 @@ import {
   listPurposes,
 } from "@/lib/visits";
 import { getWeekSummary } from "@/lib/week-summary";
-import { formatWeekRange, mondayOf } from "@/lib/weeks";
+import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
 import { formatDate, todayISO } from "@/lib/dates";
 import { getOverview } from "@/lib/admin-workspace";
 import { getActivityReportModel } from "@/lib/exports/activity-export";
@@ -118,7 +118,12 @@ export default async function DashboardPage() {
           {overview?.ok ? (
             /* `todayISO()` read once and shared: the tile's counts and the
                link it opens must agree about which day it is. */
-            <AdminOverview data={overview.data} today={todayISO()} />
+            <AdminOverview
+              data={overview.data}
+              today={todayISO()}
+              weekStart={weekStart}
+              weekEnd={weekCountEnd(weekStart)}
+            />
           ) : (
             <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />
           )}

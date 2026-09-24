@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useState } from "react";
 import { ShieldCheckIcon, UserIcon, UsersIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,42 @@ import type { TeamMember } from "@/lib/admin";
  * who knows the answer fills one in. It is the only hand-written path to the
  * column, and it is why a view-only chart has one control on it.
  */
+/**
+ * A member's name in the chart, as a link to their hub where that means
+ * something.
+ *
+ * THE CHART STAYS VIEW-ONLY — only the LABEL becomes a link, and the
+ * attribution controls below it are untouched.
+ *
+ * A REP LINKS; AN ADMIN DOES NOT. /team/[memberId] is an activity hub, and an
+ * admin has no activity to show — FO021 gives them no campus, 0028 no
+ * institutes. Linking their name here would promise a page that can only be
+ * empty, which is the same mistake the Overview's "Activity report" shortcut
+ * was making. They still appear, because "which admin created this account" is
+ * exactly what this screen records.
+ */
+function NodeName({
+  id,
+  name,
+  role,
+}: {
+  id: string;
+  name: string;
+  role: string;
+}) {
+  if (role === "admin") {
+    return <span className="text-sm font-medium">{name}</span>;
+  }
+  return (
+    <Link
+      href={`/team/${id}`}
+      className="focus-visible:ring-ring rounded-sm text-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+    >
+      {name}
+    </Link>
+  );
+}
+
 export function HierarchyChart({ members }: { members: TeamMember[] }) {
   /*
    * ONE ACTION HOOK FOR THE WHOLE SCREEN, not one per row.
@@ -125,7 +162,7 @@ export function HierarchyChart({ members }: { members: TeamMember[] }) {
                               className="text-muted-foreground size-4 shrink-0"
                               aria-hidden
                             />
-                            <span className="text-sm font-medium">{member.name}</span>
+                            <NodeName id={member.id} name={member.name} role={member.role} />
                             <Badge
                               variant={
                                 member.role === "admin" ? "neutral" : "success"
@@ -205,7 +242,7 @@ export function HierarchyChart({ members }: { members: TeamMember[] }) {
                           className="text-muted-foreground size-4 shrink-0"
                           aria-hidden
                         />
-                        <span className="text-sm font-medium">{member.name}</span>
+                        <NodeName id={member.id} name={member.name} role={member.role} />
                         <Badge
                           variant={member.role === "admin" ? "neutral" : "success"}
                           className="capitalize"

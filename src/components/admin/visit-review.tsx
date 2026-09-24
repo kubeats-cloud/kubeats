@@ -36,6 +36,8 @@ import { formatDate } from "@/lib/dates";
  */
 
 const ALL = "all";
+/** Matches VISIT_STATUS_NONE in admin-workspace.ts — `status_set_to IS NULL`. */
+const NONE = "__none__";
 
 interface Option {
   id: string;
@@ -85,6 +87,8 @@ export function VisitReview({
     "to",
     "reported",
     "status",
+    "visitStatus",
+    "lifecycle",
   ].filter((k) => params.get(k)).length;
 
   return (
@@ -220,6 +224,55 @@ export function VisitReview({
               </SelectContent>
             </Select>
           </Field>
+
+          {/*
+            "STATUS SET BY THIS VISIT" — the sibling of the control above, and
+            the labels are the whole of why both can exist without confusing
+            anybody. That one asks where the SCHOOL stands now; this one asks
+            what THIS VISIT decided. A drill-down from a visit's own badge
+            lands here, because clicking "Session scheduled" on a row must
+            narrow to the visits that set it, not to every visit ever made to a
+            school that happens to sit there today.
+          */}
+          <Field label="Status set by this visit">
+            <Select
+              value={value("visitStatus") || ALL}
+              onValueChange={(v) => apply("visitStatus", v)}
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="Any" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any</SelectItem>
+                {/* Legal only before FO024 made a status compulsory, and this
+                    is how those visits are found. */}
+                <SelectItem value={NONE}>No status set</SelectItem>
+                {statuses.map((entry) => (
+                  <SelectItem key={entry.status} value={entry.status}>
+                    {entry.isActive ? entry.status : `${entry.status} (retired)`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          {/* Open loops and closed ones. "Set" means STILL open — see
+              VisitFilters for why the lifecycle alone cannot say that. */}
+          <Field label="Loop">
+            <Select
+              value={value("lifecycle") || ALL}
+              onValueChange={(v) => apply("lifecycle", v)}
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="Any" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any</SelectItem>
+                <SelectItem value="Set">Set &mdash; still open</SelectItem>
+                <SelectItem value="Done">Done</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-3">
@@ -262,14 +315,22 @@ export function VisitReview({
                 <Card className="p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
+                      {/* Name links stay live at every width — a full-width
+                          row is a fine tap target, unlike a grid cell. */}
                       <Link
-                        href={`/review/${visit.id}`}
-                        className="truncate font-semibold hover:underline"
+                        href={`/institutes/${visit.instituteId}`}
+                        className="focus-visible:ring-ring block truncate rounded-sm font-semibold hover:underline focus-visible:ring-2 focus-visible:outline-none"
                       >
                         {visit.instituteName}
                       </Link>
                       <p className="text-muted-foreground mt-0.5 text-xs">
-                        {visit.memberName} · {formatDate(visit.date)}
+                        <Link
+                          href={`/team/${visit.memberId}`}
+                          className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                        >
+                          {visit.memberName}
+                        </Link>{" "}
+                        · {formatDate(visit.date)}
                       </p>
                     </div>
                     {visit.photo && (
@@ -384,11 +445,26 @@ export function VisitReview({
                       <td className="px-5 py-3 whitespace-nowrap tabular-nums">
                         {formatDate(visit.date)}
                       </td>
-                      <td className="px-5 py-3">{visit.memberName}</td>
                       <td className="px-5 py-3">
+                        {/* The person, not this visit — their hub. */}
                         <Link
-                          href={`/review/${visit.id}`}
-                          className="font-medium hover:underline"
+                          href={`/team/${visit.memberId}`}
+                          className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                        >
+                          {visit.memberName}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-3">
+                        {/*
+                          TWO DESTINATIONS, because they are two questions. The
+                          NAME opens the institute — everything about that
+                          school in one place — and the chevron at the end of
+                          the row still opens THIS VISIT. A name should get you
+                          to the thing it names.
+                        */}
+                        <Link
+                          href={`/institutes/${visit.instituteId}`}
+                          className="focus-visible:ring-ring rounded-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
                         >
                           {visit.instituteName}
                         </Link>
@@ -398,20 +474,57 @@ export function VisitReview({
                       </td>
                       <td className="px-5 py-3">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <Badge variant="secondary">{visit.activityLabel}</Badge>
-                          {visit.lifecycle && (
-                            <Badge
-                              variant={
-                                visit.lifecycle === "Done" ? "success" : "warning"
-                              }
-                            >
-                              {visit.lifecycle}
+                          <Link
+                            href={`/review?activity=${visit.activity}`}
+                            aria-label={`Show every ${visit.activityLabel}`}
+                            className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
+                          >
+                            <Badge variant="secondary" className="hover:ring-ring hover:ring-1">
+                              {visit.activityLabel}
                             </Badge>
+                          </Link>
+                          {visit.lifecycle && (
+                            <Link
+                              href={`/review?lifecycle=${visit.lifecycle}`}
+                              aria-label={
+                                visit.lifecycle === "Done"
+                                  ? "Show every closed loop"
+                                  : "Show every loop still open"
+                              }
+                              className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
+                            >
+                              <Badge
+                                variant={
+                                  visit.lifecycle === "Done" ? "success" : "warning"
+                                }
+                                className="hover:ring-ring hover:ring-1"
+                              >
+                                {visit.lifecycle}
+                              </Badge>
+                            </Link>
                           )}
                         </div>
                       </td>
                       <td className="text-muted-foreground px-5 py-3">
-                        {visit.standing ?? "—"}
+                        {/*
+                          ?visitStatus=, NOT ?status=. This cell is
+                          `status_set_to` — what THIS visit decided — so the
+                          link must narrow to the visits that decided the same.
+                          ?status= would have answered "every visit to a school
+                          sitting there today", a different set and a different
+                          number than the column implies.
+                        */}
+                        {visit.status ? (
+                          <Link
+                            href={`/review?visitStatus=${encodeURIComponent(visit.status)}`}
+                            aria-label={`Show every visit that set ${visit.status}`}
+                            className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          >
+                            {visit.standing ?? visit.status}
+                          </Link>
+                        ) : (
+                          (visit.standing ?? "—")
+                        )}
                       </td>
                       <td className="text-muted-foreground px-5 py-3 whitespace-nowrap tabular-nums">
                         {visit.instituteFollowUpDate

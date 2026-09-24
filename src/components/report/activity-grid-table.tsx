@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { buildActivityGrid, type GridInput } from "@/lib/exports/activity-grid";
+import { COUNT_LINK_CLASS, COUNT_ZERO_CLASS } from "@/components/ui/count-link";
 import { cn } from "@/lib/utils";
 
 /**
@@ -134,7 +135,8 @@ export function ActivityGridTable({
                           )
                         : "text-right tabular-nums",
                       // A zero is real data, but it is not what the eye is for.
-                      c > 0 && value === 0 && "text-muted-foreground/60",
+                      // Same muted treatment CountLink gives its own zeroes.
+                      c > 0 && value === 0 && COUNT_ZERO_CLASS,
                     )}
                   >
                     {href ? (
@@ -146,13 +148,22 @@ export function ActivityGridTable({
                         drill-down undiscoverable. The label says what it
                         opens, because "3" is useless to a screen reader.
                       */
-                      <Link
-                        href={href}
-                        aria-label={`${value} — open these for ${String(row[0] ?? "")}, ${String(labelRow[c] ?? "")}`}
-                        className="decoration-muted-foreground/40 hover:text-primary focus-visible:ring-ring rounded-sm underline decoration-dotted underline-offset-4 hover:decoration-solid focus-visible:ring-2 focus-visible:outline-none"
-                      >
-                        {String(value ?? "")}
-                      </Link>
+                      /*
+                        The link is `hidden md:inline` for the reason CountLink
+                        states: a grid cell cannot reach a 44px tap target, so
+                        below md the number stays plain and the sticky name
+                        column is the way in.
+                      */
+                      <>
+                        <span className="md:hidden">{String(value ?? "")}</span>
+                        <Link
+                          href={href}
+                          aria-label={`${value} — open these for ${String(row[0] ?? "")}, ${String(labelRow[c] ?? "")}`}
+                          className={cn("hidden md:inline", COUNT_LINK_CLASS)}
+                        >
+                          {String(value ?? "")}
+                        </Link>
+                      </>
                     ) : (
                       String(value ?? "")
                     )}

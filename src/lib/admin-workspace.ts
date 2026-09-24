@@ -86,12 +86,49 @@ export interface VisitRow {
   instituteFollowUpDate: string | null;
 }
 
+/** "No status yet" for the visit filter — `status_set_to IS NULL`. */
+export const VISIT_STATUS_NONE = "__none__";
+
 export interface VisitFilters {
   member?: string;
   institute?: string;
   activity?: string;
   from?: string;
   to?: string;
+  /**
+   * WHERE THIS VISIT LEFT THE INSTITUTE — `visits.status_set_to`.
+   *
+   * THE SIBLING OF `instituteStatus` AND NOT AN ALIAS FOR IT. They read alike
+   * and answer opposite questions:
+   *
+   *   visitStatus      which VISITS set this status. A row-level fact about
+   *                    what happened on the day, which a later visit may since
+   *                    have superseded.
+   *   instituteStatus  which visits were made to institutes that are AT this
+   *                    status now — including the early meetings that happened
+   *                    long before the school got there.
+   *
+   * Clicking "Session scheduled" on a visit's own badge must filter VISITS, so
+   * it keys here. Merging the two would silently answer the other question and
+   * return a different count than the badge implied, which is the one failure
+   * a drill-down cannot survive.
+   *
+   * `VISIT_STATUS_NONE` selects the rows with no status at all — legal only
+   * for visits logged before FO024 (0027) made it compulsory, and exactly how
+   * they are found.
+   */
+  visitStatus?: string;
+  /**
+   * "Set" — an OPEN loop — or "Done".
+   *
+   * `Set` is `lifecycle_status = 'Set' AND closed_at IS NULL`, the same
+   * predicate as the Overview's open-loops tile, `isPending()` and
+   * `openLoopsAt()`. Since Stage 3 a closed loop KEEPS `lifecycle_status =
+   * 'Set'` and merely gains a `closed_at`, so the lifecycle alone cannot say
+   * whether anything is still owed — which is the bug those three counters
+   * shipped with. A filter that repeated it would list closed work as open.
+   */
+  lifecycle?: string;
   /** "reported" | "unreported" — whether a closing report has been filed. */
   reported?: string;
   /**
@@ -192,6 +229,22 @@ export async function listTeamVisits(
   if (filters.to) query = query.lte("date", filters.to);
   if (filters.reported === "reported") query = query.not("reported_at", "is", null);
   if (filters.reported === "unreported") query = query.is("reported_at", null);
+
+  // The visit's OWN status. A plain column on `visits`, so — unlike the
+  // institute-status filter below — it needs no embed and cannot flip the
+  // join from outer to inner.
+  if (filters.visitStatus === VISIT_STATUS_NONE) {
+    query = query.is("status_set_to", null);
+  } else if (filters.visitStatus) {
+    query = query.eq("status_set_to", filters.visitStatus);
+  }
+
+  // Open loops and closed ones. See the note on the field.
+  if (filters.lifecycle === "Set") {
+    query = query.eq("lifecycle_status", "Set").is("closed_at", null);
+  } else if (filters.lifecycle === "Done") {
+    query = query.eq("lifecycle_status", "Done");
+  }
   // Dotted path, and it only restricts the rows because the embed above is
   // inner. With the outer embed this would filter the EMBED — every visit would
   // still come back, just with `institutes: null` on the ones that did not
@@ -608,7 +661,10 @@ export interface AssignmentRow {
   date: string;
   purpose: string;
   held: boolean;
+  /** Carried so the row's names can open the two hubs. */
+  memberId: string;
   memberName: string;
+  instituteId: string;
   instituteName: string;
 }
 
@@ -618,7 +674,7 @@ export async function listAssignments(): Promise<AssignmentRow[]> {
   const { data, error } = await supabase
     .from("daily_plans")
     .select(
-      "id, date, purpose, meetings_actual, assigned_by, profiles!daily_plans_member_fkey(name), institutes(name)",
+      "id, date, purpose, meetings_actual, assigned_by, member, institute_id, profiles!daily_plans_member_fkey(name), institutes(name)",
     )
     .not("assigned_by", "is", null)
     .gte("date", todayISO())
@@ -634,6 +690,8 @@ export async function listAssignments(): Promise<AssignmentRow[]> {
     date: string;
     purpose: string;
     meetings_actual: number | null;
+    member: string;
+    institute_id: string;
     profiles: { name: string | null } | null;
     institutes: { name: string | null } | null;
   }[]).map((row) => ({
@@ -641,7 +699,9 @@ export async function listAssignments(): Promise<AssignmentRow[]> {
     date: row.date,
     purpose: row.purpose,
     held: row.meetings_actual !== null,
+    memberId: row.member,
     memberName: row.profiles?.name ?? "Unknown",
+    instituteId: row.institute_id,
     instituteName: instituteNameOr(row.institutes?.name, "admin-workspace"),
   }));
 }
