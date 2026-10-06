@@ -178,3 +178,74 @@ export function todayISO(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${year}-${pad(month)}-${pad(day)}`;
 }
+
+/* ------------------------------------------------------------------ */
+/* Day boundaries, for filtering a timestamptz by calendar day         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The instant a given Asia/Kolkata calendar day begins, as an ISO timestamp.
+ *
+ * WHY THIS IS NEEDED AND WHY IT LIVES HERE. The pipeline report filters
+ * `institutes.status_updated_at`, which is a `timestamptz`. Comparing it
+ * against a bare `YYYY-MM-DD` is wrong at BOTH ends, and wrong in the
+ * direction that silently loses rows: PostgREST coerces the bare date to
+ * midnight UTC, so `.lte('2026-10-06')` cuts that day off at 05:30 IST and
+ * drops almost all of it, while `.gte('2026-10-06')` quietly picks up the last
+ * five and a half hours of the 5th. A whole working day either side.
+ *
+ * So a day has to be turned into an instant, and the only module allowed to
+ * know which timezone that is, is this one — the same rule every rendered date
+ * already follows.
+ *
+ * NOT `weeks.ts`, DELIBERATELY. That file does its arithmetic in UTC on
+ * purpose, so a stored date-only `YYYY-MM-DD` cannot drift as it is added to
+ * and subtracted from. These two functions do the opposite job: they take a
+ * calendar day and ask when it starts in a particular place. Putting them
+ * there would put a timezone inside the one module that is correct for not
+ * having one.
+ *
+ * THE LITERAL +05:30 IS SAFE HERE, and it is worth saying why, because a
+ * hard-coded offset is normally a bug waiting for a clock change. India has
+ * not observed daylight saving since 1945 and IST is a single fixed offset for
+ * the whole country — so there is no date on which this arithmetic changes.
+ * The same assumption is already load-bearing in `0008`'s `app_today()`, which
+ * is this function's twin in SQL. If this app ever serves a second timezone,
+ * both halves move together, exactly as `todayISO()` and `app_today()` must.
+ *
+ * Returns null for anything that is not a `YYYY-MM-DD`, so a tampered query
+ * string produces no clause rather than an invalid one.
+ */
+export function istDayStart(iso: string | null | undefined): string | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  // Parsed as the instant IST midnight corresponds to, then emitted as UTC so
+  // PostgREST receives an unambiguous timestamp rather than an offset it has
+  // to interpret.
+  const at = new Date(`${iso}T00:00:00+05:30`);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
+/**
+ * The instant the day AFTER a given Asia/Kolkata day begins.
+ *
+ * The upper bound of an inclusive range, used with `.lt()` rather than
+ * `.lte()`. "Up to and including the 6th" is `< the 7th at 00:00 IST`, which
+ * is the only form that includes 23:45 on the 6th — the boundary case the
+ * `dates.test.ts` suite pins.
+ *
+ * Done by stepping the DATE in UTC and then asking `istDayStart()` for the
+ * result, rather than adding 24 hours to an instant. The two agree for India
+ * because the offset is fixed, but stepping the calendar is the operation that
+ * stays correct if that ever stops being true.
+ */
+export function istDayAfter(iso: string | null | undefined): string | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [year, month, day] = iso.split("-").map(Number);
+  const stepped = new Date(Date.UTC(year, month - 1, day + 1));
+  if (Number.isNaN(stepped.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const next = `${stepped.getUTCFullYear()}-${pad(stepped.getUTCMonth() + 1)}-${pad(
+    stepped.getUTCDate(),
+  )}`;
+  return istDayStart(next);
+}

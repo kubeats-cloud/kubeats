@@ -9,6 +9,7 @@ import {
 } from "@/lib/validation/institute";
 import { followUpRequired } from "@/lib/validation/visit";
 import { visitMinutes, visitStatusOf } from "@/lib/validation/checkin";
+import { istDayAfter, istDayStart } from "@/lib/dates";
 
 /**
  * The rules that live in Postgres.
@@ -5308,6 +5309,193 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         missed?.institutes,
         "and its institute is nulled out rather than the row being dropped",
       ).toBeNull();
+    });
+  });
+  /* ---------------------------------------------------------------- */
+  /* C2 — the pipeline report's date filter, against a real timestamptz */
+  /* ---------------------------------------------------------------- */
+
+  describe("Pipeline report — the status-changed range", () => {
+    /**
+     * THE HALF THAT CANNOT BE PROVEN IN TYPESCRIPT.
+     *
+     * `tests/unit/dates.test.ts` proves `istDayStart` / `istDayAfter` produce
+     * the right two instants. What it cannot prove is what Postgres does with
+     * them: the comparison is `timestamptz >= timestamptz`, performed by the
+     * database against values it stored itself, and the failure this suite
+     * exists to catch is the one a string compare would have produced —
+     * a report that quietly loses the first and last working day of its own
+     * range.
+     *
+     * Each fixture is placed at a named instant either side of a boundary, and
+     * the range is built with exactly the clauses `listInstitutes()` builds.
+     *
+     * `status_updated_at` IS SET EXPLICITLY ON INSERT, which works because
+     * `touch_institute_status()` (0001) coalesces on INSERT —
+     * `new.status_updated_at := coalesce(new.status_updated_at, now())` — and
+     * only overwrites on an UPDATE that changes the status. So a fixture can
+     * sit in the past without the trigger dragging it to now(), and the trigger
+     * is left exactly as it is rather than worked around.
+     */
+
+    /** The window every assertion below uses: 6 Oct 2026, one day wide. */
+    const DAY = "2026-10-06";
+
+    /** 23:45 IST on the 6th — inside, and the row a naive `.lte` would drop. */
+    let lateOnTheDay: string;
+    /** 00:05 IST on the 6th — inside, at the opening edge. */
+    let earlyOnTheDay: string;
+    /** 23:55 IST on the 5th — outside, five minutes before the window. */
+    let justBefore: string;
+    /** 00:05 IST on the 7th — outside, five minutes after it. */
+    let justAfter: string;
+    /** No status at all, so no timestamp. Excluded by any range. */
+    let neverReached: string;
+
+    beforeAll(async () => {
+      const at = async (label: string, instant: string | null) =>
+        makeInstitute(repA.id, campusA, label, {
+          // A closed status, so FO016 does not also demand a follow-up date.
+          ...(instant ? { status: "Session done", status_updated_at: instant } : {}),
+        });
+
+      lateOnTheDay = await at("range-late", "2026-10-06T18:15:00.000Z");
+      earlyOnTheDay = await at("range-early", "2026-10-05T18:35:00.000Z");
+      justBefore = await at("range-before", "2026-10-05T18:25:00.000Z");
+      justAfter = await at("range-after", "2026-10-06T18:35:00.000Z");
+      neverReached = await at("range-nostatus", null);
+    });
+
+    /** The query `listInstitutes()` builds, run as the service role. */
+    const inRange = async (from?: string, to?: string) => {
+      let q = admin
+        .from("institutes")
+        .select("id, status, status_updated_at")
+        .like("name", `${TAG}%`);
+      const lower = istDayStart(from);
+      const upper = istDayAfter(to);
+      if (lower) q = q.gte("status_updated_at", lower);
+      if (upper) q = q.lt("status_updated_at", upper);
+      const { data, error } = await q;
+      expect(error, error?.message).toBeNull();
+      return (data ?? []).map((row) => row.id as string);
+    };
+
+    it("keeps a status set at 23:45 IST on the closing day", async () => {
+      const ids = await inRange(DAY, DAY);
+      expect(ids, "the row a string compare would have dropped").toContain(
+        lateOnTheDay,
+      );
+    });
+
+    it("keeps a status set at 00:05 IST on the opening day", async () => {
+      expect(await inRange(DAY, DAY)).toContain(earlyOnTheDay);
+    });
+
+    it("excludes 23:55 IST on the day before", async () => {
+      expect(await inRange(DAY, DAY)).not.toContain(justBefore);
+    });
+
+    it("excludes 00:05 IST on the day after", async () => {
+      expect(await inRange(DAY, DAY)).not.toContain(justAfter);
+    });
+
+    /**
+     * The one thing about this filter a reader has to be told, which is why
+     * the screen says it rather than leaving the band quietly empty: an
+     * institute with no status has a null `status_updated_at` by construction,
+     * so it is in no window at all.
+     */
+    it("excludes an institute that has never had a status", async () => {
+      expect(await inRange(DAY, DAY)).not.toContain(neverReached);
+      expect(await inRange(DAY, undefined)).not.toContain(neverReached);
+      expect(await inRange(undefined, DAY)).not.toContain(neverReached);
+    });
+
+    it("includes it again when there is no range at all", async () => {
+      const ids = await inRange(undefined, undefined);
+      for (const id of [
+        lateOnTheDay,
+        earlyOnTheDay,
+        justBefore,
+        justAfter,
+        neverReached,
+      ]) {
+        expect(ids).toContain(id);
+      }
+    });
+
+    it("honours one bound without the other", async () => {
+      const fromOnly = await inRange(DAY, undefined);
+      expect(fromOnly).toContain(lateOnTheDay);
+      expect(fromOnly).toContain(justAfter);
+      expect(fromOnly).not.toContain(justBefore);
+
+      const toOnly = await inRange(undefined, DAY);
+      expect(toOnly).toContain(lateOnTheDay);
+      expect(toOnly).toContain(justBefore);
+      expect(toOnly).not.toContain(justAfter);
+    });
+
+    /**
+     * THE REGRESSION GUARD: the naive query, proven wrong against the same
+     * rows, so nobody can "simplify" the helpers back to it and watch the
+     * tests stay green.
+     *
+     * A bare `YYYY-MM-DD` is coerced to midnight UTC — 05:30 IST — so it names
+     * an INSTANT, not a day. Which makes the failure worse than a boundary
+     * being off by a few hours, and it is worth recording exactly how:
+     */
+    const naiveRange = async (from: string, to: string) => {
+      const { data, error } = await admin
+        .from("institutes")
+        .select("id")
+        .like("name", `${TAG}%`)
+        .gte("status_updated_at", from)
+        .lte("status_updated_at", to);
+      expect(error, error?.message).toBeNull();
+      return (data ?? []).map((row) => row.id as string);
+    };
+
+    /**
+     * A ONE-DAY WINDOW RETURNS NOTHING AT ALL.
+     *
+     * `>= 2026-10-06T00:00Z AND <= 2026-10-06T00:00Z` is a single instant, so
+     * unless a status changed on precisely that tick the answer is empty. The
+     * screen would have shown a report of all zeroes for a day that had plenty
+     * of activity — and, with the totals C1 adds, a grand total of 0 under a
+     * header saying "5 of 12 institutes".
+     */
+    it("proves a naive one-day window matches nothing whatsoever", async () => {
+      expect(await naiveRange(DAY, DAY)).toEqual([]);
+      // Where the real query finds both of the day's rows.
+      const correct = await inRange(DAY, DAY);
+      expect(correct).toContain(lateOnTheDay);
+      expect(correct).toContain(earlyOnTheDay);
+    });
+
+    /**
+     * AND A WIDER NAIVE WINDOW IS OFF BY MOST OF A DAY AT EACH END.
+     *
+     * Over 5–6 October it keeps the evening of the 5th, which belongs to the
+     * day before the window the reader asked about, and drops the evening of
+     * the 6th, which is the last working day inside it. Both wrong, in
+     * opposite directions, which is why no amount of nudging a string compare
+     * fixes this and the boundaries have to be instants.
+     */
+    it("proves a naive wider window is off by a day at both ends", async () => {
+      const naive = await naiveRange("2026-10-05", DAY);
+
+      // Picks up the previous evening, which the reader did not ask for.
+      expect(naive, "23:55 IST on the 5th leaks in").toContain(justBefore);
+      // And loses the closing evening, which they did.
+      expect(naive, "23:45 IST on the 6th is lost").not.toContain(lateOnTheDay);
+
+      // The real query, over the same two days, gets both right.
+      const correct = await inRange("2026-10-05", DAY);
+      expect(correct).toContain(justBefore);
+      expect(correct).toContain(lateOnTheDay);
+      expect(correct).not.toContain(justAfter);
     });
   });
 });

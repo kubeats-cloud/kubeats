@@ -301,6 +301,21 @@ export interface GridInput {
    * promise rather than a drill-down.
    */
   hrefFor?: (rep: RepRow, status: string) => string | null;
+  /**
+   * Whether to compute the TOTAL column, the total row and the grand total.
+   *
+   * DEFAULTS TO TRUE, and unlike `showActivities` above the default here means
+   * every caller agrees rather than one caller opting out. That is the point:
+   * the screen and the download are two renderings of one computation, so a
+   * total that existed in one and not the other would be the seam this file's
+   * opening paragraph exists to close. No caller passes it; the flag is here
+   * so the byte-identity test can ask for the pre-totals grid and prove the
+   * change is confined to the new field.
+   *
+   * WHAT IT IS NOT: a row appended to `rows`. See the `totals` field on the
+   * return value for why that would have been wrong three separate ways.
+   */
+  showTotals?: boolean;
 }
 
 export const GROUP_HEADERS = {
@@ -309,7 +324,67 @@ export const GROUP_HEADERS = {
   closed: "CLOSED STATUS",
   open: "OPEN STATUS",
   unset: "NO STATUS",
+  /**
+   * LAST, AFTER NO STATUS, and the position is the whole of the client
+   * compatibility argument.
+   *
+   * The .xlsx is the client's own template with formulas and pivots written
+   * against fixed column positions — the reason `TEMPLATE_COLUMN_ORDER` exists
+   * at all. A total column inserted anywhere else would shift every column to
+   * its right and silently break all of them; placed at the far end it is
+   * additive, and every existing column keeps the letter it had.
+   *
+   * Same rule NO STATUS itself follows, for the same reason.
+   */
+  total: "TOTAL",
 } as const;
+
+/** What the TOTAL column's second-row header cell says. */
+export const TOTAL_COLUMN_LABEL = "Total";
+
+/** What the total ROW's first cell says, in column A. */
+export const TOTAL_ROW_LABEL = "All reps";
+
+/**
+ * The totals, computed once and rendered twice.
+ *
+ * `perRow` is parallel to the BODY rows (not to `rows`, which carries the two
+ * header rows in front of them), `perColumn` is parallel to one body row
+ * including column A, and `grand` is the bottom-right cell.
+ */
+export interface GridTotals {
+  /**
+   * Each rep's row total — THE STATUS COLUMNS ONLY.
+   *
+   * The six activity columns are deliberately excluded, and this is the single
+   * most important line of arithmetic in the file. Meetings comes from
+   * `daily_plans where meetings_actual = 1`; the other five activity columns
+   * fold eight metrics counted from `visits`. The status columns count those
+   * same visits again, by where they left the institute. So a row total
+   * spanning both bands would count every visit twice AND add a figure from a
+   * different table to it — a number that looks like a sum and means nothing.
+   */
+  perRow: number[];
+  /**
+   * Each column's sum down the rep axis, parallel to a body row.
+   *
+   * Column A is null — a column of names has no sum. Every other column,
+   * activity band INCLUDED, gets one: "how many meetings did the team hold" is
+   * a real question and the same arithmetic /team already answers. The
+   * asymmetry with `perRow` is not an inconsistency; summing one column is
+   * always meaningful, summing across bands is not.
+   */
+  perColumn: (number | null)[];
+  /**
+   * The bottom-right cell: the status bands' own total.
+   *
+   * Reachable two ways — the sum of `perRow`, or the sum of `perColumn`'s
+   * status half — and the two MUST agree. `activity-grid-bands.test.ts`
+   * asserts both routes, because that equality is what makes the figure
+   * reconcile with the "T institutes in all" header on the pipeline report.
+   */
+  grand: number;
+}
 
 /**
  * The template, built.
@@ -330,8 +405,52 @@ export function buildActivityGrid(input: GridInput): {
    * seam the links and the headers could drift through.
    */
   hrefs: (string | null)[][];
+  /**
+   * The row totals, the column totals and the grand total.
+   *
+   * SEPARATE FROM `rows`, NOT APPENDED TO IT, and the separation is the design
+   * rather than a detail. Appending a total row would be wrong three ways, and
+   * all three are visible in the existing callers: `activity-grid-table.tsx`
+   * destructures `[groupRow, labelRow, ...bodyRows]` and renders every
+   * remaining row as a rep — sticky name cell, hover state and all; `hrefs` is
+   * asserted to be the same shape as `rows`, so it would need a parallel null
+   * row or go silently out of alignment; and the "sums to the number of
+   * institutes behind it" test iterates every body row, so a total row would
+   * double its answer and the test would have to be loosened to accommodate a
+   * bug it was written to catch.
+   *
+   * Keeping them here leaves every one of those untouched: the body is still
+   * exactly the reps, and the renderer puts the totals where a total belongs.
+   *
+   * Null when `showTotals` is false.
+   */
+  totals: GridTotals | null;
+  /**
+   * Which sort key each column answers to, parallel to one body row.
+   *
+   * EMITTED HERE FOR THE REASON `merges` AND `hrefs` ARE. This function decides
+   * the column order, so anything that needs to know "which column is which"
+   * has to be told by it rather than work it out again — a second derivation
+   * is the seam through which a header's sort link and the column under it
+   * drift apart, and the failure would be a table that sorts by the wrong
+   * status while looking perfectly correct.
+   *
+   * `"rep"` for column A, the status text for each status column (the NO
+   * STATUS sentinel included, since it is a real column), `"total"` for the
+   * TOTAL column, and **null for every activity column** — those are folds of
+   * eight metrics into six and sorting a report of pipeline positions by them
+   * answers no question the screen is asking.
+   */
+  sortKeys: (string | null)[];
 } {
-  const { reps, columns, showActivities = true, unsetColumn, hrefFor } = input;
+  const {
+    reps,
+    columns,
+    showActivities = true,
+    unsetColumn,
+    hrefFor,
+    showTotals = true,
+  } = input;
 
   /*
    * ONE list, read by BOTH the header band and the body cells below.
@@ -355,6 +474,8 @@ export function buildActivityGrid(input: GridInput): {
     { title: GROUP_HEADERS.open, labels: columns.open.map((c) => c.label) },
     // Last, so the template's bands keep the positions they already have.
     { title: GROUP_HEADERS.unset, labels: unsetColumn ? [unsetColumn.label] : [] },
+    // ...and TOTAL after even that, for the same reason one more time over.
+    { title: GROUP_HEADERS.total, labels: showTotals ? [TOTAL_COLUMN_LABEL] : [] },
   ].filter((band) => band.labels.length > 0);
 
   const groupRow: CellValue[] = [GROUP_HEADERS.representative];
@@ -382,6 +503,7 @@ export function buildActivityGrid(input: GridInput): {
 
   const bodyRows: CellValue[][] = [];
   const bodyHrefs: (string | null)[][] = [];
+  const perRow: number[] = [];
 
   for (const rep of reps) {
     const row: CellValue[] = [rep.name];
@@ -394,11 +516,32 @@ export function buildActivityGrid(input: GridInput): {
       hrefRow.push(null);
     }
 
+    // Accumulated as the status cells are written rather than re-derived
+    // afterwards, so the figure in the TOTAL column is arithmetically the same
+    // cells the reader can see to its left. A second pass over `row` would be
+    // a second chance to pick the wrong slice.
+    let rowTotal = 0;
     for (const column of statusColumns) {
       const count = rep.statuses[column.status] ?? 0;
       row.push(count);
+      rowTotal += count;
       // Zero is real data and is not a door. See `hrefFor`.
       hrefRow.push(count > 0 && hrefFor ? hrefFor(rep, column.status) : null);
+    }
+    perRow.push(rowTotal);
+
+    if (showTotals) {
+      row.push(rowTotal);
+      /*
+       * A TOTAL IS NEVER A DOOR, and `hrefFor` is not even consulted for it.
+       *
+       * CountLink's rule is that a count and the page it opens must agree, and
+       * for a total there is no single page: it spans every status in the row.
+       * A link here would land on one cohort while displaying the size of
+       * several. Pushing null unconditionally is what makes that unspellable
+       * rather than merely unwritten.
+       */
+      hrefRow.push(null);
     }
 
     bodyRows.push(row);
@@ -407,12 +550,59 @@ export function buildActivityGrid(input: GridInput): {
 
   const blank = (row: CellValue[]) => row.map(() => null);
 
+  /*
+   * THE COLUMN SUMS, down the rep axis, over the rows as they were just built.
+   *
+   * Derived from `bodyRows` rather than from `reps` on purpose: the rows are
+   * where the column ORDER was decided a few lines above, so summing them
+   * cannot disagree with the headers. Recomputing from the rep objects would
+   * mean a second place that knows which column is which, which is the seam
+   * `merges` and `hrefs` are both emitted here to avoid.
+   *
+   * Column A is null — a column of names has no sum.
+   */
+  let totals: GridTotals | null = null;
+  if (showTotals) {
+    const width = labelRow.length;
+    const perColumn: (number | null)[] = Array.from({ length: width }, (_, c) => {
+      if (c === 0) return null;
+      return bodyRows.reduce<number>(
+        (sum, row) => sum + (typeof row[c] === "number" ? (row[c] as number) : 0),
+        0,
+      );
+    });
+    totals = {
+      perRow,
+      perColumn,
+      // The sum of the row totals. The test asserts this also equals the sum of
+      // `perColumn`'s status half — two routes, one number, which is what makes
+      // it reconcile with the pipeline report's own header.
+      grand: perRow.reduce((sum, n) => sum + n, 0),
+    };
+  }
+
+  // Built from the same three lists the columns were, in the same order.
+  const sortKeys: (string | null)[] = [
+    SORT_BY_REP,
+    ...activityColumns.map(() => null),
+    ...statusColumns.map((column) => column.status),
+    ...(showTotals ? [SORT_BY_TOTAL] : []),
+  ];
+
   return {
     rows: [groupRow, labelRow, ...bodyRows],
     merges,
     hrefs: [blank(groupRow), blank(labelRow), ...bodyHrefs],
+    totals,
+    sortKeys,
   };
 }
+
+/** The default sort: the rep's own name, which is column A. */
+export const SORT_BY_REP = "rep";
+
+/** Sorting by the TOTAL column. Not a status, so it needs its own key. */
+export const SORT_BY_TOTAL = "total";
 
 /** Column A wide enough for a name; the count columns sized for their header. */
 function widthsFor(rows: CellValue[][]): number[] {
@@ -424,15 +614,36 @@ function widthsFor(rows: CellValue[][]): number[] {
   });
 }
 
-/** The finished sheet, ready for `buildWorkbook`. */
+/**
+ * The finished sheet, ready for `buildWorkbook`.
+ *
+ * THE ONE PLACE A TOTAL ROW BECOMES A ROW. A worksheet is literally a list of
+ * rows, so the `<tfoot>` the screen renders has to be flattened into one here —
+ * and this is the only code that does it, which is why `rows` stays exactly the
+ * reps everywhere else. The sheet grows by one column and one row and nothing
+ * moves: every existing column keeps its letter and every rep keeps its row
+ * number, which is what the client's formulas and pivots are written against.
+ */
 export function activitySheet(input: GridInput, name: string): SheetSpec {
-  const { rows, merges } = buildActivityGrid(input);
+  const { rows, merges, totals } = buildActivityGrid(input);
+
+  const sheetRows = totals
+    ? [
+        ...rows,
+        // Column A names the row; every other cell is that column's sum,
+        // including the activity band. `perColumn[0]` is null by construction.
+        [TOTAL_ROW_LABEL, ...totals.perColumn.slice(1)] as CellValue[],
+      ]
+    : rows;
+
   return {
     name,
-    rows,
+    rows: sheetRows,
     merges,
-    boldRows: [0, 1],
-    widths: widthsFor(rows),
+    // The total row is bold like the two header rows, so a reader scanning the
+    // sheet does not mistake it for the last rep on the team.
+    boldRows: totals ? [0, 1, sheetRows.length - 1] : [0, 1],
+    widths: widthsFor(sheetRows),
     freezeRows: 2,
   };
 }

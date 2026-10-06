@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
+import { istDayAfter, istDayStart } from "@/lib/dates";
 import { signVisitPhotos, type VisitPhoto } from "@/lib/photos";
 import type { InstituteType } from "@/lib/validation/institute";
 
@@ -71,14 +72,68 @@ const COLUMNS = `
  * instantly with no round trip, which matters on a phone. If the registry ever
  * grows past a few thousand this should move to server-side filtering.
  */
-export async function listInstitutes(): Promise<
-  { ok: true; institutes: Institute[] } | { ok: false }
-> {
+/**
+ * An optional window on WHEN THE STATUS LAST MOVED, for the pipeline report.
+ *
+ * Both ends are inclusive calendar days in Asia/Kolkata, and both are
+ * optional — see `pipelineRangeSchema` for why this report has no default
+ * range at all.
+ */
+export interface StatusChangedRange {
+  /** Inclusive YYYY-MM-DD, or undefined for no lower bound. */
+  from?: string;
+  /** Inclusive YYYY-MM-DD, or undefined for no upper bound. */
+  to?: string;
+}
+
+export async function listInstitutes(
+  /**
+   * NARROWS BY `status_updated_at`, NOT BY `created_at`.
+   *
+   * An argument rather than a second function, because a second query against
+   * this table would be a second place the column list and the owner-name join
+   * could drift — and the two would then disagree about what an institute is
+   * while claiming to be the same registry.
+   *
+   * Omitted — which is what `/institutes` and every other caller does — the
+   * query is byte-for-byte the one it has always been. There is no default
+   * window to opt out of.
+   */
+  statusChanged?: StatusChangedRange,
+): Promise<{ ok: true; institutes: Institute[] } | { ok: false }> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+
+  let query = supabase
     .from("institutes")
     .select(COLUMNS)
     .order("created_at", { ascending: false });
+
+  /*
+   * DAY BOUNDARIES IN IST, NOT A STRING COMPARE ON A TIMESTAMPTZ.
+   *
+   * `status_updated_at` is a `timestamptz`. Handing PostgREST a bare
+   * `YYYY-MM-DD` would have it coerce the value to midnight UTC, which is
+   * 05:30 IST — so `.lte(to)` would drop all but the first five and a half
+   * hours of the closing day, and `.gte(from)` would quietly include the tail
+   * of the day before. A working day lost at each end, silently, in a report
+   * whose whole job is to add up.
+   *
+   * `istDayStart` / `istDayAfter` turn a day into an instant, and the upper
+   * bound is `.lt(the next day)` rather than `.lte(the day)` because that is
+   * the only form that includes 23:45 on the closing day.
+   *
+   * A null `status_updated_at` — every institute with no status, by
+   * construction of `touch_institute_status()` — fails both comparisons and is
+   * excluded. That is correct and it is also the one thing about this filter a
+   * reader has to be told, which is why the report says so on screen rather
+   * than leaving the NO STATUS band quietly empty.
+   */
+  const from = istDayStart(statusChanged?.from);
+  const to = istDayAfter(statusChanged?.to);
+  if (from) query = query.gte("status_updated_at", from);
+  if (to) query = query.lt("status_updated_at", to);
+
+  const { data, error } = await query;
 
   if (error) {
     logError("institutes:list", error);

@@ -4,6 +4,8 @@ import {
   formatDate,
   formatDateTime,
   formatTime,
+  istDayAfter,
+  istDayStart,
   todayISO,
 } from "@/lib/dates";
 import { formatWeekRange } from "@/lib/weeks";
@@ -342,5 +344,101 @@ describe("the app and the database agree on what day it is", () => {
     }
     expect(answers.size).toBe(1);
     expect([...answers][0]).toBe("2026-09-05");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* C2 — day boundaries for filtering a timestamptz                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The bug these two exist to prevent, stated as a test rather than a comment.
+ *
+ * The pipeline report filters `institutes.status_updated_at`, which is a
+ * `timestamptz`. Handing PostgREST a bare `YYYY-MM-DD` has it coerce the value
+ * to midnight UTC — 05:30 IST — so `.lte(to)` would keep only the first five
+ * and a half hours of the closing day and `.gte(from)` would quietly scoop up
+ * the tail of the day before. A working day lost at each end, in a report
+ * whose entire job is to add up to its own header.
+ *
+ * So the property under test is: an institute whose status changed at any
+ * moment during an Indian calendar day falls inside a range naming that day,
+ * and one that changed a minute either side of it does not.
+ */
+describe("istDayStart / istDayAfter — Kolkata day boundaries", () => {
+  it("starts a day at midnight IST, which is 18:30 UTC the day before", () => {
+    expect(istDayStart("2026-10-06")).toBe("2026-10-05T18:30:00.000Z");
+  });
+
+  it("ends an inclusive range at midnight IST on the NEXT day", () => {
+    // The upper bound is used with .lt(), so this instant is excluded and
+    // everything before it on the 6th is kept.
+    expect(istDayAfter("2026-10-06")).toBe("2026-10-06T18:30:00.000Z");
+  });
+
+  /**
+   * THE BOUNDARY CASE THAT MATTERS. A status changed at 23:45 on the closing
+   * day of the range has to be inside it — that is precisely the row a naive
+   * `.lte(to)` drops, and the reason the upper bound is exclusive-next-day.
+   */
+  it("includes 23:45 IST on the closing day", () => {
+    const at = new Date("2026-10-06T18:15:00.000Z"); // 23:45 IST on the 6th
+    expect(at.toISOString() >= istDayStart("2026-10-06")!).toBe(true);
+    expect(at.toISOString() < istDayAfter("2026-10-06")!).toBe(true);
+  });
+
+  it("includes 00:05 IST on the opening day", () => {
+    const at = new Date("2026-10-05T18:35:00.000Z"); // 00:05 IST on the 6th
+    expect(at.toISOString() >= istDayStart("2026-10-06")!).toBe(true);
+  });
+
+  it("excludes 23:55 IST on the day before the range", () => {
+    const at = new Date("2026-10-05T18:25:00.000Z"); // 23:55 IST on the 5th
+    expect(at.toISOString() >= istDayStart("2026-10-06")!).toBe(false);
+  });
+
+  it("excludes 00:05 IST on the day after the range", () => {
+    const at = new Date("2026-10-06T18:35:00.000Z"); // 00:05 IST on the 7th
+    expect(at.toISOString() < istDayAfter("2026-10-06")!).toBe(false);
+  });
+
+  it("steps the calendar, not the clock, across a month end", () => {
+    expect(istDayAfter("2026-10-31")).toBe("2026-10-31T18:30:00.000Z");
+    expect(istDayStart("2026-11-01")).toBe("2026-10-31T18:30:00.000Z");
+    // Which is to say: "up to 31 Oct" and "from 1 Nov" meet exactly, with no
+    // gap and no overlap.
+    expect(istDayAfter("2026-10-31")).toBe(istDayStart("2026-11-01"));
+  });
+
+  it("steps a leap day and a year boundary", () => {
+    expect(istDayAfter("2028-02-28")).toBe(istDayStart("2028-02-29"));
+    expect(istDayAfter("2026-12-31")).toBe(istDayStart("2027-01-01"));
+  });
+
+  it("answers null for anything that is not a calendar day", () => {
+    for (const bad of ["", "   ", "2026-10", "06-10-2026", "not a date", undefined, null]) {
+      expect(istDayStart(bad as string | null | undefined)).toBeNull();
+      expect(istDayAfter(bad as string | null | undefined)).toBeNull();
+    }
+  });
+
+  /**
+   * THE WHOLE POINT, AND THE SAME PROPERTY todayISO() IS HELD TO.
+   *
+   * A boundary that moved with the server's own timezone would reintroduce the
+   * outage this file was written for, one column along: the report would filter
+   * a different set of rows depending on where it ran.
+   */
+  it("does not depend on where the app itself is running", async () => {
+    const starts = new Set<string>();
+    const afters = new Set<string>();
+    for (const tz of ZONES) {
+      const dates = await datesModuleIn(tz);
+      starts.add(dates.istDayStart("2026-10-06")!);
+      afters.add(dates.istDayAfter("2026-10-06")!);
+    }
+    expect(starts.size).toBe(1);
+    expect(afters.size).toBe(1);
+    expect([...starts][0]).toBe("2026-10-05T18:30:00.000Z");
   });
 });

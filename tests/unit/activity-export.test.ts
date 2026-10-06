@@ -297,6 +297,8 @@ describe("the grid matches the client's template", () => {
       // Template order inside the open band: see the ordering tests above.
       "Session scheduled",
       "First meeting done",
+      // C1: the TOTAL column, last, after every band the template names.
+      "Total",
     ]);
   });
 
@@ -306,6 +308,10 @@ describe("the grid matches the client's template", () => {
       { row: 0, col: 1, rowSpan: 1, colSpan: 6 },
       { row: 0, col: 7, rowSpan: 1, colSpan: 2 },
       { row: 0, col: 9, rowSpan: 1, colSpan: 2 },
+      // TOTAL is one column wide. The writer skips a colSpan of 1, so this
+      // merge produces no <mergeCell> — it is here because the band loop
+      // emits one per band and the table reads the spans from it.
+      { row: 0, col: 11, rowSpan: 1, colSpan: 1 },
     ]);
   });
 
@@ -313,10 +319,11 @@ describe("the grid matches the client's template", () => {
     // Asha: meetings 4, sessions 2+1, campus 0, olympiad 0, apps 0, admissions 5
     expect(rows[2].slice(1, 7)).toEqual([4, 3, 0, 0, 0, 5]);
     // Closed: Admitted 3, Not interested 0. Open, in TEMPLATE order:
-    // Session scheduled 2, then First meeting done 0.
-    expect(rows[2].slice(7)).toEqual([3, 0, 2, 0]);
+    // Session scheduled 2, then First meeting done 0. Then the row total,
+    // which is the four status cells and NOT the six activity ones.
+    expect(rows[2].slice(7)).toEqual([3, 0, 2, 0, 5]);
     // A rep with no activity is a row of zeroes, not a missing row.
-    expect(rows[3].slice(1)).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(rows[3].slice(1)).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   });
 
   it("drops a band that has no columns rather than merging over nothing", () => {
@@ -326,7 +333,8 @@ describe("the grid matches the client's template", () => {
     );
     const grid = buildActivityGrid({ reps, columns: noOpen });
     expect(grid.rows[0]).not.toContain(GROUP_HEADERS.open);
-    expect(grid.merges).toHaveLength(3);
+    // Column A, DASHBOARD ACTIVITIES, CLOSED STATUS, TOTAL.
+    expect(grid.merges).toHaveLength(4);
   });
 });
 

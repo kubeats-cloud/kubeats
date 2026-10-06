@@ -104,6 +104,33 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
             </span>
           </SectionTitle>
 
+          {/*
+            THE THIRD FIGURE IS NOT "VISITS", AND THE LABEL HAS TO SAY SO.
+
+            `enforce_status_required()` (FO024, migration 0027) is INSERT-only,
+            so every visit logged before it still legally carries a null
+            `status_set_to`. Those rows are counted in the six activity columns
+            of the export and contribute nothing to the status bands — so the
+            grand total in the table's footer is strictly ≤ the number of visits
+            in the range.
+
+            Calling it "visits" would make the status bands look like they had
+            quietly lost rows. Naming it for what it is makes the arithmetic
+            legible, and is why `ActivityReportCounts` carries the figure under
+            that name rather than this page computing one.
+          */}
+          <p className="text-muted-foreground mt-1 text-xs">
+            {result.model.counts.reps} rep
+            {result.model.counts.reps === 1 ? "" : "s"}
+            {" · "}
+            {result.model.counts.statuses} status
+            {result.model.counts.statuses === 1 ? "" : "es"}
+            {" · "}
+            {result.model.counts.visitsWithStatus} visit
+            {result.model.counts.visitsWithStatus === 1 ? "" : "s"} that recorded
+            a status
+          </p>
+
           <div className="mt-3">
             {/* Status bands only — `showActivities: false`. The six activity
                 counts are what /team and /report already report, so on screen

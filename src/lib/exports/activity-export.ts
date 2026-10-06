@@ -198,12 +198,35 @@ export function exportFilename(
  * neither; there is no path by which the screen and the download can disagree
  * about a number, because neither of them counts anything.
  */
+/** The three figures the activity report's summary line prints. */
+export interface ActivityReportCounts {
+  /** Rows, which here really are all reps: `readRows` selects `role = 'rep'`. */
+  reps: number;
+  /** Closed + open columns. This report has no NO STATUS band to exclude. */
+  statuses: number;
+  /**
+   * VISITS THAT RECORDED A STATUS — not visits.
+   *
+   * The distinction is load-bearing and the label has to carry it.
+   * `enforce_status_required()` (FO024, migration 0027) is INSERT-only, so
+   * every visit logged before it still legally carries a null
+   * `status_set_to`. Those rows are counted in the six activity columns and
+   * contribute nothing to the status bands, so the grand total of the status
+   * half is strictly ≤ the number of visits in the range.
+   *
+   * Printing it as "visits" would make the status bands look like they had
+   * lost rows. Naming it for what it is makes the arithmetic legible instead.
+   */
+  visitsWithStatus: number;
+}
+
 export interface ActivityReportModel {
   reps: RepRow[];
   columns: StatusColumns;
   range: ExportRange;
   /** The rep's name for a single-member report; null for all reps. */
   repName: string | null;
+  counts: ActivityReportCounts;
 }
 
 export async function getActivityReportModel(
@@ -251,6 +274,18 @@ export async function getActivityReportModel(
       columns,
       range,
       repName: memberId ? (data.reps[0]?.name ?? null) : null,
+      counts: {
+        reps: data.reps.length,
+        statuses: columns.closed.length + columns.open.length,
+        // Summed from the same per-rep status tallies the grid will draw, so
+        // the line and the grand total cannot disagree. A visit with a null
+        // status contributed to neither.
+        visitsWithStatus: data.reps.reduce(
+          (sum, rep) =>
+            sum + Object.values(rep.statuses).reduce((n, count) => n + count, 0),
+          0,
+        ),
+      },
     },
   };
 }
