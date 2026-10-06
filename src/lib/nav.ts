@@ -159,10 +159,10 @@ export const ADMIN_ONLY_PATHS = [
  *
  * A SECOND MECHANISM, AND ONLY BECAUSE A PREFIX CANNOT REACH. Every entry in
  * the two lists above gates a whole subtree from its first segment, which is
- * what `matches()` is for. `/institutes/<id>/edit` is not that shape: the
- * registry itself is SHARED — a rep browses their own institutes and opens
- * their detail pages — and only the editor at the far end is an admin's. No
- * prefix of a shared route can express "and the leaf is not".
+ * what `matches()` is for. A route whose admin-ness sits past a dynamic segment
+ * is not that shape: the registry itself is SHARED — a rep browses their own
+ * institutes and opens their detail pages — and no prefix of a shared route can
+ * express "and one leaf is not".
  *
  * Kept deliberately small, and in this file rather than in the page, because
  * this module is still the single place every route-visibility question is
@@ -170,12 +170,26 @@ export const ADMIN_ONLY_PATHS = [
  * that does not appear here is not gated at the edge at all.
  *
  * Anchored at both ends. A pattern that matched loosely would be the prefix
- * trap the tests already guard for the lists — `/institutes/x/editor` is not
- * `/institutes/x/edit` — so the tail is `(?:/|$)`, which allows a child of the
- * editor and refuses a route that merely starts with the same letters.
+ * trap the tests already guard for the lists — `/institutes/x/reporting` is not
+ * `/institutes/report` — so the tail is `(?:/|$)`, which allows a child and
+ * refuses a route that merely starts with the same letters.
+ *
+ * ⚠ `/institutes/<id>/edit` USED TO BE HERE AND HAD TO COME OUT (B1).
+ *
+ * A rep may now correct an institute they own, once (migration 0036). This list
+ * is static regexes matched before any database read, so it cannot express
+ * "admin, OR the owner who still has an edit left" — the allowance lives in a
+ * column, and the edge has no session-scoped row to consult. Keeping the entry
+ * would have meant the feature could not exist; removing it is the honest cost.
+ *
+ * WHAT THAT COSTS, STATED PLAINLY: the editor drops from three gates to two.
+ * It keeps the page's own server-side check and `updateInstitute()`'s, with RLS
+ * (`institutes_update`, owner-scoped on both halves since 0028) and FO030
+ * underneath — four checks in all, one fewer at the EDGE. The page comment says
+ * the same thing from its side, and `nav.test.ts` pins the list at one entry so
+ * this cannot be re-added by habit without somebody reading this paragraph.
  */
 const ADMIN_ONLY_PATTERNS: readonly RegExp[] = [
-  /^\/institutes\/[^/]+\/edit(?:\/|$)/,
   /*
    * The pipeline report. Same shape as the editor above and here for the same
    * reason: the registry is shared, and only this leaf is an admin's.

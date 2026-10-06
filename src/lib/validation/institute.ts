@@ -424,3 +424,136 @@ export function fieldErrorsFrom(error: z.ZodError): Record<string, string> {
   }
   return fieldErrors;
 }
+
+/* ------------------------------------------------------------------ */
+/* Counsellors (migration 0037)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One counsellor: a name, and optionally a phone and an email.
+ *
+ * REUSES `optionalMobile` rather than restating the ten-digit rule. That
+ * constant mirrors `institutes_principal_mobile_valid` and the CHECK 0037 gives
+ * this table, so every phone number in the app answers to one shape and a
+ * second copy could not drift from it.
+ *
+ * THE NAME IS THE ONLY REQUIRED FIELD, and it is required for the same reason
+ * the closing report's `met_name` is: there is always a person, and there is
+ * not always a number. A row with a phone and nobody attached to it is a
+ * contact nobody can use.
+ *
+ * Email is `z.email()` — the rule. 0037's CHECK is a loose backstop against
+ * garbage, deliberately, because an address is not load-bearing for anything
+ * here and does not need stating three times the way Rule 12's photo does.
+ */
+export const counsellorSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Enter the counsellor's name.")
+    .max(120, "That name is too long."),
+  phone: optionalMobile,
+  email: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : v))
+    .nullable()
+    .refine(
+      (v) => v === null || z.email().max(254).safeParse(v).success,
+      { message: "That does not look like an email address." },
+    ),
+});
+
+export type CounsellorInput = z.infer<typeof counsellorSchema>;
+
+/**
+ * FormData -> the shape `counsellorSchema` expects, for ONE counsellor.
+ *
+ * Shared deliberately, exactly as `instituteFormDataToInput()` is: the browser
+ * runs it before submitting and the server action runs it again on arrival, so
+ * both ends judge the same values by the same rules.
+ */
+export function counsellorFormDataToInput(formData: FormData) {
+  const text = (key: string) => {
+    const value = formData.get(key);
+    return typeof value === "string" ? value : "";
+  };
+  return {
+    name: text("counsellor_name"),
+    phone: text("counsellor_phone"),
+    email: text("counsellor_email"),
+  };
+}
+
+/** The id of the counsellor a remove button names. */
+export const counsellorIdSchema = z.uuid("That counsellor could not be identified.");
+
+/* ------------------------------------------------------------------ */
+/* Who may edit an institute's details (migration 0036)                */
+/* ------------------------------------------------------------------ */
+
+/** Why an edit was refused, or null when it is allowed. */
+export type EditRefusal = "not-yours" | "allowance-spent";
+
+export interface EditableBy {
+  /** Whether the viewer is an admin. Admins are never limited. */
+  isAdmin: boolean;
+  /** The viewer's id, or null when signed out. */
+  viewerId: string | null;
+}
+
+export interface EditableInstitute {
+  registered_by: string | null;
+  rep_edits_used: number;
+}
+
+/**
+ * May this viewer open the editor, and if not, why not?
+ *
+ * A PURE FUNCTION ON PURPOSE. The same question is asked in three places — the
+ * edit page's server gate, `updateInstitute()`'s gate, and the detail page
+ * deciding whether to draw the Edit button — and three copies of a four-branch
+ * rule is three chances for the button and the gate to disagree. A rep seeing
+ * a button that then refuses them is worse than no button.
+ *
+ * It is NOT the security boundary and must not be mistaken for one. The
+ * boundary is `institutes_update` (owner-scoped on both halves since 0028) and
+ * `guard_rep_institute_edit()` raising FO030. This decides what to RENDER and
+ * what sentence to say; the database decides what happens.
+ *
+ * Four branches:
+ *
+ *   admin                    allowed, always, and spends nothing.
+ *   owner, allowance left    allowed, once.
+ *   owner, allowance spent   refused — "allowance-spent".
+ *   anyone else              refused — "not-yours". In practice a rep cannot
+ *                            even READ a colleague's institute after 0028, so
+ *                            this branch is reached mainly by an admin's own
+ *                            stale link and by tests.
+ */
+export function instituteEditRefusal(
+  institute: EditableInstitute,
+  viewer: EditableBy,
+): EditRefusal | null {
+  if (viewer.isAdmin) return null;
+  if (!viewer.viewerId || institute.registered_by !== viewer.viewerId) {
+    return "not-yours";
+  }
+  return institute.rep_edits_used >= 1 ? "allowance-spent" : null;
+}
+
+/** Convenience for the common question. */
+export function canEditInstitute(
+  institute: EditableInstitute,
+  viewer: EditableBy,
+): boolean {
+  return instituteEditRefusal(institute, viewer) === null;
+}
+
+/** What a rep is told when their one correction is gone. FO030's twin. */
+export const EDIT_ALLOWANCE_SPENT =
+  "You have already made your one correction to this institute. Ask an admin for any further changes.";
+
+/** What the form says to a rep who still has their correction. */
+export const EDIT_ALLOWANCE_NOTICE =
+  "This is your one correction to these details. After you save, ask an admin for any further changes.";

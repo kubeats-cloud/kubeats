@@ -23,13 +23,19 @@ import {
   getInstitute,
   getInstituteStatusHistory,
   getInstituteVisits,
+  listCounsellors,
 } from "@/lib/institutes";
+import { CounsellorsPanel } from "@/components/institutes/counsellors-panel";
 import { activityLabel } from "@/lib/activities";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getOpenFollowUps } from "@/lib/visits";
 import { instituteCounts, workedItBy } from "@/lib/institute-hub";
-import { isOpenStatus } from "@/lib/validation/institute";
+import {
+  EDIT_ALLOWANCE_SPENT,
+  instituteEditRefusal,
+  isOpenStatus,
+} from "@/lib/validation/institute";
 import { Card } from "@/components/ui/card";
 import { listRepsForCampus } from "@/lib/admin";
 import { ReassignOwner } from "@/components/institutes/reassign-owner";
@@ -107,13 +113,35 @@ export default async function InstituteDetailPage(
   // Independent reads, so the slower one does not hold up the others. The reps
   // list is fetched for an ADMIN only: it is the reassign picker's, and a rep
   // has nothing to reassign.
-  const [history, statusHistory, catalogue, reps] = await Promise.all([
+  const [history, statusHistory, catalogue, reps, counsellorList] = await Promise.all([
     getInstituteVisits(id),
     getInstituteStatusHistory(id),
     listStatusCatalogue(),
     admin ? listRepsForCampus(institute.campus_id) : Promise.resolve([]),
+    // Scoped by RLS through the parent institute (0037), so this needs no
+    // ownership test of its own — a rep who cannot see the institute has
+    // already been sent to notFound() above.
+    listCounsellors(id),
   ]);
   const total = class12Total(institute.class12);
+
+  /*
+   * WHO MAY EDIT, AND WHY A SPENT ALLOWANCE IS SAID OUT LOUD (B1).
+   *
+   * One helper, three callers — here, the edit page's gate and
+   * updateInstitute() — so the button, the page and the write cannot disagree.
+   * `refusal` is kept rather than just the boolean because "not yours" and
+   * "you have used your correction" need different answers on screen: the first
+   * says nothing (a rep cannot even reach a colleague's institute after 0028),
+   * the second has to explain itself, or a button that was there yesterday
+   * reads as a bug today.
+   */
+  const editRefusal = instituteEditRefusal(institute, {
+    isAdmin: admin,
+    viewerId: user?.id ?? null,
+  });
+  const canEdit = editRefusal === null;
+  const counsellors = counsellorList.ok ? counsellorList.counsellors : [];
 
   const visits = history.ok ? history.visits : [];
   const counts = instituteCounts(visits, institute.status_updated_at);
@@ -169,10 +197,16 @@ export default async function InstituteDetailPage(
           .join(", ")}
         action={
           <div className="flex items-center gap-1">
-            {/* Admin-only, and hidden rather than disabled for a rep: the
-                editor is theirs alone, proxy.ts redirects a rep off it, and
-                updateInstitute() refuses one regardless. */}
-            {admin && (
+            {/*
+              B1: an admin always, and the owning rep while they still have
+              their one correction. The decision comes from the SAME helper the
+              edit page's gate and updateInstitute() both use, so a button that
+              appears can never lead to a refusal.
+
+              A rep who has spent theirs gets a sentence below rather than a
+              button that silently vanished — see the Details section.
+            */}
+            {canEdit && (
               <Button asChild variant="ghost" className="h-11">
                 <Link href={`/institutes/${institute.id}/edit`}>
                   <PencilIcon className="size-4" aria-hidden />
@@ -282,6 +316,16 @@ export default async function InstituteDetailPage(
         </div>
       )}
 
+      {/*
+        A BUTTON THAT SILENTLY DISAPPEARS READS AS A BUG. A rep who has spent
+        their one correction is told so, where the button used to be.
+      */}
+      {editRefusal === "allowance-spent" && (
+        <p className="text-muted-foreground mb-4 text-xs">
+          {EDIT_ALLOWANCE_SPENT}
+        </p>
+      )}
+
       <FormSection
         title="Details"
         description="What was recorded when this institute was registered."
@@ -343,6 +387,35 @@ export default async function InstituteDetailPage(
               <Phone number={institute.decision_maker_mobile} />
             </Row>
           </dl>
+      </FormSection>
+
+      {/*
+        COUNSELLORS — a LIST, beside the two fixed contacts above rather than
+        instead of them. "Principal / owner" and "Decision maker" are the people
+        a school has one of; this is the list it has several of.
+
+        Uncapped for the owning rep, deliberately and unlike the one-time detail
+        correction: staff change, and a contact list that could be edited once
+        would be useless within a term.
+      */}
+      <FormSection
+        title="Counsellors"
+        description="Everyone else worth calling at this institute."
+        className="mb-4"
+      >
+        {!counsellorList.ok ? (
+          <p className="text-muted-foreground text-sm">
+            We could not load the counsellors just now.
+          </p>
+        ) : (
+          <CounsellorsPanel
+            instituteId={institute.id}
+            counsellors={counsellors}
+            // An admin, or the rep who owns this institute. Not tied to the
+            // one-time edit allowance — see the panel's own note.
+            canWrite={admin || institute.registered_by === (user?.id ?? null)}
+          />
+        )}
       </FormSection>
 
       <FormSection

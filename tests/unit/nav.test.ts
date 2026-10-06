@@ -118,35 +118,47 @@ describe("path guards", () => {
   });
 
   /*
-   * THE INSTITUTE EDITOR, WHICH NO PREFIX CAN REACH.
+   * ⚠ THE INSTITUTE EDITOR IS NO LONGER EDGE-GATED (B1), AND THAT IS THE POINT
+   * OF THIS TEST.
    *
-   * `/institutes` is SHARED — a rep browses their own and opens their detail
-   * pages — and only the editor at the far end is an admin's. That shape is the
-   * reason `ADMIN_ONLY_PATTERNS` exists beside the two lists: putting
-   * "/institutes" on the admin list would take the registry away from every
-   * rep, and leaving it off would leave the editor gated by the page alone,
-   * with `proxy.ts` waving it through at the edge.
+   * It WAS in `ADMIN_ONLY_PATTERNS`, and it had to come out: a rep may now
+   * correct an institute they own, once (migration 0036), and this list is
+   * static regexes matched before any database read — it cannot express "admin,
+   * OR the owner who still has an edit left", because the allowance lives in a
+   * column and the edge has no row to consult.
+   *
+   * The cost is one layer at the edge. What still stands: the page's own server
+   * check, `updateInstitute()`'s gate, `institutes_update` (owner-scoped on
+   * both halves since 0028), and `guard_rep_institute_edit()` raising FO030.
+   *
+   * This test is pinned the other way round so the entry cannot come back by
+   * habit — re-adding it would silently break the feature for every rep, with
+   * a 307 and no explanation.
    */
-  it("gates the institute editor, which sits behind a dynamic segment", () => {
+  it("no longer edge-gates the institute editor, so an owning rep can reach it", () => {
     const id = "8b1a9953-4c22-4d1f-9b1a-99534c224d1f";
-    expect(isAdminOnlyPath(`/institutes/${id}/edit`)).toBe(true);
+    expect(isAdminOnlyPath(`/institutes/${id}/edit`)).toBe(false);
     expect(isRepOnlyPath(`/institutes/${id}/edit`)).toBe(false);
-    // And the registry either side of it stays shared.
+    // And the registry either side of it stays shared, as it always was.
     expect(isAdminOnlyPath("/institutes")).toBe(false);
     expect(isAdminOnlyPath(`/institutes/${id}`)).toBe(false);
     expect(isAdminOnlyPath("/institutes/new")).toBe(false);
   });
 
-  it("anchors the editor pattern at both ends, like the prefix lists", () => {
+  it("keeps exactly one pattern — the pipeline report — after B1", () => {
     const id = "8b1a9953-4c22-4d1f-9b1a-99534c224d1f";
-    // The same boundary trap the lists document: "editor" is not "edit".
-    expect(isAdminOnlyPath(`/institutes/${id}/editor`)).toBe(false);
-    expect(isAdminOnlyPath(`/institutes/${id}/edit-history`)).toBe(false);
-    // A child of the editor is still the editor.
-    expect(isAdminOnlyPath(`/institutes/${id}/edit/anything`)).toBe(true);
-    // And it must not match one segment up or somewhere else entirely.
-    expect(isAdminOnlyPath("/institutes/edit")).toBe(false);
-    expect(isAdminOnlyPath("/materials/x/edit")).toBe(false);
+    // The report is still gated...
+    expect(isAdminOnlyPath("/institutes/report")).toBe(true);
+    // ...and nothing else under /institutes is.
+    for (const path of [
+      "/institutes",
+      "/institutes/new",
+      `/institutes/${id}`,
+      `/institutes/${id}/edit`,
+      `/institutes/${id}/edit/anything`,
+    ]) {
+      expect(isAdminOnlyPath(path), path).toBe(false);
+    }
   });
 
   /*

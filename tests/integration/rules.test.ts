@@ -366,6 +366,55 @@ const has0013 = configured
       .then(({ error }) => !error)
   : false;
 
+/**
+ * Phase B's two migrations, probed by the column and the table they add.
+ *
+ * A missing column comes back as 42703 and a missing table as PGRST205, so a
+ * clean read is evidence the file ran. Each suite skips itself rather than
+ * failing, which is the rule the whole file follows: a project that has not had
+ * the migration should say so loudly, not report a broken rule.
+ */
+const has0036 = configured
+  ? await admin
+      .from("institutes")
+      .select("rep_edits_used")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+const has0037 = configured
+  ? await admin
+      .from("institute_counsellors")
+      .select("id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+if (configured && !has0036) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0036 is not applied to this project.",
+      "    The rep edit allowance suite is being SKIPPED, not passing - nothing",
+      "    here is checking FO030, and in particular nothing is checking that",
+      "    logging a visit does NOT spend the rep's one correction.",
+      "",
+    ].join("\n"),
+  );
+}
+
+if (configured && !has0037) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0037 is not applied to this project.",
+      "    The counsellor suite is being SKIPPED, not passing - nothing here is",
+      "    checking that one rep cannot read another's contacts.",
+      "",
+    ].join("\n"),
+  );
+}
+
 if (configured && !has0013) {
   console.warn(
     [
@@ -5496,6 +5545,304 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(correct).toContain(justBefore);
       expect(correct).toContain(lateOnTheDay);
       expect(correct).not.toContain(justAfter);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* B1 - the rep's one correction, and the trap it exists to avoid     */
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0036)("the rep edit allowance (FO030, migration 0036)", () => {
+    let mine: string;
+
+    beforeEach(async () => {
+      // A fresh institute per test, so a spent allowance in one does not
+      // decide the next. repA owns it, which is what makes them the rep whose
+      // allowance is in question.
+      mine = await makeInstitute(repA.id, campusA, "rep-edit");
+    });
+
+    it("lets the owning rep correct the details once", async () => {
+      const { error } = await repA.db
+        .from("institutes")
+        .update({ name: `${TAG} rep-edit corrected` })
+        .eq("id", mine);
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("institutes")
+        .select("name, rep_edits_used, rep_edited_by")
+        .eq("id", mine)
+        .single();
+      expect(data?.name).toBe(`${TAG} rep-edit corrected`);
+      expect(data?.rep_edits_used, "the allowance is spent").toBe(1);
+      expect(data?.rep_edited_by, "and stamped with who spent it").toBe(repA.id);
+    });
+
+    it("refuses the second correction with FO030", async () => {
+      const first = await repA.db
+        .from("institutes")
+        .update({ name: `${TAG} once` })
+        .eq("id", mine);
+      expect(first.error, first.error?.message).toBeNull();
+
+      const second = await repA.db
+        .from("institutes")
+        .update({ name: `${TAG} twice` })
+        .eq("id", mine);
+      expect(second.error?.code).toBe("FO030");
+
+      const { data } = await admin
+        .from("institutes").select("name").eq("id", mine).single();
+      expect(data?.name, "and the second value never landed").toBe(`${TAG} once`);
+    });
+
+    /**
+     * THE REGRESSION THIS WHOLE DESIGN EXISTS TO PREVENT.
+     *
+     * `log_visit()` is SECURITY INVOKER and sets `institutes.status` AS THE
+     * REP. A guard scoped to "any UPDATE by a non-admin" would spend the
+     * allowance here - silently, before the rep had edited anything - and they
+     * would find the Edit button gone with nothing to connect it to.
+     *
+     * The trigger's `update of <detail columns>` list is what makes this pass:
+     * `status` is not in it, so logging a visit never reaches the function.
+     */
+    it("does NOT spend the allowance when the rep logs a visit", async () => {
+      const today = iso();
+      await ensureArrival(repA.id, mine, today);
+
+      const { data: plan } = await admin
+        .from("daily_plans")
+        .select("id")
+        .eq("member", repA.id)
+        .eq("institute_id", mine)
+        .eq("date", today)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      const { error } = await repA.db.rpc("log_visit", {
+        p_institute_id: mine,
+        p_activity: "meeting",
+        p_lifecycle_status: null,
+        p_expected_date: null,
+        p_latitude: null,
+        p_longitude: null,
+        p_photo_url: photoFor(repA.id),
+        p_notes: null,
+        p_status_set_to: "Session done",
+        p_accuracy: null,
+        p_follow_up_date: null,
+        p_follow_up_time: null,
+        p_daily_plan_id: plan!.id,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("institutes")
+        .select("status, rep_edits_used")
+        .eq("id", mine)
+        .single();
+
+      // The visit did its job...
+      expect(data?.status).toBe("Session done");
+      // ...and the correction is still there to be spent.
+      expect(
+        data?.rep_edits_used,
+        "logging a visit must not cost the rep their edit",
+      ).toBe(0);
+
+      // And it really is still usable, not merely un-incremented.
+      const edit = await repA.db
+        .from("institutes")
+        .update({ name: `${TAG} still editable` })
+        .eq("id", mine);
+      expect(edit.error, edit.error?.message).toBeNull();
+    });
+
+    it("does not spend it on a no-op save of unchanged details", async () => {
+      const { data: before } = await admin
+        .from("institutes").select("name").eq("id", mine).single();
+
+      const { error } = await repA.db
+        .from("institutes")
+        .update({ name: before!.name })
+        .eq("id", mine);
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("institutes").select("rep_edits_used").eq("id", mine).single();
+      expect(data?.rep_edits_used).toBe(0);
+    });
+
+    /**
+     * Deleting a button never closes the path behind it - FO020's lesson.
+     * `institutes_update` lets the owner write any column on their own row, so
+     * without the trigger stamping it, a rep could post their own counter.
+     */
+    it("refuses a rep who tries to reset their own counter", async () => {
+      const first = await repA.db
+        .from("institutes").update({ name: `${TAG} spent` }).eq("id", mine);
+      expect(first.error).toBeNull();
+
+      // Reset attempted alongside a real edit: the trigger overwrites it.
+      const reset = await repA.db
+        .from("institutes")
+        .update({ rep_edits_used: 0, name: `${TAG} sneaky` })
+        .eq("id", mine);
+      expect(reset.error?.code).toBe("FO030");
+
+      const { data } = await admin
+        .from("institutes").select("rep_edits_used").eq("id", mine).single();
+      expect(data?.rep_edits_used).toBe(1);
+    });
+
+    it("lets an admin edit without limit, and without spending the rep's one", async () => {
+      for (const n of [1, 2, 3]) {
+        const { error } = await boss.db
+          .from("institutes")
+          .update({ name: `${TAG} admin edit ${n}` })
+          .eq("id", mine);
+        expect(error, error?.message).toBeNull();
+      }
+
+      const { data } = await admin
+        .from("institutes").select("rep_edits_used").eq("id", mine).single();
+      expect(data?.rep_edits_used, "an admin spends nothing").toBe(0);
+
+      // And the rep's own correction is still available afterwards.
+      const repEdit = await repA.db
+        .from("institutes").update({ name: `${TAG} rep after admin` }).eq("id", mine);
+      expect(repEdit.error, repEdit.error?.message).toBeNull();
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* B2 - counsellors, and the boundary they inherit                   */
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0037)("institute_counsellors (migration 0037)", () => {
+    let mine: string;
+
+    beforeAll(async () => {
+      mine = await makeInstitute(repA.id, campusA, "counsellors");
+    });
+
+    it("lets the owning rep add a counsellor to their own institute", async () => {
+      const { error } = await repA.db.from("institute_counsellors").insert({
+        institute_id: mine,
+        name: `${TAG} Priya`,
+        phone: "9876543210",
+        email: "priya@example.test",
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await repA.db
+        .from("institute_counsellors").select("name").eq("institute_id", mine);
+      expect((data ?? []).map((r) => r.name)).toContain(`${TAG} Priya`);
+    });
+
+    /**
+     * THE 0028 SECTION 2 TRAP, ONE TABLE ALONG.
+     *
+     * A child policy that did not reach through the parent would let repB read
+     * repA's contacts without ever selecting from `institutes`. Zero rows is
+     * the only correct answer - not an error, which would confirm the row is
+     * there.
+     */
+    it("hides it from another rep entirely", async () => {
+      const { data, error } = await repB.db
+        .from("institute_counsellors").select("id").eq("institute_id", mine);
+      expect(error, error?.message).toBeNull();
+      expect(data, "repB must see nothing, not an error").toEqual([]);
+    });
+
+    it("refuses another rep writing one against it", async () => {
+      const { error } = await repB.db.from("institute_counsellors").insert({
+        institute_id: mine,
+        name: `${TAG} intruder`,
+      });
+      expect(error, "the insert policy must refuse").not.toBeNull();
+    });
+
+    it("refuses another rep deleting one", async () => {
+      const { data: row } = await admin
+        .from("institute_counsellors")
+        .select("id")
+        .eq("institute_id", mine)
+        .limit(1)
+        .single();
+
+      await repB.db.from("institute_counsellors").delete().eq("id", row!.id);
+
+      const { data: still } = await admin
+        .from("institute_counsellors").select("id").eq("id", row!.id).maybeSingle();
+      expect(still, "the row survives repB's delete").not.toBeNull();
+    });
+
+    it("lets an admin read and write across institutes", async () => {
+      const { error } = await boss.db.from("institute_counsellors").insert({
+        institute_id: mine,
+        name: `${TAG} admin added`,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await boss.db
+        .from("institute_counsellors").select("name").eq("institute_id", mine);
+      expect((data ?? []).length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("holds every phone to the same ten digits as the rest of the schema", async () => {
+      const { error } = await admin.from("institute_counsellors").insert({
+        institute_id: mine, name: `${TAG} bad phone`, phone: "98765",
+      });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses a nameless counsellor", async () => {
+      const { error } = await admin.from("institute_counsellors").insert({
+        institute_id: mine, name: "   ",
+      });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    /**
+     * Cascade, unlike visits' `restrict`: a contact card is not evidence, and
+     * an admin deleting an institute should not be blocked by one.
+     */
+    it("cascades away when the institute is deleted", async () => {
+      const doomed = await makeInstitute(repA.id, campusA, "counsellor-cascade");
+      await admin.from("institute_counsellors").insert({
+        institute_id: doomed, name: `${TAG} goes with it`,
+      });
+
+      const { error } = await admin.from("institutes").delete().eq("id", doomed);
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("institute_counsellors").select("id").eq("institute_id", doomed);
+      expect(data).toEqual([]);
+    });
+
+    /**
+     * B2 IS NOT CAPPED BY B1. A counsellor list changes as staff change; the
+     * one-time allowance is for correcting a registration. 0036's trigger is
+     * scoped to a column list on `institutes`, so this table cannot touch it.
+     */
+    it.skipIf(!has0036)("never spends the institute's edit allowance", async () => {
+      const fresh = await makeInstitute(repA.id, campusA, "counsellor-no-cost");
+
+      for (const n of [1, 2, 3]) {
+        const { error } = await repA.db.from("institute_counsellors").insert({
+          institute_id: fresh, name: `${TAG} person ${n}`,
+        });
+        expect(error, error?.message).toBeNull();
+      }
+
+      const { data } = await admin
+        .from("institutes").select("rep_edits_used").eq("id", fresh).single();
+      expect(data?.rep_edits_used, "adding counsellors costs no correction").toBe(0);
     });
   });
 });

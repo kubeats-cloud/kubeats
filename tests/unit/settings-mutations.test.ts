@@ -760,15 +760,43 @@ describe("0035 corrects a campus without stranding the pipeline", () => {
 /* (6) editing an institute — details only                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Source with comments removed.
+ *
+ * These assertions read the file as TEXT, so a column named in a comment is
+ * indistinguishable from one being written. That was harmless while the
+ * functions here never mentioned the load-bearing columns at all; B1's gate has
+ * to READ `registered_by`, and the comments explaining why mention it several
+ * times more. Stripping comments first keeps the assertion about the code.
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+}
+
 describe("the institute editor leaves the load-bearing columns alone", () => {
   const source = read("src/lib/institute-actions.ts");
   const action = source.slice(source.indexOf("export async function updateInstitute"));
   const body = action.slice(0, action.indexOf("\nexport ", 1));
 
-  it("starts with requireAdmin(), not with a role check in the page alone", () => {
-    // Deleting a button never closes the path behind it — the lesson FO020
-    // records. The action is the boundary; the hidden link is the courtesy.
-    expect(body).toContain("await requireAdmin()");
+  /**
+   * ⚠ RE-BASELINED BY B1. This used to assert `await requireAdmin()` on the
+   * first line, and that was right while the editor was an admin's alone.
+   *
+   * A rep may now correct an institute they own, ONCE (migration 0036), so the
+   * gate is no longer about the role — it is about the role AND the allowance.
+   * What the original assertion was really protecting is unchanged and is
+   * asserted below: the action is still the boundary, not the hidden link, and
+   * deleting a button still closes nothing (FO020's lesson).
+   */
+  it("gates on the allowance, not on the role alone", () => {
+    expect(body).not.toContain("await requireAdmin()");
+    // The same helper the detail page and the edit page read, so a button that
+    // appears cannot lead to a refusal.
+    expect(body).toContain("instituteEditRefusal");
+    // And the database's own refusal is mapped by CODE, never by message text.
+    expect(body).toContain('error.code === "FO030"');
   });
 
   it("re-parses with the SHARED schema rather than a second one", () => {
@@ -780,8 +808,38 @@ describe("the institute editor leaves the load-bearing columns alone", () => {
     // campus. Asserted this way rather than by hunting for column names: the
     // destructure that REMOVES campus_id necessarily mentions it.
     expect(body).toContain(".update(institute)");
-    expect(body).not.toContain("registered_by");
     expect(body).not.toContain("status:");
+
+    /*
+     * `registered_by` MAY BE READ, AND MUST NEVER BE WRITTEN.
+     *
+     * The blunt `not.toContain("registered_by")` was correct while this
+     * function never mentioned the column at all; B1's gate has to READ it to
+     * answer "is this your institute". So the assertion is sharpened rather
+     * than dropped — what matters is that it appears only in a `.select()`,
+     * never in an update payload, because moving an owner is a permissions
+     * change with its own guarded control (FO010/FO025).
+     */
+    const code = stripComments(body);
+
+    /*
+     * THE INVARIANT IS ABOUT THE WRITE, not about the word.
+     *
+     * The blunt `not.toContain("registered_by")` held while this function never
+     * mentioned the column; B1's gate reads it to answer "is this your
+     * institute", and passes it to `instituteEditRefusal()`. Both are reads.
+     *
+     * So assert the thing that actually matters: there is exactly ONE update
+     * call and its payload is the destructured `institute` object — which comes
+     * from `instituteSchema`, a schema with no `registered_by` key at all. The
+     * column therefore cannot be written here however the text reads, and
+     * moving an owner stays `reassignInstitute()`'s job, guarded by FO010 and
+     * FO025.
+     */
+    const updates = code.match(/\.update\([^)]*\)/g) ?? [];
+    expect(updates).toEqual([".update(institute)"]);
+    // And it is read from the row, never sent to it.
+    expect(code).toContain('.select("registered_by');
   });
 
   it("refuses a submitted campus rather than dropping it quietly", () => {

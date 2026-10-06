@@ -43,6 +43,21 @@ export interface Institute {
   /** Resolved for an ADMIN only; a rep sees only their own and is not told. */
   ownerName: string | null;
   /**
+   * How many of the owning rep's corrections have been spent (0036). 0 or 1.
+   *
+   * Written ONLY by `guard_rep_institute_edit()`; a client that sends its own
+   * value is overwritten, and a rep who has spent theirs is refused with FO030.
+   * Read here so the detail page can offer the Edit button to an owner who
+   * still has one, and explain its absence to one who does not.
+   *
+   * AN ADMIN'S EDITS NEVER MOVE IT, which is why this is not "times edited".
+   */
+  rep_edits_used: number;
+  /** When the owning rep spent it, or null. */
+  rep_edited_at: string | null;
+  /** Which rep spent it — not necessarily the current owner after a reassign. */
+  rep_edited_by: string | null;
+  /**
    * The campus this institute belongs to — the OUTER boundary, unchanged by
    * rep-ownership. Read here so the reassign picker can offer only the reps who
    * could actually see it afterwards.
@@ -55,7 +70,8 @@ const COLUMNS = `
   principal_name, principal_mobile,
   decision_maker_name, decision_maker_designation, decision_maker_mobile,
   class11, class12, status, status_updated_at, created_at,
-  registered_by, campus_id
+  registered_by, campus_id,
+  rep_edits_used, rep_edited_at, rep_edited_by
 `;
 
 /**
@@ -199,6 +215,57 @@ export async function getInstitute(id: string): Promise<Institute | null> {
 
   const [withOwner] = await withOwnerNames([data as unknown as Institute]);
   return withOwner;
+}
+
+/* ------------------------------------------------------------------ */
+/* Counsellors (migration 0037)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One counsellor at an institute.
+ *
+ * ALONGSIDE the fixed `principal_*` pair (the one the detail page labels
+ * "Principal / owner") and the `decision_maker_*` trio, which this does not
+ * replace. Those are the two people an institute has one of; this is the list
+ * it has several of.
+ */
+export interface Counsellor {
+  id: string;
+  institute_id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  created_at: string;
+}
+
+const COUNSELLOR_COLUMNS = "id, institute_id, name, phone, email, created_at";
+
+/**
+ * The counsellors for one institute, oldest first.
+ *
+ * SCOPED BY RLS AND NOT BY US. `institute_counsellors_select` reaches through
+ * the parent institute (0037), so a rep asking for a colleague's institute gets
+ * an empty list rather than an error — which is the same answer `institutes`
+ * itself gives them, and the reason this needs no ownership check of its own.
+ *
+ * Oldest first so the order is stable as rows are added: a list that reshuffled
+ * every time somebody added a name would be hard to scan on a phone.
+ */
+export async function listCounsellors(
+  instituteId: string,
+): Promise<{ ok: true; counsellors: Counsellor[] } | { ok: false }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("institute_counsellors")
+    .select(COUNSELLOR_COLUMNS)
+    .eq("institute_id", instituteId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    logError("institutes:counsellors", error);
+    return { ok: false };
+  }
+  return { ok: true, counsellors: (data ?? []) as Counsellor[] };
 }
 
 export interface VisitSummary {

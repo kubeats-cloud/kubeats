@@ -25,6 +25,7 @@ import type { StateNode } from "@/lib/locations";
 import {
   BOARD_OPTIONS,
   CAMPUS_REQUIRED,
+  EDIT_ALLOWANCE_NOTICE,
   INSTITUTE_TYPES,
   STREAMS,
   TYPE_LABELS,
@@ -46,6 +47,7 @@ export function InstituteForm({
   tree,
   campuses = [],
   initial,
+  oneTimeNotice = false,
 }: {
   tree: StateNode[];
   /**
@@ -84,6 +86,16 @@ export function InstituteForm({
    *           and FO025, with its own card on the institute's page.
    */
   initial?: Institute;
+  /**
+   * Say, before they save, that this is the rep's ONE correction (B1).
+   *
+   * Passed only for a rep — an admin edits without limit and telling them they
+   * are spending something would be false. A NOTICE RATHER THAN A DISABLED
+   * STATE: the rep can still read the form, change their mind and cancel. What
+   * they must not do is discover the rule by pressing Save a second time and
+   * being refused, which is what this exists to prevent.
+   */
+  oneTimeNotice?: boolean;
 }) {
   const editing = initial !== undefined;
   const asksForCampus = campuses.length > 0;
@@ -193,6 +205,15 @@ export function InstituteForm({
       {/* Which institute is being edited. Absent when registering, and the
           action refuses a submission with no id rather than inventing one. */}
       {initial && <input type="hidden" name="institute_id" value={initial.id} />}
+
+      {/* Said BEFORE the fields, not beside the Save button: a rep deciding
+          whether this is the correction worth spending needs to know at the top
+          of the form, not after they have filled it in. */}
+      {oneTimeNotice && (
+        <p className="bg-warning-subtle text-warning-subtle-foreground rounded-md px-3 py-2 text-sm">
+          {EDIT_ALLOWANCE_NOTICE}
+        </p>
+      )}
 
       <FormSection
         title="The basics"

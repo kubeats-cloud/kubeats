@@ -17,3 +17,24 @@ export const EMPTY_FORM_STATE: InstituteFormState = {
   error: null,
   fieldErrors: {},
 };
+
+/**
+ * The counsellor panel's form state (B2).
+ *
+ * Here rather than in `institute-actions.ts` for the reason stated at the head
+ * of this file, which is not a style preference: `EMPTY_COUNSELLOR_STATE` is a
+ * CONST, and a const exported from a "use server" module is handed to the
+ * client as a server-function reference. The panel would then fail to mount
+ * with "Server Functions cannot be called during initial render", and
+ * `use-server-exports.test.ts` is what catches it — it caught exactly this.
+ */
+export interface CounsellorState {
+  error: string | null;
+  fieldErrors: Record<string, string>;
+  ok?: boolean;
+}
+
+export const EMPTY_COUNSELLOR_STATE: CounsellorState = {
+  error: null,
+  fieldErrors: {},
+};
