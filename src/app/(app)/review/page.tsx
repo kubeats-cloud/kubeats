@@ -2,7 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
 import { VisitReview } from "@/components/admin/visit-review";
 import { requireAdmin } from "@/lib/admin";
-import { listTeamVisits, REVIEW_PAGE_SIZE } from "@/lib/admin-workspace";
+import { listTeamVisits } from "@/lib/admin-workspace";
 import { listReps } from "@/lib/closing-report";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { listInstitutesForPicker } from "@/lib/visits";
@@ -53,8 +53,19 @@ export default async function ReviewPage(props: PageProps<"/review">) {
     lifecycle: first(searchParams.lifecycle),
   };
 
+  /*
+   * The page, read from the URL like every other piece of this screen's state.
+   *
+   * LENIENT, like the pipeline report's sort: a junk or out-of-range value
+   * resolves to a real page rather than erroring, because a stale link should
+   * land on something readable. `listTeamVisits` clamps it against the actual
+   * result, so "?page=99" of a two-page register shows page 2 rather than an
+   * empty table that reads as "nothing matches".
+   */
+  const requestedPage = Number.parseInt(first(searchParams.page) ?? "1", 10);
+
   const [result, reps, institutes, catalogue] = await Promise.all([
-    listTeamVisits(filters),
+    listTeamVisits(filters, Number.isFinite(requestedPage) ? requestedPage : 1),
     listReps(),
     listInstitutesForPicker(),
     /*
@@ -82,13 +93,15 @@ export default async function ReviewPage(props: PageProps<"/review">) {
         <VisitReview
           visits={result.visits}
           total={result.total}
+          page={result.page}
+          pageCount={result.pageCount}
           reps={reps.map((r) => ({ id: r.id, name: r.name }))}
           institutes={institutes.map((i) => ({ id: i.id, name: i.name }))}
           statuses={catalogue.map((s) => ({
             status: s.status,
             isActive: s.isActive,
           }))}
-          pageSize={REVIEW_PAGE_SIZE}
+          pageSize={result.pageSize}
         />
       ) : (
         <ErrorState message="We could not load the team's visits just now. Please try again in a moment." />

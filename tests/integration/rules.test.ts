@@ -1012,7 +1012,16 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           " — something still references them.",
       );
     }
-  });
+    /*
+     * ⚠ NOT THE DEFAULT 30s. Every statement above is a round trip to a hosted
+     * Postgres, and the count grows with the file: each institute costs five
+     * deletes, each member seven plus a storage list. Leaving it at the default
+     * means cleanup is cut off PART-WAY, and a half-run teardown leaks fixtures
+     * — which makes the NEXT run's baseline wrong, the one failure this file's
+     * afterAll exists to prevent. A slow teardown is cheap; a truncated one is
+     * not.
+     */
+  }, 120_000);
 
   /* ---------------------------------------------------------------- */
 
@@ -6230,6 +6239,206 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_visit_id: visitId, p_daily_plan_id: planId,
       });
       expect(error?.code, "repB must not be able to file repA's report").toBe("FO017");
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* The register pages, and filters reach the whole table              */
+  /* ---------------------------------------------------------------- */
+
+  describe("Review - filters span every visit, and pages reach all of them", () => {
+    /**
+     * Enough visits to need three pages, spread over enough days that a date
+     * window can select rows FAR outside the newest fifty. That is the case
+     * the whole suite is about: before paging existed those rows were returned
+     * by the query and then thrown away by `.limit(50)`.
+     */
+    const SEEDED = 120;
+    const PAGE = 50;
+    /**
+     * ITS OWN REP, not the shared repA, and that is not tidiness.
+     *
+     * FO013 permits one OPEN visit per member, and sibling suites in this file
+     * deliberately leave repA mid-visit to assert on it. Seeding 120 arrivals
+     * under a rep somebody else has parked at a school gate fails on the first
+     * row with "You are still checked in" — which is FO013 working correctly,
+     * reported as a paging failure. A register fixture has no business sharing
+     * the subject of another suite's open-visit state.
+     */
+    let pager: Member;
+    let school: string;
+    let oldestDate: string;
+    let windowStart: string;
+    let windowEnd: string;
+
+    beforeAll(async () => {
+      pager = await makeMember("rep", "register-paging", campusA);
+      school = await makeInstitute(pager.id, campusA, "register-paging");
+
+      const { data: today } = await admin.rpc("app_today");
+      const day = (back: number) =>
+        new Date(Date.parse(today as string) - back * 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+
+      oldestDate = day(SEEDED - 1);
+      // A ten-day window at the OLD end: rows ~110-119 by recency, which no
+      // amount of "newest fifty" would ever have shown.
+      windowStart = day(SEEDED - 1);
+      windowEnd = day(SEEDED - 10);
+
+      const { data: purpose } = await admin
+        .from("purposes").select("id,label").eq("is_active", true).limit(1).single();
+
+      /*
+       * Each visit needs an ARRIVAL: FO009 is SECURITY DEFINER, so the service
+       * role meets it too. Each plan row is inserted already CLOSED, because
+       * FO013 permits only one OPEN visit per rep and 120 open ones would be
+       * refused on the second -- which is also why the rep is this suite's own
+       * (see `pager` above).
+       *
+       * The activity is a one-shot: `meeting` would also need the meeting gate
+       * satisfied, and these are register fixtures rather than a test of the
+       * logging chain.
+       */
+      const plans = [];
+      const visits = [];
+      for (let i = 0; i < SEEDED; i += 1) {
+        const date = day(i);
+        const inAt = new Date(Date.parse(date) + 9 * 3_600_000).toISOString();
+        plans.push({
+          member: pager.id, date, institute_id: school,
+          purpose: purpose!.label, purpose_id: purpose!.id,
+          checkin_at: inAt, checkin_lat: 23.03, checkin_lng: 72.58, checkin_accuracy: 10,
+          checkout_at: new Date(Date.parse(inAt) + 45 * 60_000).toISOString(),
+          checkout_lat: 23.03, checkout_lng: 72.58, checkout_accuracy: 10,
+        });
+        visits.push({
+          institute_id: school, member: pager.id, activity: "olympiad",
+          lifecycle_status: null, date, photo_url: photoFor(pager.id),
+          status_set_to: "Will not come", notes: `${TAG} register ${i}`,
+        });
+      }
+      const p = await admin.from("daily_plans").insert(plans);
+      if (p.error) throw new Error("plans: " + p.error.message);
+      const v = await admin.from("visits").insert(visits);
+      if (v.error) throw new Error("visits: " + v.error.message);
+    });
+
+    /** The query listTeamVisits builds, reduced to what this suite asserts. */
+    const pageOf = async (
+      page: number,
+      narrow: (q: ReturnType<typeof base>) => ReturnType<typeof base> = (q) => q,
+    ) => {
+      const from = (page - 1) * PAGE;
+      let q = admin
+        .from("visits")
+        .select("id, date", { count: "exact" })
+        .eq("institute_id", school)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(from, from + PAGE - 1);
+      q = narrow(q as never) as never;
+      const { data, count, error } = await q;
+      expect(error, error?.message).toBeNull();
+      return { ids: (data ?? []).map((r) => r.id as string), count: count ?? 0,
+        dates: (data ?? []).map((r) => r.date as string) };
+    };
+    // Typing helper for the narrowing callbacks above.
+    function base() {
+      return admin.from("visits").select("id, date", { count: "exact" });
+    }
+
+    /**
+     * ★ THE BUG AS REPORTED, WHICH TURNS OUT NOT TO BE THE BUG ★
+     *
+     * The report was "a date range only narrows the newest 50". It never did:
+     * PostgREST applies LIMIT after WHERE, so the window was always computed
+     * over the whole table. This pins that, so nobody re-introduces a
+     * client-side filter believing it is a fix.
+     */
+    it("returns OLD visits for a date window far outside the newest page", async () => {
+      const { ids, count, dates } = await pageOf(1, (q) =>
+        q.gte("date", windowStart).lte("date", windowEnd) as never,
+      );
+
+      expect(count, "ten days of one-a-day").toBe(10);
+      expect(ids).toHaveLength(10);
+      // Every row is genuinely old - none of them is in the newest fifty.
+      expect(dates.every((d) => d <= windowEnd)).toBe(true);
+      expect(dates).toContain(oldestDate);
+    });
+
+    /** ★ THE BUG THAT WAS REAL: matches beyond the first page were unreachable. */
+    it("reaches every match across pages, with no overlap and no gap", async () => {
+      const p1 = await pageOf(1);
+      const p2 = await pageOf(2);
+      const p3 = await pageOf(3);
+
+      expect(p1.count, "the total describes the whole filtered set").toBe(SEEDED);
+      expect(p2.count).toBe(SEEDED);
+      expect(p3.count).toBe(SEEDED);
+
+      expect(p1.ids).toHaveLength(PAGE);
+      expect(p2.ids).toHaveLength(PAGE);
+      expect(p3.ids).toHaveLength(SEEDED - 2 * PAGE);
+
+      const all = [...p1.ids, ...p2.ids, ...p3.ids];
+      expect(new Set(all).size, "no row appears on two pages").toBe(SEEDED);
+      expect(all).toHaveLength(SEEDED);
+    });
+
+    it("keeps the pages in date order, newest first", async () => {
+      const p1 = await pageOf(1);
+      const p2 = await pageOf(2);
+      // Last of page 1 is no older than the first of page 2.
+      expect(p1.dates[p1.dates.length - 1] >= p2.dates[0]).toBe(true);
+    });
+
+    /**
+     * ★ WHY `listTeamVisits` CLAMPS BEFORE IT ASKS ★
+     *
+     * PostgREST does not answer an out-of-range offset with an empty page — it
+     * answers with PGRST103, an ERROR. So a naive "fetch the page, notice it is
+     * empty, retry" would have rendered the register's error state over a
+     * 120-row result. This pins the behaviour that forces the clamp-first
+     * design; an integration run caught it when the first implementation got it
+     * the other way round.
+     */
+    it("refuses an out-of-range window outright (PGRST103), rather than returning empty", async () => {
+      const from = 98 * PAGE;
+      const { error, count } = await admin
+        .from("visits")
+        .select("id", { count: "exact" })
+        .eq("institute_id", school)
+        .order("date", { ascending: false })
+        .range(from, from + PAGE - 1);
+
+      expect(error?.code, "an error, not an empty page").toBe("PGRST103");
+      expect(count, "and no usable total comes back with it").not.toBe(SEEDED);
+    });
+
+    /** The head-count the clamp is built on costs no rows. */
+    it("can count the filtered set without fetching any of it", async () => {
+      const { count, data, error } = await admin
+        .from("visits")
+        .select("id", { count: "exact", head: true })
+        .eq("institute_id", school);
+
+      expect(error, error?.message).toBeNull();
+      expect(count).toBe(SEEDED);
+      expect(data ?? [], "head: true returns no rows").toEqual([]);
+    });
+
+    it("composes a filter with paging, and the total follows the filter", async () => {
+      const narrowed = await pageOf(1, (q) =>
+        q.gte("date", windowStart).lte("date", windowEnd) as never,
+      );
+      const everything = await pageOf(1);
+
+      expect(narrowed.count).toBe(10);
+      expect(everything.count).toBe(SEEDED);
+      expect(narrowed.count).toBeLessThan(everything.count);
     });
   });
 });

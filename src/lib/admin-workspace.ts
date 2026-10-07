@@ -196,14 +196,60 @@ interface RawVisit {
   } | null;
 }
 
-/** Keeps one page of results honest about how much there is behind it. */
+/** How many rows one page of the register carries. */
 export const REVIEW_PAGE_SIZE = 50;
 
+/** One page of the register, and enough about the rest to navigate it. */
+export interface TeamVisitPage {
+  visits: VisitRow[];
+  /** Every visit matching the filters — NOT the number on this page. */
+  total: number;
+  /** 1-based, and already clamped to a page the result actually has. */
+  page: number;
+  pageSize: number;
+  pageCount: number;
+}
+
+/**
+ * The team's visits, filtered and paged.
+ *
+ * ⚠ WHAT WAS ACTUALLY WRONG, because the obvious reading is the wrong one and
+ * it sent at least one person looking in the wrong place.
+ *
+ * The filters were ALWAYS applied across every visit. PostgREST builds one
+ * statement and applies LIMIT after WHERE, so `.limit(50)` took the newest
+ * fifty OF THE MATCHES — never "the newest fifty, then filtered" — and
+ * `count: "exact"` has always reported the true filtered total. A date range
+ * over the oldest month really did return those rows, measured.
+ *
+ * The defect was narrower and real: a filter matching MORE than fifty had no
+ * way to reach the rest. Narrow 352 visits down to 65, see 50, and the last
+ * fifteen were unreachable — with "newest 50 shown" as the only
+ * acknowledgement. A register whose missing rows cannot be got at is one an
+ * admin cannot trust, because the row they want may be in the part that is not
+ * offered.
+ *
+ * So this takes a PAGE instead of a cap. `.range()` replaces `.limit()` on the
+ * SAME query, which matters: one statement means the count and the rows are
+ * filtered identically by construction, where a separate count query could
+ * drift by a filter and produce a total nobody could reconcile with the screen.
+ *
+ * THE PAGE IS CLAMPED BEFORE IT IS ASKED FOR, and that is not merely tidiness:
+ * PostgREST answers an offset past the end with **PGRST103, an ERROR** — not an
+ * empty page — so `?page=99` on a two-page register would come back as a failed
+ * read and render the error state over a result with plenty in it. Measured,
+ * after an integration test caught exactly that.
+ *
+ * So the total is established first, with a `head: true` count that fetches no
+ * rows, and the window is only then asked for. Two queries, both built by the
+ * SAME function so they cannot drift apart by a filter — a count that applied
+ * one condition fewer would produce a total nobody could reconcile with what is
+ * on screen.
+ */
 export async function listTeamVisits(
   filters: VisitFilters = {},
-): Promise<
-  { ok: true; visits: VisitRow[]; total: number } | { ok: false }
-> {
+  requestedPage = 1,
+): Promise<({ ok: true } & TeamVisitPage) | { ok: false }> {
   const supabase = await createClient();
 
   /*
@@ -211,14 +257,55 @@ export async function listTeamVisits(
    * the two constants: an unconditional inner join would change what this
    * function returns for every other caller, and it would do it silently.
    */
-  let query = supabase
-    .from("visits")
-    .select(filters.instituteStatus ? VISIT_SELECT_STATUS : VISIT_SELECT, {
-      count: "exact",
-    })
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(REVIEW_PAGE_SIZE);
+  /*
+   * The window, as a function of the page, so the two reads below cannot
+   * disagree about where a page starts. `.range()` is inclusive at both ends.
+   */
+  const windowFor = (page: number) => {
+    const from = (page - 1) * REVIEW_PAGE_SIZE;
+    return { from, to: from + REVIEW_PAGE_SIZE - 1 };
+  };
+
+  const page = Number.isFinite(requestedPage) && requestedPage >= 1
+    ? Math.floor(requestedPage)
+    : 1;
+
+  /*
+   * ONE BODY, CALLED ONCE PER READ.
+   *
+   * The filters live INSIDE this rather than in a helper the query is piped
+   * through, so there is exactly one place that decides what a filtered
+   * register is. A helper would have needed a cast to satisfy supabase-js's
+   * builder types, and a cast here is a quiet invitation for the count query
+   * and the row query to drift apart by one condition.
+   */
+  /*
+   * ONE BODY, CALLED TWICE — once to count, once to fetch.
+   *
+   * The filters live INSIDE this rather than in a helper the query is piped
+   * through, so there is exactly one place that decides what a filtered
+   * register is, and the count and the rows are narrowed identically by
+   * construction.
+   */
+  const build = (window: { from: number; to: number } | null) => {
+    let query = supabase
+      .from("visits")
+      .select(filters.instituteStatus ? VISIT_SELECT_STATUS : VISIT_SELECT, {
+        count: "exact",
+        // No window means "just tell me how many" — no rows cross the wire.
+        head: window === null,
+      })
+      .order("date", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    /*
+     * `.range()` where this used to say `.limit(REVIEW_PAGE_SIZE)`.
+     *
+     * That one word is the whole fix. The filters below were always applied
+     * server-side and the count was always the true filtered total; what was
+     * missing was any way to ask for the SECOND fifty.
+     */
+    if (window) query = query.range(window.from, window.to);
 
   // Each filter is optional and independent; an absent one is not a filter of
   // "null", it is no filter at all.
@@ -253,7 +340,38 @@ export async function listTeamVisits(
     query = query.eq("institutes.status", filters.instituteStatus);
   }
 
-  const { data, error, count } = await query;
+    return query;
+  };
+
+  // How many match, before asking for any of them. See the header: this is
+  // what lets the page be clamped BEFORE PostgREST is given a range it would
+  // refuse outright.
+  const counted = await build(null);
+  if (counted.error) {
+    logError("admin:visits-count", counted.error);
+    return { ok: false };
+  }
+
+  const total = counted.count ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / REVIEW_PAGE_SIZE));
+  const resolvedPage = Math.min(page, pageCount);
+
+  /*
+   * Nothing matched: there is no window to ask for, and asking would be the
+   * PGRST103 the clamp above exists to avoid.
+   */
+  if (total === 0) {
+    return {
+      ok: true,
+      visits: [],
+      total: 0,
+      page: 1,
+      pageSize: REVIEW_PAGE_SIZE,
+      pageCount: 1,
+    };
+  }
+
+  const { data, error } = await build(windowFor(resolvedPage));
 
   if (error) {
     logError("admin:visits", error);
@@ -268,7 +386,10 @@ export async function listTeamVisits(
 
   return {
     ok: true,
-    total: count ?? rows.length,
+    total,
+    page: resolvedPage,
+    pageSize: REVIEW_PAGE_SIZE,
+    pageCount,
     visits: rows.map((row) => ({
       id: row.id,
       date: row.date,

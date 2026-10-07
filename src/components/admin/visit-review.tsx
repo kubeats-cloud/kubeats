@@ -3,7 +3,12 @@
 import { useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronRightIcon, FilterXIcon, SearchIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  FilterXIcon,
+  SearchIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -53,6 +58,8 @@ interface StatusOption {
 export function VisitReview({
   visits,
   total,
+  page,
+  pageCount,
   reps,
   institutes,
   statuses,
@@ -60,6 +67,9 @@ export function VisitReview({
 }: {
   visits: VisitRow[];
   total: number;
+  /** 1-based, already clamped by the server to a page that exists. */
+  page: number;
+  pageCount: number;
   reps: Option[];
   institutes: Option[];
   /** The whole vocabulary in display order, retired statuses included. */
@@ -76,8 +86,32 @@ export function VisitReview({
     const search = new URLSearchParams(params.toString());
     if (!next || next === ALL) search.delete(key);
     else search.set(key, next);
+    /*
+     * ⚠ CHANGING A FILTER ALWAYS RETURNS TO PAGE ONE.
+     *
+     * Without this, narrowing from 300 visits to 12 while sitting on page 4
+     * asks for rows 151-200 of a 12-row result. The server clamps that to the
+     * last page rather than showing nothing, so it would not look broken — it
+     * would quietly show the END of the new result, and the reader would have
+     * no idea they were not at the top of it.
+     */
+    search.delete("page");
     startTransition(() => router.push(`/review?${search.toString()}`));
   }
+
+  /** The same URL with a different page, every filter preserved. */
+  function pageHref(next: number) {
+    const search = new URLSearchParams(params.toString());
+    if (next <= 1) search.delete("page");
+    else search.set("page", String(next));
+    const query = search.toString();
+    return query ? `/review?${query}` : "/review";
+  }
+
+  // 1-based and inclusive, for the "Showing 51-100 of 352" line. Clamped
+  // against what actually arrived so a short last page reads correctly.
+  const firstRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastRow = total === 0 ? 0 : firstRow + visits.length - 1;
 
   const activeCount = [
     "member",
@@ -281,8 +315,15 @@ export function VisitReview({
               "Filtering…"
             ) : (
               <>
-                Showing {visits.length} of {total} visit{total === 1 ? "" : "s"}
-                {total > pageSize && ` · newest ${pageSize} shown`}
+                {/*
+                  THE TRUE FILTERED TOTAL, and which slice of it is on screen.
+                  This used to read "Showing 50 of 352 · newest 50 shown",
+                  which was honest about the cap and offered no way past it.
+                */}
+                {total === 0
+                  ? "No visits match these filters"
+                  : `Showing ${firstRow}–${lastRow} of ${total} visit${total === 1 ? "" : "s"}`}
+                {pageCount > 1 && ` · page ${page} of ${pageCount}`}
               </>
             )}
           </p>
@@ -557,6 +598,74 @@ export function VisitReview({
             </div>
           </Card>
         </>
+      )}
+
+      {/*
+        THE PAGER, and the reason this screen now has one.
+
+        The register was capped at the newest fifty with no way past it: a
+        filter matching sixty-five showed fifty and the rest were simply
+        unreachable. The filters themselves were never the problem — they have
+        always run across every visit — so what was needed was not a wider net
+        but a way to haul the rest of it in.
+
+        LINKS, NOT BUTTONS, and the same reasoning the pipeline report's sort
+        headers carry: the page lives in the URL and the screen is
+        server-rendered, so what a pager does is NAVIGATE. A link works with
+        JavaScript off, can be opened in a new tab, and can be sent to somebody
+        — and `pageHref()` preserves every active filter, so a shared link
+        lands on the same rows.
+
+        Hidden entirely on a single page: a pager over one page of results is
+        furniture that says nothing.
+      */}
+      {pageCount > 1 && (
+        <nav
+          className="flex items-center justify-between gap-3 pt-1"
+          aria-label="Register pages"
+        >
+          <Button
+            asChild={page > 1}
+            variant="outline"
+            className="h-11"
+            disabled={page <= 1}
+          >
+            {page > 1 ? (
+              <Link href={pageHref(page - 1)} scroll={false}>
+                <ChevronLeftIcon className="size-4" aria-hidden />
+                Newer
+              </Link>
+            ) : (
+              <span>
+                <ChevronLeftIcon className="size-4" aria-hidden />
+                Newer
+              </span>
+            )}
+          </Button>
+
+          <p className="text-muted-foreground text-xs tabular-nums" aria-live="polite">
+            Page {page} of {pageCount}
+          </p>
+
+          <Button
+            asChild={page < pageCount}
+            variant="outline"
+            className="h-11"
+            disabled={page >= pageCount}
+          >
+            {page < pageCount ? (
+              <Link href={pageHref(page + 1)} scroll={false}>
+                Older
+                <ChevronRightIcon className="size-4" aria-hidden />
+              </Link>
+            ) : (
+              <span>
+                Older
+                <ChevronRightIcon className="size-4" aria-hidden />
+              </span>
+            )}
+          </Button>
+        </nav>
       )}
     </div>
   );
