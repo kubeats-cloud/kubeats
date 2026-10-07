@@ -205,6 +205,34 @@ export const memberCreatorSchema = z
     message: "Nobody creates their own account.",
   });
 
+/**
+ * Putting a rep on a team, or taking them off it (H3).
+ *
+ * `team_lead` is OPTIONAL, and the empty string is how the form says "no
+ * team" — a `<select>` cannot post null, and treating a blank as a release is
+ * what lets one control both assign and unassign. `assign_rep_to_team()` reads
+ * a null second argument the same way.
+ *
+ * No same-campus check here: that is a fact about two rows the form does not
+ * hold, and FO033 plus FO034 both refuse it with a sentence naming the campus.
+ * A form cannot usefully pre-empt a rule it cannot evaluate.
+ */
+export const teamAssignmentSchema = z
+  .object({
+    member: z.uuid("That person could not be identified."),
+    team_lead: z
+      .string()
+      .trim()
+      .transform((v) => (v === "" ? null : v))
+      .refine((v) => v === null || z.uuid().safeParse(v).success, {
+        message: "Choose a team lead, or leave it blank to take them off a team.",
+      }),
+  })
+  .refine((v) => v.team_lead !== v.member, {
+    path: ["team_lead"],
+    message: "Nobody leads themselves.",
+  });
+
 export const stateSchema = z.object({
   name: name(80, "The state name"),
 });

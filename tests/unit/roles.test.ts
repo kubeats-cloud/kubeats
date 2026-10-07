@@ -160,6 +160,20 @@ describe("H1 is behaviour-neutral, and the migration says so at source level", (
   const read = (path: string) =>
     readFileSync(fileURLToPath(new URL(`../../${path}`, import.meta.url)), "utf8");
 
+  /**
+   * A TypeScript file with its prose removed.
+   *
+   * ⚠ THE SAME TRAP THREE SUITES IN THIS REPO HAVE NOW HIT. These files explain
+   * their own decisions by NAMING the thing they avoid — "requireAdmin() is the
+   * second layer", "`profiles!team_lead_id` would be a second self-relation" —
+   * so a guard that greps the raw text fails the moment the code documents
+   * itself. Read the code; leave the essay alone.
+   */
+  const tsCode = (path: string) =>
+    read(path)
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+
   const sql = () => read("supabase/migrations/0041_team_leads.sql");
 
   /**
@@ -303,6 +317,101 @@ describe("H1 is behaviour-neutral, and the migration says so at source level", (
     expect(body).toContain("drop trigger if exists profiles_guard_role on public.profiles;");
     expect(body).toContain("create trigger profiles_guard_role\n  before insert or update on public.profiles");
     expect(body).not.toContain("profiles_role_guard");
+  });
+
+  /* ---- H3 ---------------------------------------------------------- */
+
+  /**
+   * ⚠ `requireAdmin` MUST NOT HAVE BEEN LOOSENED IN PLACE. It still gates the
+   * shared vocabulary, /data, /materials/manage and every Settings mutation —
+   * none of which has a team dimension, so a team lead writing them would write
+   * across every other team. Widening it by rename would have moved all of
+   * those at once and invisibly; a separate `requireStaff` makes each call site
+   * a readable diff.
+   */
+  it("keeps requireAdmin strict and adds requireStaff beside it", () => {
+    const admin = read("src/lib/admin.ts");
+    expect(admin).toContain("export async function requireStaff");
+    // requireAdmin's own body still demands exactly "admin".
+    const fn = admin.slice(admin.indexOf("export async function requireAdmin"));
+    expect(fn.slice(0, 600)).toContain('user.role !== "admin"');
+  });
+
+  /** The supervision screens must be reachable by a team lead. */
+  it("puts every supervision page on requireStaff", () => {
+    for (const path of [
+      "src/app/(app)/review/page.tsx",
+      "src/app/(app)/assign/page.tsx",
+      "src/app/(app)/team/page.tsx",
+      "src/app/(app)/team/report/page.tsx",
+      "src/app/(app)/team/hierarchy/page.tsx",
+      "src/app/(app)/institutes/report/page.tsx",
+    ]) {
+      expect(tsCode(path), path).toContain("requireStaff");
+      expect(tsCode(path), path).not.toContain("requireAdmin");
+    }
+  });
+
+  /** And the three un-scopable ones must NOT have moved. */
+  it("leaves the global surfaces on requireAdmin", () => {
+    for (const path of [
+      "src/app/(app)/data/page.tsx",
+      "src/app/(app)/materials/manage/page.tsx",
+    ]) {
+      expect(tsCode(path), path).toContain("requireAdmin");
+      expect(tsCode(path), path).not.toContain("requireStaff");
+    }
+  });
+
+  /**
+   * ⚠ E1's RECORD NOW READS THE REAL BOUNDARY. It filtered on `created_by` as a
+   * deliberate SOFT filter, because 0034 backfills nothing and making that
+   * column a boundary would have hidden every pre-0034 rep from every admin.
+   * `team_lead_id` is the actual boundary, so filter and permission agree.
+   */
+  it("re-points the missed record off created_by", () => {
+    const page = read("src/app/(app)/missed/page.tsx");
+    expect(page).toContain('.not("team_lead_id", "is", null)');
+    expect(page).not.toContain('.eq("created_by", user.id)');
+  });
+
+  /**
+   * The assignment goes through the RPC, never a direct update: profiles_update
+   * is still `id = auth.uid() or is_admin()`, so a team lead writing the row
+   * matches NO ROWS and PostgREST reports success — a control that silently did
+   * nothing for the one role it exists for.
+   */
+  it("assigns through assign_rep_to_team, not a profiles update", () => {
+    const actions = read("src/lib/admin-actions.ts");
+    const fn = actions.slice(actions.indexOf("export async function assignRepToTeam"));
+    // The next top-level export ends this function's body. Built rather than
+    // written as a literal, so the newline cannot be mangled by an editor.
+    const body = fn.slice(0, fn.indexOf(`${"\n"}export `, 1));
+    expect(body).toContain('rpc("assign_rep_to_team"');
+    expect(body).toContain("requireStaff");
+    expect(body).not.toContain('from("profiles")');
+  });
+
+  /**
+   * ⚠ NEVER AN EMBED for the second self-relation on profiles. The first one —
+   * `profiles!profiles_created_by_fkey` — answered PGRST200 and blanked every
+   * admin screen, because PostgREST disambiguates a self-join by the
+   * REFERENCING COLUMN. team_lead_id walks into the identical trap.
+   */
+  it("resolves the team lead's name in TypeScript", () => {
+    const admin = tsCode("src/lib/admin.ts");
+    expect(admin).toContain("teamLeadName:");
+    expect(admin).not.toMatch(/profiles!team_lead_id/);
+    expect(admin).not.toMatch(/profiles_team_lead_id_fkey\(/);
+  });
+
+  /** 0043 closes the campus trap the plan flagged as open. */
+  it("refuses to move a team lead who still has reps", () => {
+    const sql = read("supabase/migrations/0043_team_assignment.sql");
+    expect(sql).toContain("team_lead_id = p_member");
+    expect(sql).toContain("Move or reassign the team first");
+    // And the return key the app reads is untouched.
+    expect(sql).toContain("institutes_moved");
   });
 
   /** The vocabulary must agree with auth.ts and with validation/admin.ts. */

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireAdmin, selectPhotosUpTo } from "@/lib/admin";
+import { requireAdmin, requireStaff, selectPhotosUpTo } from "@/lib/admin";
 import { ensureAreas, ensureCity, ensureState } from "@/lib/locations";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import type {
@@ -31,6 +31,7 @@ import {
   statusUpdateSchema,
   stateSchema,
   textOf,
+  teamAssignmentSchema,
 } from "@/lib/validation/admin";
 import { CHECK_FIELD, CHECK_FIELDS } from "@/lib/visit-form-state";
 
@@ -930,6 +931,69 @@ export async function updateMember(
  * rather than two: they come from the same table and a round trip is a round
  * trip.
  */
+/**
+ * Putting a rep on a team, or taking them off it (H3).
+ *
+ * ⚠ `requireStaff()`, NOT `requireAdmin()`, and the RPC is what makes that
+ * safe. An admin may move anybody; a team lead may take a rep onto their OWN
+ * team and release one of their own — and `assign_rep_to_team()` (0043)
+ * re-checks exactly that with `is_admin() or (is_team_lead() and p_lead =
+ * auth.uid())` as the first thing in its body, with FO033 clause (e) checking
+ * it a second time inside the write. This gate is for the error message; the
+ * two underneath it are the boundary.
+ *
+ * ⚠ AND IT IS AN RPC RATHER THAN AN UPDATE, because `profiles_update` is still
+ * `id = auth.uid() or is_admin()` — 0042 left it alone deliberately. A team
+ * lead writing this row directly matches NO ROWS and PostgREST reports success,
+ * so a plain update here would be a control that silently did nothing for the
+ * one role it exists for.
+ */
+export async function assignRepToTeam(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const gate = await requireStaff();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = teamAssignmentSchema.safeParse({
+    member: textOf(formData, "member"),
+    team_lead: textOf(formData, "team_lead"),
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELD, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+
+  const { error } = await gate.supabase.rpc("assign_rep_to_team", {
+    p_rep: parsed.data.member,
+    p_lead: parsed.data.team_lead,
+  });
+
+  if (error) {
+    logError("admin:assign-team", error);
+    /*
+     * FO034 and FO033 both arrive here, and both already carry a sentence an
+     * admin can act on — "a rep and their team lead must work from the same
+     * campus", "that rep is not on your team". So the code is mapped to its own
+     * message rather than to a generic one, which is the rule CLAUDE.md states
+     * for log_visit()'s FO001-FO009: map the CODE, never the message text, and
+     * let the database own the wording it already got right.
+     */
+    if (error.code === "FO034" || error.code === "FO033") {
+      return denied(error.message);
+    }
+    return denied(toFriendlyMessage(error, "We could not change that team."));
+  }
+
+  revalidatePath("/team");
+  revalidatePath("/missed");
+  return {
+    ok: true,
+    error: null,
+    fieldErrors: {},
+    message: parsed.data.team_lead ? "Team updated." : "Taken off the team.",
+  };
+}
+
 export async function setMemberCreator(
   _prev: AdminState,
   formData: FormData,

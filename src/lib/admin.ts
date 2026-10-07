@@ -38,6 +38,45 @@ export async function requireAdmin(): Promise<
   return { ok: true, user, supabase: await createClient() };
 }
 
+/**
+ * The SUPERVISION gate: an admin or a team lead, never a rep (H3).
+ *
+ * ⚠ IT IS A SEPARATE FUNCTION RATHER THAN A LOOSENED `requireAdmin`, and the
+ * difference is the whole safety of the change. `requireAdmin` still gates the
+ * shared vocabulary, /data, /materials/manage, every Settings mutation and the
+ * member editor — none of which has a team dimension, so a team lead writing
+ * them would write across every other team. Loosening it in place would widen
+ * all of those silently and invisibly; moving call sites ONE AT A TIME is a
+ * diff somebody can read.
+ *
+ * WHAT IT IS NOT IS A SCOPE. It answers "may this person be on a supervision
+ * screen at all". WHICH ROWS they then see is RLS's answer and nobody else's —
+ * `supervises()` since 0042 — which is why no page below needs a team filter of
+ * its own and why a bug here cannot leak another team's work.
+ */
+export async function requireStaff(): Promise<
+  (AdminGate & { isAdmin: boolean }) | { ok: false; error: string }
+> {
+  const user = await getCurrentUser();
+  if (!user) {
+    return { ok: false, error: "Your session has expired. Please sign in again." };
+  }
+  if (
+    user.profileStatus !== "ready" ||
+    (user.role !== "admin" && user.role !== "team_lead")
+  ) {
+    return { ok: false, error: "Only an admin or a team lead can do that." };
+  }
+  return {
+    ok: true,
+    user,
+    // Carried so a page can render the one or two controls that are genuinely
+    // an admin's — never to decide which ROWS to show.
+    isAdmin: user.role === "admin",
+    supabase: await createClient(),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Purposes                                                            */
 /* ------------------------------------------------------------------ */
@@ -261,6 +300,28 @@ export interface TeamMember {
    * `profiles_select` gives an admin every row.
    */
   createdByName: string | null;
+  /**
+   * THE TEAM LEAD THIS REP REPORTS TO — `profiles.team_lead_id`, migration 0041.
+   *
+   * ⚠ UNLIKE `createdBy`, THIS ONE DECIDES SOMETHING. It is the boundary
+   * supervises() reads, so every policy rewritten by 0042 turns on it. The two
+   * columns sit side by side in this interface and mean opposite kinds of
+   * thing, which is exactly why each says so where it is declared.
+   *
+   * Null for every non-rep for ever, and for a rep nobody has assigned yet —
+   * the day-one state, since 0041 backfills nothing.
+   */
+  teamLeadId: string | null;
+  /**
+   * Resolved in TypeScript from the same result set, NEVER by an embed.
+   *
+   * ⚠ `profiles!team_lead_id` would be a SECOND self-relation on this table and
+   * walks straight into the PGRST200 that once took every admin screen down —
+   * see the long note on the select below. The map is complete by construction
+   * for an admin (who reads every row) and for a team lead reading their own
+   * reps (whose lead is themselves, and who is in their own result set).
+   */
+  teamLeadName: string | null;
   /** From auth.users, which only the service-role client can read. */
   email: string | null;
   createdAt: string | null;
@@ -366,7 +427,9 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
      * and the foreign key is ON DELETE SET NULL — so a non-null `created_by`
      * always names a row in this very result set.
      */
-    .select("id, name, role, created_at, campus_id, campuses(name), created_by")
+    .select(
+      "id, name, role, created_at, campus_id, campuses(name), created_by, team_lead_id",
+    )
     .order("name");
 
   if (error) {
@@ -447,6 +510,7 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
     campusId: profile.campus_id ?? null,
     ownedInstitutes: owned.get(profile.id) ?? 0,
     createdBy: profile.created_by ?? null,
+    teamLeadId: profile.team_lead_id ?? null,
     /*
      * Looked up in the rows we already have rather than embedded — see the
      * select above.
@@ -458,6 +522,12 @@ export async function listTeamMembers(): Promise<TeamMember[]> {
      */
     createdByName: profile.created_by
       ? (names.get(profile.created_by) ?? null)
+      : null,
+    // Same lookup, same reason — and emphatically NOT an embed: this would be
+    // the second self-relation on `profiles`, and PostgREST answered PGRST200
+    // for the first one, which returned [] and blanked every admin screen.
+    teamLeadName: profile.team_lead_id
+      ? (names.get(profile.team_lead_id) ?? null)
       : null,
     email: emails.get(profile.id) ?? null,
     createdAt: profile.created_at ?? null,

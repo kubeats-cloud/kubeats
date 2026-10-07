@@ -4888,7 +4888,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   describe("listTeamMembers — the select every admin screen depends on", () => {
     /** Verbatim from src/lib/admin.ts. */
     const TEAM_SELECT =
-      "id, name, role, created_at, campus_id, campuses(name), created_by";
+      "id, name, role, created_at, campus_id, campuses(name), created_by, team_lead_id";
 
     it("resolves, and returns the team, for a signed-in admin", async () => {
       const { data, error } = await boss.db
@@ -4945,7 +4945,14 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         fileURLToPath(new URL("../../src/lib/admin.ts", import.meta.url)),
         "utf8",
       );
-      expect(source).toContain(`.select("${TEAM_SELECT}")`);
+      /*
+       * THE STRING, not its formatting. This asserted `.select("…")` on one
+       * line and broke the moment the column list grew past the line width and
+       * prettier wrapped it — a failure about whitespace, in a test whose whole
+       * job is the column list. What matters is that the app ships THIS list;
+       * that it is passed to a select is what the query above proves.
+       */
+      expect(source).toContain(TEAM_SELECT);
 
       /*
        * And that the embed has not crept back into ANY select in this file.
@@ -7567,6 +7574,259 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
       const { data: bad } = await leadX.db.storage.from("visit-photos").list("not-a-uuid");
       expect(bad ?? [], "a non-uuid key raised rather than answering false").toBeDefined();
+    });
+  });
+  /* ---------------------------------------------------------------- */
+  /* H3 — staffing a team, and the door it opens                       */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * ⚠ assign_rep_to_team() IS A SECURITY DEFINER WRITE INTO A TABLE THE CALLER
+   * CANNOT OTHERWISE REACH, which makes it the most likely place for H2's
+   * boundary to spring a leak. Every refusal is therefore tested from the side
+   * that would exploit it: one lead trying to take, release or re-home another
+   * lead's rep.
+   */
+  describe("H3 - assign_rep_to_team and the campus trap", () => {
+    let leadP: Member;
+    let leadQ: Member;
+    let leadFar: Member;
+    let repP: Member;
+    let repQ: Member;
+    let repFar: Member;
+    let repSpare: Member;
+    let farCampus: string;
+
+    beforeAll(async () => {
+      const { data, error } = await admin
+        .from("campuses")
+        .insert({ name: `${TAG} far campus`, city: "Kolkata", active: true })
+        .select("id").single();
+      if (error) throw new Error(`far campus: ${error.message}`);
+      farCampus = data.id as string;
+
+      // Two leads on ONE campus, plus one on another — the two shapes the
+      // same-campus rule has to tell apart.
+      leadP = await makeMember("team_lead", "h3-lead-p", campusA);
+      leadQ = await makeMember("team_lead", "h3-lead-q", campusA);
+      leadFar = await makeMember("team_lead", "h3-lead-far", farCampus);
+      repP = await makeMember("rep", "h3-rep-p", campusA);
+      repQ = await makeMember("rep", "h3-rep-q", campusA);
+      repSpare = await makeMember("rep", "h3-rep-spare", campusA);
+      repFar = await makeMember("rep", "h3-rep-far", farCampus);
+    });
+
+    afterAll(async () => {
+      if (farCampus) await admin.from("campuses").delete().eq("id", farCampus);
+    });
+
+    const assign = async (who: Member, rep: string, lead: string | null) =>
+      who.db.rpc("assign_rep_to_team", { p_rep: rep, p_lead: lead });
+
+    const leadOf = async (rep: string) => {
+      const { data } = await admin
+        .from("profiles").select("team_lead_id").eq("id", rep).single();
+      return (data?.team_lead_id ?? null) as string | null;
+    };
+
+    /* ---- an admin divides the reps ----------------------------------- */
+
+    it("lets an admin assign a rep to a team lead, and reassign them", async () => {
+      const first = await assign(boss, repP.id, leadP.id);
+      expect(first.error, first.error?.message).toBeNull();
+      expect(await leadOf(repP.id)).toBe(leadP.id);
+
+      const moved = await assign(boss, repP.id, leadQ.id);
+      expect(moved.error, moved.error?.message).toBeNull();
+      expect(await leadOf(repP.id), "an admin could not reassign").toBe(leadQ.id);
+
+      // Back where the rest of the suite expects them.
+      await assign(boss, repP.id, leadP.id);
+      await assign(boss, repQ.id, leadQ.id);
+    });
+
+    it("lets an admin take a rep off every team", async () => {
+      await assign(boss, repSpare.id, leadP.id);
+      const released = await assign(boss, repSpare.id, null);
+      expect(released.error, released.error?.message).toBeNull();
+      expect(await leadOf(repSpare.id)).toBeNull();
+    });
+
+    /* ---- a team lead staffs their own team --------------------------- */
+
+    it("lets a team lead take an unassigned rep on their own campus", async () => {
+      await assign(boss, repSpare.id, null);
+
+      const { error } = await assign(leadP, repSpare.id, leadP.id);
+      expect(error, error?.message).toBeNull();
+      expect(await leadOf(repSpare.id)).toBe(leadP.id);
+    });
+
+    it("lets a team lead release one of their own", async () => {
+      const { error } = await assign(leadP, repSpare.id, null);
+      expect(error, error?.message).toBeNull();
+      expect(await leadOf(repSpare.id)).toBeNull();
+    });
+
+    /* ---- and nobody else's ------------------------------------------- */
+
+    /**
+     * ⚠ THE LEAK THIS RPC COULD HAVE OPENED. It is SECURITY DEFINER, so the
+     * policy that stops a lead writing another profile is not in play — the
+     * guard in its own body is. One lead taking another's rep is a cross-team
+     * WRITE, which is the one thing H2 exists to prevent.
+     */
+    it("refuses a team lead taking ANOTHER lead's rep", async () => {
+      const { error } = await assign(leadP, repQ.id, leadP.id);
+      // Refused by FO033 clause (e) or FO034 — both are correct, and which one
+      // depends only on which check is reached first.
+      expect(["FO033", "FO034"]).toContain(error?.code);
+      expect(await leadOf(repQ.id), "⚠ LEAK: a lead poached another's rep").toBe(leadQ.id);
+    });
+
+    it("refuses a team lead RELEASING another lead's rep", async () => {
+      const { error } = await assign(leadP, repQ.id, null);
+      expect(error?.code, "a lead unassigned somebody else's rep").toBe("FO034");
+      expect(await leadOf(repQ.id)).toBe(leadQ.id);
+    });
+
+    it("refuses a team lead assigning a rep to a DIFFERENT lead", async () => {
+      await assign(boss, repSpare.id, null);
+      const { error } = await assign(leadP, repSpare.id, leadQ.id);
+      expect(error?.code, "a lead staffed another team").toBe("FO034");
+      expect(await leadOf(repSpare.id)).toBeNull();
+    });
+
+    /** The same-campus rule, from the layer the app reads. */
+    it("refuses a rep and a lead on different campuses", async () => {
+      const mine = await assign(leadP, repFar.id, leadP.id);
+      expect(mine.error?.code).toBe("FO034");
+      expect(mine.error?.message).toMatch(/same campus/i);
+
+      const byAdmin = await assign(boss, repFar.id, leadP.id);
+      expect(byAdmin.error?.code, "an admin bypassed the campus rule").toBe("FO034");
+      expect(await leadOf(repFar.id)).toBeNull();
+
+      // On their own campus it works, which is what makes the refusal a rule
+      // rather than a block.
+      const right = await assign(boss, repFar.id, leadFar.id);
+      expect(right.error, right.error?.message).toBeNull();
+      expect(await leadOf(repFar.id)).toBe(leadFar.id);
+    });
+
+    it("refuses a non-rep being given a team lead", async () => {
+      const { error } = await assign(boss, leadQ.id, leadP.id);
+      expect(error?.code).toBe("FO034");
+    });
+
+    /** A rep reaches none of it. */
+    it("refuses a rep calling it at all", async () => {
+      const onSelf = await assign(repSpare, repSpare.id, leadP.id);
+      expect(onSelf.error?.code, "a rep joined a team through the RPC").toBe("FO034");
+
+      const onOther = await assign(repSpare, repP.id, null);
+      expect(onOther.error?.code).toBe("FO034");
+      expect(await leadOf(repP.id)).toBe(leadP.id);
+    });
+
+    /* ---- the campus trap the plan flagged ----------------------------- */
+
+    /**
+     * ⚠ FO033 HOLDS "A REP AND THEIR LEAD SHARE ONE CAMPUS" FROM THE REP'S SIDE
+     * and fires on the rep's row. Moving the LEAD'S campus is the other half of
+     * the same rule and no trigger on profiles can see it: their UPDATE touches
+     * only their own row, which satisfies every check on it, and the whole team
+     * is left pointing at a lead who now works somewhere else — visible in the
+     * roster and invisible in the work, because institutes are campus-scoped.
+     */
+    it("refuses moving a team lead who still has reps, and says how many", async () => {
+      // leadP currently has repP.
+      const { error } = await boss.db.rpc("correct_member_campus", {
+        p_member: leadP.id, p_campus: farCampus, p_retag: false,
+      });
+      expect(error?.code).toBe("FO029");
+      expect(error?.message, "the message must name the count").toMatch(/still has 1 rep/i);
+      expect(error?.message).toMatch(/reassign the team first/i);
+
+      const { data } = await admin
+        .from("profiles").select("campus_id").eq("id", leadP.id).single();
+      expect(data?.campus_id, "the lead moved anyway").toBe(campusA);
+    });
+
+    it("allows it once the team is empty", async () => {
+      await assign(boss, repP.id, null);
+
+      const { error } = await boss.db.rpc("correct_member_campus", {
+        p_member: leadP.id, p_campus: farCampus, p_retag: false,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("profiles").select("campus_id").eq("id", leadP.id).single();
+      expect(data?.campus_id).toBe(farCampus);
+
+      /*
+       * ⚠ RESTORED WITH THE SERVICE ROLE, NOT THROUGH THE RPC, and this is a
+       * fixture fact rather than a behaviour: `campusA` is created `active:
+       * false` at the top of this file (so these tests never touch a real
+       * campus's pipeline), and correct_member_campus() correctly refuses an
+       * inactive campus — 0020a's `active` flag, which 0035 documents as "the
+       * control behind that courtesy".
+       *
+       * The first version of this called the RPC and IGNORED its error, so the
+       * restore silently failed, lead P stayed on the far campus, and the
+       * cross-team test below reported "lead P lost their own rep" — a setup
+       * failure wearing the costume of a leak. Every line of this teardown is
+       * checked now.
+       */
+      const restored = await admin
+        .from("profiles").update({ campus_id: campusA }).eq("id", leadP.id);
+      expect(restored.error, restored.error?.message).toBeNull();
+
+      const reassigned = await assign(boss, repP.id, leadP.id);
+      expect(reassigned.error, reassigned.error?.message).toBeNull();
+    });
+
+    /** A rep's own move is unchanged — and still retags by default. */
+    it("leaves a rep's campus correction working as it did", async () => {
+      await assign(boss, repSpare.id, null);
+      const { data, error } = await boss.db.rpc("correct_member_campus", {
+        p_member: repSpare.id, p_campus: farCampus, p_retag: true,
+      });
+      expect(error, error?.message).toBeNull();
+      // The key the app reads, unchanged by 0043.
+      expect(data).toHaveProperty("institutes_moved");
+
+      await boss.db.rpc("correct_member_campus", {
+        p_member: repSpare.id, p_campus: campusA, p_retag: true,
+      });
+    });
+
+    /* ---- the boundary still holds after all that staffing ------------- */
+
+    /**
+     * The whole point of H3 is that assignment MOVES the boundary. This is the
+     * proof that it moves it correctly rather than widening it: after every
+     * reassignment above, each lead still sees exactly their own.
+     */
+    it("leaves no cross-team sight open after the reassignments", async () => {
+      // ASSERTED, not assumed. A setup call that fails quietly makes the three
+      // assertions below report the opposite of what they are testing.
+      const p0 = await assign(boss, repP.id, leadP.id);
+      expect(p0.error, `setup: ${p0.error?.message}`).toBeNull();
+      const q0 = await assign(boss, repQ.id, leadQ.id);
+      expect(q0.error, `setup: ${q0.error?.message}`).toBeNull();
+
+      const { data: pSees } = await leadP.db.from("profiles").select("id");
+      const p = new Set((pSees ?? []).map((r) => r.id as string));
+      expect(p.has(repP.id), "lead P lost their own rep").toBe(true);
+      expect(p.has(repQ.id), "⚠ LEAK: lead P sees team Q's rep").toBe(false);
+      expect(p.has(repFar.id), "⚠ LEAK: lead P sees another campus's rep").toBe(false);
+
+      const { data: qSees } = await leadQ.db.from("profiles").select("id");
+      const q = new Set((qSees ?? []).map((r) => r.id as string));
+      expect(q.has(repQ.id)).toBe(true);
+      expect(q.has(repP.id), "⚠ LEAK: lead Q sees team P's rep").toBe(false);
     });
   });
 });

@@ -7,7 +7,7 @@ import { ErrorState } from "@/components/states";
 import { CustomisableGrid } from "@/components/report/customisable-grid";
 import { RangeControls } from "@/components/report/range-controls";
 import { ExportExcel } from "@/components/report/export-excel";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { getActivityReportModel } from "@/lib/exports/activity-export";
 import { exportRangeSchema } from "@/lib/validation/export";
 import { formatDate } from "@/lib/dates";
@@ -33,7 +33,7 @@ const first = (value: string | string[] | undefined) =>
  * twice and no default is written down in two places.
  */
 export default async function TeamReportPage(props: PageProps<"/team/report">) {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     return (
       <>

@@ -322,7 +322,8 @@ export function TeamPanel({
     const parsed = newMemberSchema.safeParse({
       ...values,
       role,
-      campus_id: role === "rep" ? campusId : "",
+      // `!== "admin"` since 0041: a team lead belongs to one campus too.
+      campus_id: role !== "admin" ? campusId : "",
     });
     if (!parsed.success) {
       setClientState({
@@ -594,6 +595,19 @@ export function TeamPanel({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="rep">Rep (logs their own visits)</SelectItem>
+                  {/*
+                    H3. A team lead is campus-scoped exactly as a rep is, which
+                    is why the campus field below tests `!== "admin"` rather
+                    than `=== "rep"` — FO021 gained that third branch in 0041
+                    and would refuse a lead with no campus.
+
+                    Who they SUPERVISE is not asked here: a lead is created
+                    empty and reps are moved onto them from /team, because
+                    assigning six people is not a field on a create form.
+                  */}
+                  <SelectItem value="team_lead">
+                    Team lead (sees one campus team, logs nothing)
+                  </SelectItem>
                   <SelectItem value="admin">
                     Admin (sees the team and these settings)
                   </SelectItem>
@@ -604,7 +618,7 @@ export function TeamPanel({
 
             {/* Shown only for a rep. An admin is not posted to a campus, so
                 offering them one would be offering a choice with no meaning. */}
-            {role === "rep" && (
+            {role !== "admin" && (
               <div className="space-y-2">
                 <Label>Campus</Label>
                 <Select value={campusId} onValueChange={setCampusId}>

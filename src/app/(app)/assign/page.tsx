@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { EmptyState, ErrorState } from "@/components/states";
 import { AssignVisit } from "@/components/dashboard/assign-visit";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { listAssignments } from "@/lib/admin-workspace";
 import { listReps } from "@/lib/closing-report";
 import { listInstitutesForPicker, listPurposes, todayISO } from "@/lib/visits";
@@ -22,7 +22,7 @@ export const metadata = { title: "Assign" };
  * the admin's half of that: the form, and the list of what is outstanding.
  */
 export default async function AssignPage() {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     return (
       <>

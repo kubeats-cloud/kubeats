@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
 import { CustomisableGrid } from "@/components/report/customisable-grid";
 import { RangeControls } from "@/components/report/range-controls";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { getInstituteStatusModel } from "@/lib/institute-status-report";
 // `cohortHref` and `sortHref` moved to CustomisableGrid with the links they
 // build — see the comment at the grid below.
@@ -80,7 +80,7 @@ const first = (value: string | string[] | undefined) =>
 export default async function InstituteStatusReportPage(
   props: PageProps<"/institutes/report">,
 ) {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     return (
       <>

@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
 import { VisitReview } from "@/components/admin/visit-review";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { listTeamVisits } from "@/lib/admin-workspace";
 import { listReps } from "@/lib/closing-report";
 import { listStatusCatalogue } from "@/lib/statuses";
@@ -21,7 +21,7 @@ const first = (value: string | string[] | undefined) =>
  * whose visits come back.
  */
 export default async function ReviewPage(props: PageProps<"/review">) {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     return (
       <>

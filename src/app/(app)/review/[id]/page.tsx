@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
 import { ReportView } from "@/components/visits/report-view";
 import { VisitProof } from "@/components/admin/visit-proof";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { getVisitReport } from "@/lib/closing-report";
 import { activityLabelFor } from "@/lib/validation/visit";
 
@@ -24,7 +24,7 @@ export const metadata = { title: "Visit" };
  * actually looking at the evidence.
  */
 export default async function ReviewVisitPage(props: PageProps<"/review/[id]">) {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     return (
       <PageColumn>

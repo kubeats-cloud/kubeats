@@ -19,7 +19,7 @@ import {
   TodayCard,
 } from "@/components/team/member-hub";
 import { RepSwitcher } from "@/components/team/rep-switcher";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { listTeamMembers } from "@/lib/admin";
 import { listOpenCheckIns, listTeamVisits } from "@/lib/admin-workspace";
 import { listReps } from "@/lib/closing-report";
@@ -104,7 +104,7 @@ const INSTITUTES_SHOWN = 8;
  * third and the one that actually decides which rows come back.
  */
 export default async function MemberHubPage(props: PageProps<"/team/[memberId]">) {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     return (
       <>

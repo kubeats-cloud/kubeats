@@ -7,7 +7,7 @@ import { ErrorState } from "@/components/states";
 import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { ExportExcel } from "@/components/report/export-excel";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { defaultExportRange } from "@/lib/validation/export";
 import { getTeamWeek } from "@/lib/week-summary";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
@@ -32,7 +32,7 @@ const first = (value: string | string[] | undefined) =>
  * puts the weekly target back, so the question goes back to the stronger one.
  */
 export default async function TeamPage(props: PageProps<"/team">) {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     return (
       <>
