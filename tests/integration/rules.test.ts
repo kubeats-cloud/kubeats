@@ -7484,15 +7484,37 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { data: purpose } = await admin
         .from("purposes").select("id,label").eq("is_active", true).limit(1).single();
 
-      /** A CLOSED arrival, so FO013's one-open-visit index is untouched. */
-      const makePlan = async () => {
+      /*
+       * ⚠ UNSTARTED BY DEFAULT, AND THE FIRST VERSION OF THIS TEST WAS WRONG
+       * TO USE A CHECKED-IN ROW.
+       *
+       * `guard_checkin_cycle_final` (FO014, rule 8, migration 0018) refuses a
+       * rep deleting a plan row that has a check-in at all — nothing to do
+       * with supervision — so asserting "a rep can delete their own" against a
+       * started row asserted something the schema deliberately forbids, and it
+       * failed for that reason rather than for this one.
+       *
+       * Worse, it made the LEAD's refusal ambiguous: two rules could have
+       * produced it. An unstarted row has no competing guard, so the policy is
+       * the only thing that can refuse, which is what this test is for. The
+       * started case is covered separately below, where the mechanism is named.
+       *
+       * Unstarted also means FO013's one-open-visit index is untouched: its
+       * predicate is `checkin_at is not null and checkout_at is null and
+       * checkout_missing = false`, and this row satisfies none of it.
+       */
+      const makePlan = async ({ started = false } = {}) => {
         const inAt = new Date(Date.parse(`${today}T00:00:00Z`) + 11 * 3_600_000).toISOString();
         const { data, error } = await admin.from("daily_plans").insert({
           member: repX.id, date: today, institute_id: schoolX,
           purpose: purpose!.label, purpose_id: purpose!.id,
-          checkin_at: inAt, checkin_lat: 23.03, checkin_lng: 72.58, checkin_accuracy: 10,
-          checkout_at: new Date(Date.parse(inAt) + 30 * 60_000).toISOString(),
-          checkout_lat: 23.03, checkout_lng: 72.58, checkout_accuracy: 10,
+          ...(started
+            ? {
+                checkin_at: inAt, checkin_lat: 23.03, checkin_lng: 72.58, checkin_accuracy: 10,
+                checkout_at: new Date(Date.parse(inAt) + 30 * 60_000).toISOString(),
+                checkout_lat: 23.03, checkout_lng: 72.58, checkout_accuracy: 10,
+              }
+            : {}),
         }).select("id").single();
         if (error) throw new Error(`plan: ${error.message}`);
         return data.id as string;
@@ -7568,6 +7590,39 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const bossPlan = await boss.db.from("daily_plans").delete().eq("id", adminPlan);
       expect(bossPlan.error, bossPlan.error?.message).toBeNull();
       expect(await stillThere("daily_plans", adminPlan), "an admin could not delete a rep's plan row").toBe(0);
+
+      /*
+       * AND THE STARTED ROW, where TWO rules refuse and they are not the same
+       * rule. Asserted separately so neither can be mistaken for the other.
+       *
+       *   the lead  the POLICY, silently: the row matches no `using` clause, so
+       *             nothing is deleted and no error is raised.
+       *   the rep   FO014, loudly: the row IS theirs, so the policy admits it
+       *             and `guard_checkin_cycle_final` then refuses the delete to
+       *             stop a second check-in cycle being bought at the same
+       *             institute on the same day.
+       *
+       * The difference in SHAPE is the evidence: a silent no-op and a raised
+       * FO014 cannot be confused, which is how this test knows the lead was
+       * stopped by the policy and not by rule 8.
+       */
+      const startedPlan = await makePlan({ started: true });
+
+      const leadStarted = await leadX.db.from("daily_plans").delete().eq("id", startedPlan);
+      expect(leadStarted.error, "the lead's refusal should be the policy's, which is silent").toBeNull();
+      expect(
+        await stillThere("daily_plans", startedPlan),
+        "⚠ LEAK: lead X deleted their own rep's STARTED plan row",
+      ).toBe(1);
+
+      const repStarted = await repX.db.from("daily_plans").delete().eq("id", startedPlan);
+      expect(repStarted.error?.code, "rule 8 no longer refuses a rep deleting a started row").toBe("FO014");
+      expect(await stillThere("daily_plans", startedPlan)).toBe(1);
+
+      // An admin may, which is rule 8's own stated exemption.
+      const bossStarted = await boss.db.from("daily_plans").delete().eq("id", startedPlan);
+      expect(bossStarted.error, bossStarted.error?.message).toBeNull();
+      expect(await stillThere("daily_plans", startedPlan), "an admin could not clear a started plan row").toBe(0);
     });
 
     /**
