@@ -179,6 +179,37 @@ export function todayISO(now: Date = new Date()): string {
   return `${year}-${pad(month)}-${pad(day)}`;
 }
 
+/**
+ * The hour of the Asia/Kolkata clock, 0-23.
+ *
+ * ⚠ THE TIME-OF-DAY HALF OF todayISO()'s RULE, and it exists for the same
+ * reason. The notification bell asks "is it past 16:00 in India yet?" and the
+ * server runs in UTC, so `new Date().getHours()` answers 10:30 for an Indian
+ * afternoon and the 16:00 nudge would appear five and a half hours late — the
+ * same off-by-one-timezone bug this file was written to end, in the one
+ * direction todayISO() does not cover.
+ *
+ * ⚠ IT IS A READER, NOT A SECOND SOURCE OF TRUTH. The authoritative evaluation
+ * of these thresholds is pg_cron's: migration 0040 fires
+ * materialise_daily_alerts() at fixed IST times and writes the row that becomes
+ * the permanent record. This answers the live question the bell asks between
+ * those runs — see `notifications.ts` for why the bell derives rather than
+ * reading those rows.
+ *
+ * The thresholds themselves live in `notification-kinds.ts` beside the kinds
+ * they gate, not here: this file knows what time it is in India and nothing
+ * about what the app does at 16:00.
+ *
+ * `now` is injectable for the same reason todayISO()'s is — so a test can ask
+ * what the answer would be at 19:00 IST without waiting until 19:00 IST.
+ */
+export function istHour(now: Date = new Date()): number {
+  // `fieldsOf` pins hourCycle "h23", so midnight is "00" rather than the "24"
+  // some engines emit for hour12:false — which would make `>= 19` true at
+  // midnight and fire every night-time threshold at once.
+  return Number(fieldsOf(now).hour);
+}
+
 /* ------------------------------------------------------------------ */
 /* Day boundaries, for filtering a timestamptz by calendar day         */
 /* ------------------------------------------------------------------ */

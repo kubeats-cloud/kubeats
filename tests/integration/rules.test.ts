@@ -8411,4 +8411,187 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(b.error, b.error?.message).toBeNull();
     });
   });
+
+  /* ---------------------------------------------------------------- */
+  /* The notification bell — the boundary its queries actually get      */
+  /* ---------------------------------------------------------------- */
+
+  describe("Notification bell scoping", () => {
+    let bellLeadA: Member;
+    let bellLeadB: Member;
+    let bellRepA: Member;
+    let bellRepB: Member;
+    let bellSchoolA: string;
+    let bellSchoolB: string;
+    let bellToday: string;
+
+    /**
+     * ⚠ WHAT THIS SUITE IS FOR, AND WHAT IT DELIBERATELY DOES NOT TEST.
+     *
+     * `bellFor()` cannot run here: it imports `@/lib/supabase/server`, which
+     * needs `next/headers` and a request. What it DOES is issue three reads —
+     * follow_up_tasks, daily_plans, targets — plus a roster read of profiles,
+     * each as the signed-in person. Those reads ARE the security question,
+     * because the bell adds no filter of its own that a wrong answer here could
+     * be rescued by.
+     *
+     * So this runs exactly those queries through each role's own client and
+     * reads back with the SERVICE ROLE, which is the difference between "the UI
+     * did not show it" and "the database did not return it". A UI filter would
+     * pass a test that only looked at the UI.
+     *
+     * The pure half — the clock gates, the Phase A flag, the hrefs — is in
+     * tests/unit/notifications.test.ts and needs no database.
+     */
+    beforeAll(async () => {
+      const { data: d } = await admin.rpc("app_today");
+      bellToday = d as string;
+
+      // TWO TEAMS ON ONE CAMPUS: the only shape that can tell a team boundary
+      // from a campus one.
+      bellLeadA = await makeMember("team_lead", "bell-lead-a", campusA);
+      bellLeadB = await makeMember("team_lead", "bell-lead-b", campusA);
+      bellRepA = await makeMember("rep", "bell-rep-a", campusA);
+      bellRepB = await makeMember("rep", "bell-rep-b", campusA);
+      bellSchoolA = await makeInstitute(bellRepA.id, campusA, "bell-a");
+      bellSchoolB = await makeInstitute(bellRepB.id, campusA, "bell-b");
+
+      for (const [rep, lead] of [
+        [bellRepA, bellLeadA],
+        [bellRepB, bellLeadB],
+      ] as const) {
+        const { error } = await admin
+          .from("profiles").update({ team_lead_id: lead.id }).eq("id", rep.id);
+        if (error) throw new Error(`link: ${error.message}`);
+      }
+
+      // One follow-up due TODAY and not done for each rep — the exact predicate
+      // the bell counts and the one 0040 writes its row from.
+      for (const [rep, school] of [
+        [bellRepA, bellSchoolA],
+        [bellRepB, bellSchoolB],
+      ] as const) {
+        const { error } = await admin.from("follow_up_tasks").insert({
+          member: rep.id, institute_id: school,
+          kind: "call", due_date: bellToday,
+        });
+        if (error) throw new Error(`task: ${error.message}`);
+      }
+    });
+
+    /** The bell's follow-up query, exactly as notifications.ts issues it. */
+    const dueTasksAsSeenBy = async (who: Member) => {
+      const { data, error } = await who.db
+        .from("follow_up_tasks")
+        .select("member")
+        .eq("due_date", bellToday)
+        .is("done_at", null);
+      if (error) throw new Error(`tasks: ${error.message}`);
+      return new Set((data ?? []).map((r) => r.member as string));
+    };
+
+    /** The bell's roster query, exactly as notifications.ts issues it. */
+    const rosterAsSeenBy = async (who: Member) => {
+      const { data, error } = await who.db
+        .from("profiles").select("id").eq("role", "rep");
+      if (error) throw new Error(`roster: ${error.message}`);
+      return new Set((data ?? []).map((r) => r.id as string));
+    };
+
+    it("gives a rep only their own due follow-up", async () => {
+      const seen = await dueTasksAsSeenBy(bellRepA);
+      expect(seen.has(bellRepA.id), "a rep cannot see their own item").toBe(true);
+      expect(
+        seen.has(bellRepB.id),
+        "⚠ LEAK: a rep's bell could count another rep's follow-up",
+      ).toBe(false);
+
+      // And the service role confirms rep B's task EXISTS — so the absence
+      // above is the policy withholding it, not the fixture having failed.
+      const { count } = await admin.from("follow_up_tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("member", bellRepB.id).eq("due_date", bellToday);
+      expect(count, "rep B's task was never created").toBe(1);
+    });
+
+    it("gives a team lead their own rep's item and not a second lead's", async () => {
+      const a = await dueTasksAsSeenBy(bellLeadA);
+      expect(a.has(bellRepA.id), "lead A cannot see their own rep's item").toBe(true);
+      expect(
+        a.has(bellRepB.id),
+        "⚠ LEAK: lead A's bell counted team B's follow-up",
+      ).toBe(false);
+
+      const b = await dueTasksAsSeenBy(bellLeadB);
+      expect(b.has(bellRepB.id)).toBe(true);
+      expect(
+        b.has(bellRepA.id),
+        "⚠ LEAK: lead B's bell counted team A's follow-up",
+      ).toBe(false);
+    });
+
+    it("scopes the roster that names each line, both ways", async () => {
+      // The roster turns an id into "Rep X:" on a lead's bell. If it leaked, a
+      // lead would learn the NAMES of another team's reps even with the task
+      // counts correctly withheld.
+      const a = await rosterAsSeenBy(bellLeadA);
+      expect(a.has(bellRepA.id)).toBe(true);
+      expect(a.has(bellRepB.id), "⚠ LEAK: lead A can name team B's rep").toBe(false);
+
+      const b = await rosterAsSeenBy(bellLeadB);
+      expect(b.has(bellRepB.id)).toBe(true);
+      expect(b.has(bellRepA.id), "⚠ LEAK: lead B can name team A's rep").toBe(false);
+
+      // A rep's roster read is themselves alone. The bell short-circuits it,
+      // but the policy must agree or a future caller that does read it leaks.
+      const r = await rosterAsSeenBy(bellRepA);
+      expect(r.has(bellRepA.id)).toBe(true);
+      expect(r.has(bellRepB.id), "⚠ LEAK: a rep can name another rep").toBe(false);
+    });
+
+    it("counts nothing once the follow-up is done", async () => {
+      /*
+       * ⚠ THE REASON THE BELL DERIVES RATHER THAN READING alert_events. An
+       * alert row is a RECORD and does not retract — /missed says so on the
+       * page. The bell must go quiet the moment the work is done, and this is
+       * the assertion that proves it does.
+       */
+      const { error } = await admin.from("follow_up_tasks")
+        .update({ done_at: new Date().toISOString(), outcome: "done" })
+        .eq("member", bellRepA.id).eq("due_date", bellToday);
+      expect(error, error?.message).toBeNull();
+
+      const seen = await dueTasksAsSeenBy(bellRepA);
+      expect(
+        seen.has(bellRepA.id),
+        "a closed follow-up still counted towards the bell",
+      ).toBe(false);
+
+      // Put it back, so order between tests cannot matter.
+      await admin.from("follow_up_tasks")
+        .update({ done_at: null, outcome: null })
+        .eq("member", bellRepA.id).eq("due_date", bellToday);
+    });
+
+    it("leaves the two plan sources scoped the same way", async () => {
+      // daily_plans and targets are the Phase A kinds' sources. They are dark
+      // in the UI while the flag is false, but the policy must already be right
+      // — a boundary that is only correct while a feature is hidden is not a
+      // boundary. Both are supervises(member) since 0042.
+      const plans = await bellLeadA.db
+        .from("daily_plans").select("member").eq("date", bellToday);
+      const planMembers = new Set((plans.data ?? []).map((r) => r.member as string));
+      expect(
+        planMembers.has(bellRepB.id),
+        "⚠ LEAK: lead A can read team B's daily plans",
+      ).toBe(false);
+
+      const targets = await bellLeadA.db.from("targets").select("member");
+      const targetMembers = new Set((targets.data ?? []).map((r) => r.member as string));
+      expect(
+        targetMembers.has(bellRepB.id),
+        "⚠ LEAK: lead A can read team B's targets",
+      ).toBe(false);
+    });
+  });
 });

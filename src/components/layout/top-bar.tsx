@@ -1,7 +1,9 @@
 import Image from "next/image";
 import { DesktopNav } from "@/components/layout/desktop-nav";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import type { NavItem } from "@/lib/nav";
+import type { NotificationItem } from "@/lib/notification-kinds";
 import type { Role } from "@/lib/auth";
 
 /**
@@ -42,12 +44,25 @@ export function TopBar({
   role,
   showRole,
   items,
+  notifications,
+  showBell,
 }: {
   name: string;
   role: Role;
   /** Only true when a profile row actually loaded, so we never label a guess. */
   showRole: boolean;
   items: NavItem[];
+  /** What is currently due for this reader, computed in the layout. */
+  notifications: NotificationItem[];
+  /**
+   * Whether this reader has a bell at all.
+   *
+   * ⚠ SEPARATE FROM `notifications.length`, deliberately. An ADMIN has no bell;
+   * a rep with nothing due has a bell with no badge. Keying presence off the
+   * count would collapse those two into one and take the bell away from every
+   * rep on a quiet morning - which reads as a broken header, not as calm.
+   */
+  showBell: boolean;
 }) {
   return (
     <header className="border-border bg-card sticky top-0 z-30 border-b">
@@ -98,6 +113,15 @@ export function TopBar({
               {ROLE_LABEL[role]}
             </span>
           )}
+
+          {/*
+            THE BELL SITS BEFORE SIGN-OUT, which puts the two controls that can
+            change what is on screen together at the end of the bar and keeps
+            the destructive one last. An ADMIN gets no bell rather than an empty
+            one: `bellFor()` returns before it queries anything, and `showBell`
+            is what makes that absence deliberate rather than a count of zero.
+          */}
+          {showBell && <NotificationBell items={notifications} />}
 
           {/*
             A CLIENT COMPONENT, because sign-out can now be REFUSED. A rep still

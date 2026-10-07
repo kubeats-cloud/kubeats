@@ -4,6 +4,8 @@ import { BottomNav } from "@/components/layout/bottom-nav";
 import { TopBar } from "@/components/layout/top-bar";
 import { effectiveRole, getCurrentUser, isAdmin } from "@/lib/auth";
 import { navItemsFor } from "@/lib/nav";
+import { settled } from "@/lib/errors";
+import { bellFor } from "@/lib/notifications";
 
 /**
  * Wording for the states where the profile row is missing or unreadable. Shown
@@ -38,6 +40,29 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const items = navItemsFor(role);
   const notice = PROFILE_NOTICE[user.profileStatus];
 
+  /*
+   * THE BELL IS COMPUTED HERE, which is what makes it "recomputed on every page
+   * load" without a single screen having to remember to ask. This layout
+   * already awaits getCurrentUser(), so the route is dynamic regardless and
+   * this adds no caching question of its own.
+   *
+   * ⚠ WRAPPED IN settled(), because this is DECORATION ON EVERY SCREEN. A
+   * dropped connection while counting follow-ups must cost the bell, not the
+   * page - and without this it would cost every page in the app at once, which
+   * is the one way a notification feature can take down a product. The fallback
+   * is the same empty state bellFor() returns for an admin, so a failure and a
+   * quiet day look identical to everything downstream. errors.ts says the same
+   * about reads that decorate a page.
+   *
+   * An admin's call returns before it queries anything, so this costs their
+   * page load nothing.
+   */
+  const bell = await settled(
+    bellFor(user, role),
+    { items: [], count: 0 },
+    "layout:bell",
+  );
+
   return (
     <div className="flex min-h-dvh flex-col">
       <TopBar
@@ -45,6 +70,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         role={role}
         showRole={user.profileStatus === "ready"}
         items={items}
+        notifications={bell.items}
+        showBell={role !== "admin"}
       />
 
       {notice && (
