@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
-import { ActivityGridTable } from "@/components/report/activity-grid-table";
+import { CustomisableGrid } from "@/components/report/customisable-grid";
 import { RangeControls } from "@/components/report/range-controls";
 import { ExportExcel } from "@/components/report/export-excel";
 import { requireAdmin } from "@/lib/admin";
@@ -137,12 +137,15 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
                 they crowded out the status columns this report exists for. The
                 Excel export keeps all six: the flag is passed here, never by
                 `activitySheet()`. See GridInput in activity-grid.ts. */}
-            <ActivityGridTable
-              data={{
-                reps: result.model.reps,
-                columns: result.model.columns,
-                showActivities: false,
-              }}
+            {/* The grid, with its columns and status categories foldable per
+                reader (change-doc item 7). Display only: the same rows are
+                fetched under the same RLS, and the Export button above is
+                untouched — `activitySheet()` never sees a view preference. */}
+            <CustomisableGrid
+              viewKey="activity-report"
+              reps={result.model.reps}
+              columns={result.model.columns}
+              showActivities={false}
               caption={`Activity by rep from ${start} to ${end}`}
             />
           </div>

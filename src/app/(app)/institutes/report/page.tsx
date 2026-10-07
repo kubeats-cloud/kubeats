@@ -4,16 +4,14 @@ import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
-import { ActivityGridTable } from "@/components/report/activity-grid-table";
+import { CustomisableGrid } from "@/components/report/customisable-grid";
 import { RangeControls } from "@/components/report/range-controls";
 import { requireAdmin } from "@/lib/admin";
-import {
-  cohortHref,
-  getInstituteStatusModel,
-} from "@/lib/institute-status-report";
+import { getInstituteStatusModel } from "@/lib/institute-status-report";
+// `cohortHref` and `sortHref` moved to CustomisableGrid with the links they
+// build — see the comment at the grid below.
 import {
   pipelineRangeSchema,
-  sortHref,
   type PipelineRange,
 } from "@/lib/validation/pipeline-report";
 import { formatDate } from "@/lib/dates";
@@ -231,39 +229,42 @@ export default async function InstituteStatusReportPage(
           )}
 
           <div className="mt-3">
-            <ActivityGridTable
-              data={{
-                reps: result.model.reps,
-                columns: result.model.columns,
-                // The status bands are the whole report; there is no activity
-                // to show, and these rows carry no activity counts.
-                showActivities: false,
-                // Null while a range is active — see the model's own note.
-                unsetColumn: result.model.unsetColumn ?? undefined,
-                /*
-                 * EVERY NON-ZERO CELL IS A DOOR into the rows behind it —
-                 * the client's "click 3 scheduled, open those three".
-                 *
-                 * The two sentinels are the ones /institutes already
-                 * understands, so this links into a screen built to answer
-                 * it rather than into a new one.
-                 *
-                 * The TOTAL column is never offered one: `buildActivityGrid`
-                 * does not consult `hrefFor` for it at all, because a total
-                 * spans several statuses and no single cohort page is the
-                 * honest destination.
-                 */
-                hrefFor: (rep, status) =>
-                  rep.id ? cohortHref(rep.id, status) : null,
-              }}
+            {/*
+              THE TWO FUNCTION PROPS BECAME DATA (change-doc item 7).
+
+              This grid can now have its columns and status categories folded
+              away per reader, which means it is rebuilt in the browser — and a
+              server page cannot hand a function to a client component. So the
+              cell links and the sort links are described rather than supplied:
+              `linkCohorts` asks for the cohort hrefs this screen has always
+              drawn, and `sort` + `range` are what `sortHref()` was being closed
+              over. Both helpers are pure URL builders and are rebuilt
+              identically on the other side.
+
+              What they meant has not changed:
+                - EVERY NON-ZERO CELL IS A DOOR into the rows behind it — the
+                  client's "click 3 scheduled, open those three" — linking into
+                  /institutes, a screen already built to answer it.
+                - The TOTAL column is never offered one: `buildActivityGrid`
+                  does not consult `hrefFor` for it at all, because a total
+                  spans several statuses and no single cohort page is honest.
+                - Sorting is this screen's alone, and the range rides through
+                  every sort link so the two parameter sets cannot knock each
+                  other out.
+            */}
+            <CustomisableGrid
+              viewKey="pipeline-report"
+              reps={result.model.reps}
+              columns={result.model.columns}
+              // The status bands are the whole report; there is no activity to
+              // show, and these rows carry no activity counts.
+              showActivities={false}
+              // Null while a range is active — see the model's own note.
+              unsetColumn={result.model.unsetColumn ?? undefined}
+              linkCohorts
+              sort={result.model.sort}
+              range={range}
               caption="Institutes by current status, per owning rep"
-              // Sorting is this screen's alone. The href builder carries the
-              // range through, so the two parameter sets cannot knock each
-              // other out.
-              sortHrefFor={(sortKey) =>
-                sortHref(sortKey, result.model.sort, range)
-              }
-              sortState={result.model.sort}
             />
           </div>
 

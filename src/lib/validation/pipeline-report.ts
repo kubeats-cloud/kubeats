@@ -195,3 +195,19 @@ export function sortHref(
         : "desc";
   return pipelineHref({ range, sort: { key: sortKey, dir } });
 }
+
+/**
+ * Where a non-zero cell of the pipeline report goes: the institutes behind it.
+ *
+ * MOVED HERE FROM `institute-status-report.ts` (view picker, change-doc item 7)
+ * and re-exported from there, so there is still exactly one definition. That
+ * module carries `import "server-only"`, and the report's grid became a client
+ * component the moment a reader could fold its columns away — a pure
+ * four-line URL builder is not a reason for the table to stay on the server.
+ */
+export function cohortHref(ownerId: string, status: string): string {
+  const params = new URLSearchParams();
+  params.set("owner", ownerId);
+  params.set("status", status);
+  return `/institutes?${params.toString()}`;
+}

@@ -26,6 +26,8 @@ import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import { ACTIVITIES } from "@/lib/validation/visit";
 import type { VisitRow } from "@/lib/admin-workspace";
 import { formatDate } from "@/lib/dates";
+import { useTableView } from "@/lib/table-view";
+import { ViewPicker } from "@/components/ui/view-picker";
 
 /**
  * Review — the screen an admin spends their time on.
@@ -54,6 +56,31 @@ interface StatusOption {
   /** False once an admin has retired it. Still filterable — see the panel. */
   isActive: boolean;
 }
+
+/**
+ * The Review table's foldable columns (change-doc item 7).
+ *
+ * ⚠ DISPLAY ONLY. Every one of these is still selected by `listTeamVisits`,
+ * still returned under the same RLS, and still in any export — folding a column
+ * away is a reader's convenience, not a narrowing of the query. `table-view.ts`
+ * is the long version.
+ *
+ * TWO COLUMNS ARE DELIBERATELY ABSENT. The chevron is the row's only route into
+ * the report, so hiding it would strand the reader on a table they cannot open;
+ * the photograph is the evidence this screen exists to review. Everything else
+ * is offerable — an admin filtered to one rep has no use for the Rep column,
+ * which is the case the feature was asked for.
+ */
+const REVIEW_COLUMNS = [
+  { key: "date", label: "Date" },
+  { key: "rep", label: "Rep" },
+  { key: "institute", label: "Institute" },
+  { key: "activity", label: "Activity" },
+  { key: "status", label: "Status" },
+  { key: "followUp", label: "Follow-up" },
+  { key: "statusChanged", label: "Status changed" },
+  { key: "report", label: "Report" },
+] as const;
 
 export function VisitReview({
   visits,
@@ -107,6 +134,17 @@ export function VisitReview({
     const query = search.toString();
     return query ? `/review?${query}` : "/review";
   }
+
+  /*
+   * The columns a reader may fold away (change-doc item 7).
+   *
+   * PHOTO AND THE CHEVRON ARE NOT HERE and are not oversights. The chevron is
+   * the row's only route into the report and hiding it would strand the reader;
+   * the photograph is the evidence this screen exists to review. Date, Rep and
+   * Institute stay offerable because an admin filtered to one rep does not need
+   * the Rep column — which is the case this feature was asked for.
+   */
+  const view = useTableView("review", REVIEW_COLUMNS.map((c) => c.key));
 
   // 1-based and inclusive, for the "Showing 51-100 of 352" line. Clamped
   // against what actually arrived so a short last page reads correctly.
@@ -327,17 +365,23 @@ export function VisitReview({
               </>
             )}
           </p>
-          {activeCount > 0 && (
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-8"
-              onClick={() => startTransition(() => router.push("/review"))}
-            >
-              <FilterXIcon className="size-4" aria-hidden />
-              Clear {activeCount} filter{activeCount === 1 ? "" : "s"}
-            </Button>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {activeCount > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-8"
+                onClick={() => startTransition(() => router.push("/review"))}
+              >
+                <FilterXIcon className="size-4" aria-hidden />
+                Clear {activeCount} filter{activeCount === 1 ? "" : "s"}
+              </Button>
+            )}
+            {/* Beside the filters, not floating over the table: at phone width
+                a floating control covers the first row it is meant to help
+                with. One flat group — this table has no categories. */}
+            <ViewPicker view={view} groups={[{ columns: [...REVIEW_COLUMNS] }]} />
+          </div>
         </div>
       </Card>
 
@@ -436,11 +480,11 @@ export function VisitReview({
                 <thead>
                   <tr className="border-border bg-secondary/40 text-muted-foreground border-b text-left">
                     <Th className="w-20">Photo</Th>
-                    <Th>Date</Th>
-                    <Th>Rep</Th>
-                    <Th>Institute</Th>
-                    <Th>Activity</Th>
-                    <Th>Status</Th>
+                    {view.shows("date") && <Th>Date</Th>}
+                    {view.shows("rep") && <Th>Rep</Th>}
+                    {view.shows("institute") && <Th>Institute</Th>}
+                    {view.shows("activity") && <Th>Activity</Th>}
+                    {view.shows("status") && <Th>Status</Th>}
                     {/*
                       The two per-institute columns. They repeat down a run of
                       visits to one school, which is accepted: they answer
@@ -453,15 +497,19 @@ export function VisitReview({
                       like the moment this visit changed it. The subtitle is the
                       cheapest place to say which question is being answered.
                     */}
-                    <Th>
-                      Follow-up
-                      <span className="block font-normal">at this institute</span>
-                    </Th>
-                    <Th>
-                      Status changed
-                      <span className="block font-normal">last actual change</span>
-                    </Th>
-                    <Th>Report</Th>
+                    {view.shows("followUp") && (
+                      <Th>
+                        Follow-up
+                        <span className="block font-normal">at this institute</span>
+                      </Th>
+                    )}
+                    {view.shows("statusChanged") && (
+                      <Th>
+                        Status changed
+                        <span className="block font-normal">last actual change</span>
+                      </Th>
+                    )}
+                    {view.shows("report") && <Th>Report</Th>}
                     <th className="w-10 px-2 py-2.5">
                       <span className="sr-only">Open</span>
                     </th>
@@ -483,105 +531,121 @@ export function VisitReview({
                           <span className="text-muted-foreground text-xs">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-3 whitespace-nowrap tabular-nums">
-                        {formatDate(visit.date)}
-                      </td>
-                      <td className="px-5 py-3">
-                        {/* The person, not this visit — their hub. */}
-                        <Link
-                          href={`/team/${visit.memberId}`}
-                          className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                        >
-                          {visit.memberName}
-                        </Link>
-                      </td>
-                      <td className="px-5 py-3">
-                        {/*
-                          TWO DESTINATIONS, because they are two questions. The
-                          NAME opens the institute — everything about that
-                          school in one place — and the chevron at the end of
-                          the row still opens THIS VISIT. A name should get you
-                          to the thing it names.
-                        */}
-                        <Link
-                          href={`/institutes/${visit.instituteId}`}
-                          className="focus-visible:ring-ring rounded-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                        >
-                          {visit.instituteName}
-                        </Link>
-                        {visit.city && (
-                          <p className="text-muted-foreground text-xs">{visit.city}</p>
-                        )}
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
+                      {view.shows("date") && (
+                        <td className="px-5 py-3 whitespace-nowrap tabular-nums">
+                          {formatDate(visit.date)}
+                        </td>
+                      )}
+                      {view.shows("rep") && (
+                        <td className="px-5 py-3">
+                          {/* The person, not this visit — their hub. */}
                           <Link
-                            href={`/review?activity=${visit.activity}`}
-                            aria-label={`Show every ${visit.activityLabel}`}
-                            className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
-                          >
-                            <Badge variant="secondary" className="hover:ring-ring hover:ring-1">
-                              {visit.activityLabel}
-                            </Badge>
-                          </Link>
-                          {visit.lifecycle && (
-                            <Link
-                              href={`/review?lifecycle=${visit.lifecycle}`}
-                              aria-label={
-                                visit.lifecycle === "Done"
-                                  ? "Show every closed loop"
-                                  : "Show every loop still open"
-                              }
-                              className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
-                            >
-                              <Badge
-                                variant={
-                                  visit.lifecycle === "Done" ? "success" : "warning"
-                                }
-                                className="hover:ring-ring hover:ring-1"
-                              >
-                                {visit.lifecycle}
-                              </Badge>
-                            </Link>
-                          )}
-                        </div>
-                      </td>
-                      <td className="text-muted-foreground px-5 py-3">
-                        {/*
-                          ?visitStatus=, NOT ?status=. This cell is
-                          `status_set_to` — what THIS visit decided — so the
-                          link must narrow to the visits that decided the same.
-                          ?status= would have answered "every visit to a school
-                          sitting there today", a different set and a different
-                          number than the column implies.
-                        */}
-                        {visit.status ? (
-                          <Link
-                            href={`/review?visitStatus=${encodeURIComponent(visit.status)}`}
-                            aria-label={`Show every visit that set ${visit.status}`}
+                            href={`/team/${visit.memberId}`}
                             className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
                           >
-                            {visit.standing ?? visit.status}
+                            {visit.memberName}
                           </Link>
-                        ) : (
-                          (visit.standing ?? "—")
-                        )}
-                      </td>
-                      <td className="text-muted-foreground px-5 py-3 whitespace-nowrap tabular-nums">
-                        {visit.instituteFollowUpDate
-                          ? formatDate(visit.instituteFollowUpDate)
-                          : "—"}
-                      </td>
-                      <td className="text-muted-foreground px-5 py-3 whitespace-nowrap tabular-nums">
-                        {visit.instituteStatusUpdatedAt
-                          ? formatDate(visit.instituteStatusUpdatedAt)
-                          : "—"}
-                      </td>
-                      <td className="px-5 py-3">
-                        <Badge variant={visit.reportedAt ? "success" : "neutral"}>
-                          {visit.reportedAt ? "Filed" : "None"}
-                        </Badge>
-                      </td>
+                        </td>
+                      )}
+                      {view.shows("institute") && (
+                        <td className="px-5 py-3">
+                          {/*
+                            TWO DESTINATIONS, because they are two questions. The
+                            NAME opens the institute — everything about that
+                            school in one place — and the chevron at the end of
+                            the row still opens THIS VISIT. A name should get you
+                            to the thing it names.
+                          */}
+                          <Link
+                            href={`/institutes/${visit.instituteId}`}
+                            className="focus-visible:ring-ring rounded-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                          >
+                            {visit.instituteName}
+                          </Link>
+                          {visit.city && (
+                            <p className="text-muted-foreground text-xs">{visit.city}</p>
+                          )}
+                        </td>
+                      )}
+                      {view.shows("activity") && (
+                        <td className="px-5 py-3">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Link
+                              href={`/review?activity=${visit.activity}`}
+                              aria-label={`Show every ${visit.activityLabel}`}
+                              className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
+                            >
+                              <Badge variant="secondary" className="hover:ring-ring hover:ring-1">
+                                {visit.activityLabel}
+                              </Badge>
+                            </Link>
+                            {visit.lifecycle && (
+                              <Link
+                                href={`/review?lifecycle=${visit.lifecycle}`}
+                                aria-label={
+                                  visit.lifecycle === "Done"
+                                    ? "Show every closed loop"
+                                    : "Show every loop still open"
+                                }
+                                className="focus-visible:ring-ring rounded-sm focus-visible:ring-2 focus-visible:outline-none"
+                              >
+                                <Badge
+                                  variant={
+                                    visit.lifecycle === "Done" ? "success" : "warning"
+                                  }
+                                  className="hover:ring-ring hover:ring-1"
+                                >
+                                  {visit.lifecycle}
+                                </Badge>
+                              </Link>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                      {view.shows("status") && (
+                        <td className="text-muted-foreground px-5 py-3">
+                          {/*
+                            ?visitStatus=, NOT ?status=. This cell is
+                            `status_set_to` — what THIS visit decided — so the
+                            link must narrow to the visits that decided the same.
+                            ?status= would have answered "every visit to a school
+                            sitting there today", a different set and a different
+                            number than the column implies.
+                          */}
+                          {visit.status ? (
+                            <Link
+                              href={`/review?visitStatus=${encodeURIComponent(visit.status)}`}
+                              aria-label={`Show every visit that set ${visit.status}`}
+                              className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                            >
+                              {visit.standing ?? visit.status}
+                            </Link>
+                          ) : (
+                            (visit.standing ?? "—")
+                          )}
+                        </td>
+                      )}
+                      {view.shows("followUp") && (
+                        <td className="text-muted-foreground px-5 py-3 whitespace-nowrap tabular-nums">
+                          {visit.instituteFollowUpDate
+                            ? formatDate(visit.instituteFollowUpDate)
+                            : "—"}
+                        </td>
+                      )}
+                      {view.shows("statusChanged") && (
+                        <td className="text-muted-foreground px-5 py-3 whitespace-nowrap tabular-nums">
+                          {visit.instituteStatusUpdatedAt
+                            ? formatDate(visit.instituteStatusUpdatedAt)
+                            : "—"}
+                        </td>
+                      )}
+                      {view.shows("report") && (
+                        <td className="px-5 py-3">
+                          <Badge variant={visit.reportedAt ? "success" : "neutral"}>
+                            {visit.reportedAt ? "Filed" : "None"}
+                          </Badge>
+                        </td>
+                      )}
                       <td className="px-2 py-3">
                         <Link
                           href={`/review/${visit.id}`}

@@ -416,9 +416,10 @@ export function comparePipelineRows(
  * was built to answer it, not a new view. This is the client's "click 3
  * scheduled and open those three institutes", end to end.
  */
-export function cohortHref(ownerId: string, status: string): string {
-  const params = new URLSearchParams();
-  params.set("owner", ownerId);
-  params.set("status", status);
-  return `/institutes?${params.toString()}`;
-}
+/*
+ * RE-EXPORTED, NOT REDEFINED. The body moved to validation/pipeline-report.ts
+ * because this module is `server-only` and the report's grid is now a client
+ * component — see that file. Kept here so every existing import still resolves
+ * and there is one definition rather than two that can drift.
+ */
+export { cohortHref } from "@/lib/validation/pipeline-report";

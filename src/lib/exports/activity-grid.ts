@@ -283,6 +283,29 @@ export interface GridInput {
    */
   showActivities?: boolean;
   /**
+   * Columns the READER has folded away (change-doc item 7). Keys are the ones
+   * this builder returns in `columns`.
+   *
+   * ⚠ SCREEN ONLY, AND THE EXPORT NEVER PASSES IT. `activitySheet()` does not
+   * know this field exists, so the .xlsx is byte-for-byte what it was — the
+   * same arrangement `showActivities` already has, and for a sharper reason:
+   * the workbook is the client's own template with formulas written against
+   * column positions, and one reader's preference must never reach it.
+   *
+   * FILTERED HERE RATHER THAN IN THE RENDERER, because the bands, the merges,
+   * the sort keys and both totals are all derived from these three lists. Hide
+   * a column downstream and the band header above it still spans the old width,
+   * so every column to its right slides out from under its own heading — a
+   * report that looks fine and is wrong, which is the failure 0033's comments
+   * call out elsewhere in this file. Filtering at the source makes that
+   * unspellable.
+   *
+   * The TOTAL therefore counts only what is shown. That is the honest answer
+   * for a table whose row total must equal the cells beside it: a figure that
+   * included columns the reader cannot see would be a sum of something else.
+   */
+  hiddenColumns?: readonly string[];
+  /**
    * A third band, for institutes that have no status at all.
    *
    * Its own band rather than an extra entry in OPEN or CLOSED, because null is
@@ -442,6 +465,22 @@ export function buildActivityGrid(input: GridInput): {
    * answers no question the screen is asking.
    */
   sortKeys: (string | null)[];
+  /**
+   * One entry per column, in the order the rows carry them.
+   *
+   * ⚠ FOR THE SCREEN ONLY. The workbook reads `rows` and `merges` and nothing
+   * else, so this changes no cell of the .xlsx — the byte-identity test in
+   * activity-grid-bands proves that rather than asserting it, the same way
+   * `RepRow.id` was added.
+   *
+   * It exists because `sortKeys` CANNOT serve as a column identity: it is null
+   * for every activity column by design (sorting a pipeline report by a fold of
+   * eight metrics answers no question the screen asks), and the view picker has
+   * to be able to name one. `band` is what the picker groups by, and is null for
+   * column A, which is never foldable — a table of counts belonging to nobody
+   * is not a table.
+   */
+  columns: { key: string; label: string; band: string | null }[];
 } {
   const {
     reps,
@@ -450,7 +489,19 @@ export function buildActivityGrid(input: GridInput): {
     unsetColumn,
     hrefFor,
     showTotals = true,
+    hiddenColumns,
   } = input;
+
+  /*
+   * Folded away by the reader, before anything is derived from the lists.
+   *
+   * An empty or absent set is the default and must cost nothing — `keep()` is
+   * then a function that always returns true, and every array below is the one
+   * it has always been. That is what keeps the export and the two screens that
+   * do not offer a picker byte-identical to before this field existed.
+   */
+  const hidden = new Set(hiddenColumns ?? []);
+  const keep = (key: string) => !hidden.has(key);
 
   /*
    * ONE list, read by BOTH the header band and the body cells below.
@@ -463,17 +514,27 @@ export function buildActivityGrid(input: GridInput): {
    * particular mistake unspellable.
    */
   const activityColumns: readonly (typeof ACTIVITY_COLUMNS)[number][] =
-    showActivities ? ACTIVITY_COLUMNS : [];
+    showActivities
+      ? ACTIVITY_COLUMNS.filter((c) => keep(`activity:${c.from[0]}`))
+      : [];
+
+  // The two status bands and the unset column, narrowed the same way. Named
+  // here so the bands, the body cells, the sort keys and the column descriptor
+  // below all read ONE narrowed list rather than each narrowing their own.
+  const closedColumns = columns.closed.filter((c) => keep(`status:${c.status}`));
+  const openColumns = columns.open.filter((c) => keep(`status:${c.status}`));
+  const unset =
+    unsetColumn && keep(`status:${unsetColumn.status}`) ? unsetColumn : undefined;
 
   const bands: { title: string; labels: string[] }[] = [
     {
       title: GROUP_HEADERS.activities,
       labels: activityColumns.map((c) => c.label),
     },
-    { title: GROUP_HEADERS.closed, labels: columns.closed.map((c) => c.label) },
-    { title: GROUP_HEADERS.open, labels: columns.open.map((c) => c.label) },
+    { title: GROUP_HEADERS.closed, labels: closedColumns.map((c) => c.label) },
+    { title: GROUP_HEADERS.open, labels: openColumns.map((c) => c.label) },
     // Last, so the template's bands keep the positions they already have.
-    { title: GROUP_HEADERS.unset, labels: unsetColumn ? [unsetColumn.label] : [] },
+    { title: GROUP_HEADERS.unset, labels: unset ? [unset.label] : [] },
     // ...and TOTAL after even that, for the same reason one more time over.
     { title: GROUP_HEADERS.total, labels: showTotals ? [TOTAL_COLUMN_LABEL] : [] },
   ].filter((band) => band.labels.length > 0);
@@ -496,9 +557,9 @@ export function buildActivityGrid(input: GridInput): {
   }
 
   const statusColumns = [
-    ...columns.closed,
-    ...columns.open,
-    ...(unsetColumn ? [unsetColumn] : []),
+    ...closedColumns,
+    ...openColumns,
+    ...(unset ? [unset] : []),
   ];
 
   const bodyRows: CellValue[][] = [];
@@ -589,7 +650,56 @@ export function buildActivityGrid(input: GridInput): {
     ...(showTotals ? [SORT_BY_TOTAL] : []),
   ];
 
+  /*
+   * The same three lists once more, this time naming every column.
+   *
+   * NAMESPACED KEYS (`activity:` / `status:`) because an activity and a status
+   * could share a label — "Admission" is already both an activity column and a
+   * plausible status — and a view preference that confused the two would fold
+   * away the wrong column. The prefix makes them distinct in storage for ever.
+   *
+   * The status key is the STATUS, not the label: a retired status renders as
+   * "Name (retired)" and a reader who hid it before it was retired must not
+   * find it back on screen under a new label.
+   */
+  const columnKeys: { key: string; label: string; band: string | null }[] = [
+    { key: SORT_BY_REP, label: GROUP_HEADERS.representative, band: null },
+    // Keyed on `from[0]` — the first metric the column folds — because
+    // ACTIVITY_COLUMNS has no key of its own and the label is display text that
+    // could be reworded. `from` is the METRICS keys, which are the vocabulary
+    // Rule 7 counts by and the one thing here that cannot be renamed without a
+    // migration.
+    ...activityColumns.map((c) => ({
+      key: `activity:${c.from[0]}`,
+      label: c.label,
+      band: GROUP_HEADERS.activities,
+    })),
+    ...closedColumns.map((c) => ({
+      key: `status:${c.status}`,
+      label: c.label,
+      band: GROUP_HEADERS.closed,
+    })),
+    ...openColumns.map((c) => ({
+      key: `status:${c.status}`,
+      label: c.label,
+      band: GROUP_HEADERS.open,
+    })),
+    ...(unset
+      ? [
+          {
+            key: `status:${unset.status}`,
+            label: unset.label,
+            band: GROUP_HEADERS.unset,
+          },
+        ]
+      : []),
+    ...(showTotals
+      ? [{ key: SORT_BY_TOTAL, label: TOTAL_COLUMN_LABEL, band: null }]
+      : []),
+  ];
+
   return {
+    columns: columnKeys,
     rows: [groupRow, labelRow, ...bodyRows],
     merges,
     hrefs: [blank(groupRow), blank(labelRow), ...bodyHrefs],

@@ -15,6 +15,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
+import { useTableView } from "@/lib/table-view";
+import { ViewPicker } from "@/components/ui/view-picker";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
 import type { StatusCatalogue } from "@/lib/validation/institute";
 import type { Institute } from "@/lib/institutes";
@@ -71,6 +73,29 @@ export interface InstituteFilters {
  * truth, every keystroke would be a server round trip and this component would
  * be the thing its own opening paragraph says it deliberately is not.
  */
+/**
+ * The registry's foldable columns (change-doc item 7).
+ *
+ * ⚠ DESKTOP ONLY, AND THAT IS DELIBERATE. Below `md` this screen is a list of
+ * cards, not a table — there are no columns to fold, and a picker that silently
+ * did nothing on a phone would be worse than no picker. The control is rendered
+ * inside the same `hidden md:block` card as the table it customises.
+ *
+ * "Institute" IS NOT OFFERED: it is the row's name and its only link into the
+ * detail page, so hiding it would leave a table of attributes belonging to
+ * nobody. "Registered by" is already conditional on `showOwner` (a rep sees
+ * only their own, so the column would say their name eight times) — it joins
+ * the picker only when it is on screen at all.
+ */
+const INSTITUTE_COLUMNS = [
+  { key: "location", label: "Location" },
+  { key: "status", label: "Status" },
+  { key: "contact", label: "Key contact" },
+  { key: "owner", label: "Registered by" },
+  { key: "streams", label: "Streams" },
+  { key: "class12", label: "Class 12" },
+] as const;
+
 export function InstitutesBrowser({
   institutes,
   catalogue,
@@ -115,6 +140,18 @@ export function InstitutesBrowser({
    * nothing and removes a dead end.
    */
   const [owner, setOwner] = useState(showOwner ? (initial.owner ?? ALL) : ALL);
+
+  /*
+   * `owner` is dropped from the picker when the column is not rendered —
+   * offering a toggle for a column that is not on screen would be a control
+   * with no visible effect. The hook's own keys are only used for the "n
+   * hidden" count, so a stored preference for it survives a rep/admin switch
+   * rather than being silently reset.
+   */
+  const view = useTableView(
+    "institutes",
+    INSTITUTE_COLUMNS.filter((c) => showOwner || c.key !== "owner").map((c) => c.key),
+  );
 
   /*
    * THE URL IS WRITTEN FROM STATE, never read back after the seed.
@@ -473,10 +510,26 @@ export function InstitutesBrowser({
         </div>
       )}
 
-      <p className="text-muted-foreground text-xs">
-        {filtered.length} of {institutes.length} institute
-        {institutes.length === 1 ? "" : "s"}
-      </p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-muted-foreground text-xs">
+          {filtered.length} of {institutes.length} institute
+          {institutes.length === 1 ? "" : "s"}
+        </p>
+        {/* Hidden below `md` with the table it belongs to — see
+            INSTITUTE_COLUMNS for why a phone has no columns to fold. */}
+        <div className="hidden md:block">
+          <ViewPicker
+            view={view}
+            groups={[
+              {
+                columns: INSTITUTE_COLUMNS.filter(
+                  (c) => showOwner || c.key !== "owner",
+                ).map((c) => ({ key: c.key, label: c.label })),
+              },
+            ]}
+          />
+        </div>
+      </div>
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -510,32 +563,42 @@ export function InstitutesBrowser({
                     <th scope="col" className="px-5 py-2.5 text-xs font-medium">
                       Institute
                     </th>
-                    <th scope="col" className="px-5 py-2.5 text-xs font-medium">
-                      Location
-                    </th>
-                    <th scope="col" className="px-5 py-2.5 text-xs font-medium">
-                      Status
-                    </th>
-                    <th scope="col" className="px-5 py-2.5 text-xs font-medium">
-                      Key contact
-                    </th>
-                    {showOwner && (
+                    {view.shows("location") && (
+                      <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                        Location
+                      </th>
+                    )}
+                    {view.shows("status") && (
+                      <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                        Status
+                      </th>
+                    )}
+                    {view.shows("contact") && (
+                      <th scope="col" className="px-5 py-2.5 text-xs font-medium">
+                        Key contact
+                      </th>
+                    )}
+                    {showOwner && view.shows("owner") && (
                       <th scope="col" className="px-5 py-2.5 text-xs font-medium">
                         Registered by
                       </th>
                     )}
-                    <th
-                      scope="col"
-                      className="px-5 py-2.5 text-right text-xs font-medium"
-                    >
-                      Streams
-                    </th>
-                    <th
-                      scope="col"
-                      className="px-5 py-2.5 text-right text-xs font-medium"
-                    >
-                      Class 12
-                    </th>
+                    {view.shows("streams") && (
+                      <th
+                        scope="col"
+                        className="px-5 py-2.5 text-right text-xs font-medium"
+                      >
+                        Streams
+                      </th>
+                    )}
+                    {view.shows("class12") && (
+                      <th
+                        scope="col"
+                        className="px-5 py-2.5 text-right text-xs font-medium"
+                      >
+                        Class 12
+                      </th>
+                    )}
                     <th scope="col" className="w-10 px-2 py-2.5">
                       <span className="sr-only">Open</span>
                     </th>
@@ -561,16 +624,22 @@ export function InstitutesBrowser({
                             {TYPE_LABELS[institute.type]}
                           </p>
                         </td>
-                        <td className="text-muted-foreground px-5 py-3">
-                          {[institute.area, institute.city, institute.state]
-                            .filter(Boolean)
-                            .join(", ") || "—"}
-                        </td>
-                        <td className="px-5 py-3">
-                          <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
-                        </td>
-                        <td className="px-5 py-3">{keyContact(institute)}</td>
-                        {showOwner && (
+                        {view.shows("location") && (
+                          <td className="text-muted-foreground px-5 py-3">
+                            {[institute.area, institute.city, institute.state]
+                              .filter(Boolean)
+                              .join(", ") || "—"}
+                          </td>
+                        )}
+                        {view.shows("status") && (
+                          <td className="px-5 py-3">
+                            <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
+                          </td>
+                        )}
+                        {view.shows("contact") && (
+                          <td className="px-5 py-3">{keyContact(institute)}</td>
+                        )}
+                        {showOwner && view.shows("owner") && (
                           <td className="px-5 py-3">
                             {institute.registered_by ? (
                               <span className="text-muted-foreground">
@@ -581,10 +650,14 @@ export function InstitutesBrowser({
                             )}
                           </td>
                         )}
-                        <td className="px-5 py-3 text-right tabular-nums">{streams}</td>
-                        <td className="px-5 py-3 text-right tabular-nums">
-                          ~{students}
-                        </td>
+                        {view.shows("streams") && (
+                          <td className="px-5 py-3 text-right tabular-nums">{streams}</td>
+                        )}
+                        {view.shows("class12") && (
+                          <td className="px-5 py-3 text-right tabular-nums">
+                            ~{students}
+                          </td>
+                        )}
                         <td className="px-2 py-3">
                           <Link
                             href={`/institutes/${institute.id}`}
