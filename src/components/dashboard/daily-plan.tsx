@@ -18,7 +18,12 @@ import { EmptyState } from "@/components/states";
 import { CheckInButton } from "@/components/dashboard/check-buttons";
 import { addToDailyPlan, removeFromDailyPlan } from "@/lib/visit-actions";
 import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
-import type { PickerInstitute, PlanEntry, PurposeOption } from "@/lib/visits";
+import type {
+  FollowUpTask,
+  PickerInstitute,
+  PlanEntry,
+  PurposeOption,
+} from "@/lib/visits";
 import {
   dailyPlanFormDataToInput,
   dailyPlanSchema,
@@ -36,6 +41,8 @@ import {
   visitStatusOf,
 } from "@/lib/validation/checkin";
 import { FormNotice } from "@/components/form-notice";
+import { FollowUpCalls } from "@/components/dashboard/follow-up-calls";
+import { MorningPlan } from "@/components/dashboard/morning-plan";
 
 /**
  * Today's plan, which the Dashboard owns (see CLAUDE.md).
@@ -49,12 +56,26 @@ export function DailyPlan({
   purposes,
   entries,
   catalogue,
+  tasks,
 }: {
   institutes: PickerInstitute[];
   purposes: PurposeOption[];
   entries: PlanEntry[];
   /** The status vocabulary, for the closed-institute warning and its label. */
   catalogue: StatusCatalogue;
+  /**
+   * A1 — today's follow-ups, from `follow_up_tasks` and NEVER from
+   * `daily_plans`.
+   *
+   * They are handed in as their own list rather than merged into `entries`,
+   * which is the whole of Phase A's design. A call has no arrival, no photo and
+   * no check-out; folding one into the plan entries would mean every reader
+   * below — the status splitter, the sequence numbering, the Check in button —
+   * had to learn to skip a row it cannot process, and the Overview's "of
+   * planned" tile would start counting phone calls as visits. 0038's header is
+   * the long version.
+   */
+  tasks: FollowUpTask[];
 }) {
   const [state, formAction, isPending] = useActionState(
     addToDailyPlan,
@@ -234,7 +255,19 @@ export function DailyPlan({
         <CardTitle className="text-base">Today&rsquo;s plan</CardTitle>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
+        {/*
+          A1 — TWO SECTIONS, and the headings are not decoration. "Meetings" is
+          what a rep walks into and what the meeting gate reads; "Follow-up
+          calls" is what they owe from a desk. Before this they would have been
+          one undifferentiated list, and the Check in button would have been
+          offered against a phone call.
+        */}
+        <section className="space-y-4">
+          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+            Meetings
+          </h3>
+
         {canAdd ? (
           <form action={formAction} onSubmit={handleSubmit} className="space-y-3">
             <input type="hidden" name="institute_id" value={instituteId} />
@@ -354,6 +387,29 @@ export function DailyPlan({
               ? "Register an institute before planning a visit."
               : "No meeting purposes have been set up yet. Ask an admin to add some."}
           </p>
+        )}
+
+        {/*
+          A2 — the morning tick-list, beneath the one-at-a-time form rather
+          than instead of it. Planning six schools before leaving the house and
+          adding one more at eleven are different moments, and the second is
+          still the quickest path for a single institute.
+
+          It writes ORDINARY plan rows, so everything they land in — this list,
+          the meeting gate, Rule 7 — is unchanged.
+        */}
+        {canAdd && (
+          <MorningPlan
+            institutes={institutes}
+            purposes={purposes}
+            catalogue={catalogue}
+            // Already on today's plan and not yet walked into: shown ticked and
+            // disabled, so the rep is not offered a duplicate the action would
+            // only skip.
+            plannedIds={entries
+              .filter((entry) => entry.checkinAt === null)
+              .map((entry) => entry.institute_id)}
+          />
         )}
 
         {entries.length === 0 ? (
@@ -505,6 +561,19 @@ export function DailyPlan({
             ))}
           </ul>
         )}
+        </section>
+
+        {/*
+          A1's second section. Reads the SAME source Pending's today-filter
+          reads, which is what makes a follow-up created at the end of a visit
+          appear in both with no write-sync between them.
+        */}
+        <section className="space-y-3">
+          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+            Follow-up calls
+          </h3>
+          <FollowUpCalls tasks={tasks} />
+        </section>
       </CardContent>
     </Card>
   );

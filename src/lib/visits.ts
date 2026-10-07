@@ -930,3 +930,106 @@ export async function getPlanById(
     checkoutMissing: data.checkout_missing ?? false,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Follow-up tasks (A3, migration 0038)                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One thing a rep owes an institute next.
+ *
+ * NOT A PLAN ROW, and the distinction is the whole of Phase A. `daily_plans` is
+ * what the meeting gate checks, what Rule 7 counts Meetings from, and what the
+ * Overview's "of planned" denominator counts; a call is none of those. 0038's
+ * header is the long version.
+ */
+export interface FollowUpTask {
+  id: string;
+  instituteId: string;
+  instituteName: string;
+  kind: "call" | "meeting";
+  dueDate: string;
+  note: string | null;
+  /** The institute's phone, so a call can be made from the list. */
+  phone: string | null;
+  doneAt: string | null;
+  outcome: string | null;
+}
+
+interface RawTask {
+  id: string;
+  institute_id: string;
+  kind: string;
+  due_date: string;
+  note: string | null;
+  done_at: string | null;
+  outcome: string | null;
+  institutes: { name: string | null; principal_mobile: string | null } | null;
+}
+
+/**
+ * What this rep still owes, on or before a given day.
+ *
+ * `upTo` rather than an exact date, so a task due yesterday and never done is
+ * still in front of the rep this morning rather than silently behind them. The
+ * Dashboard asks for today; Pending's today-filter asks the same question of
+ * the same table, which is what makes a follow-up created at Log Visit appear
+ * in both with no write-sync between them.
+ *
+ * OPEN ONLY — `done_at is null`. A finished call is history, and the partial
+ * index (0038) is built on exactly this predicate.
+ *
+ * Scoped by RLS through the parent institute, so a rep gets their own and an
+ * admin gets everyone's. The member filter is for correctness of the answer,
+ * not for security — the same sentence `getTodayPlan()` carries.
+ */
+export async function listFollowUpTasks(
+  memberId: string,
+  upTo: string,
+): Promise<{ ok: true; tasks: FollowUpTask[] } | { ok: false }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("follow_up_tasks")
+    .select(
+      "id, institute_id, kind, due_date, note, done_at, outcome, institutes(name, principal_mobile)",
+    )
+    .eq("member", memberId)
+    .is("done_at", null)
+    .lte("due_date", upTo)
+    .order("due_date", { ascending: true });
+
+  if (error) {
+    logError("visits:follow-up-tasks", error);
+    return { ok: false };
+  }
+
+  const rows = (data ?? []) as unknown as RawTask[];
+  return {
+    ok: true,
+    tasks: rows.map((row) => {
+      // PostgREST types a one-to-one embed as an array; the same narrowing
+      // `purposeOf()` does above, for the same reason.
+      const joined = row.institutes as unknown;
+      const inst = (Array.isArray(joined) ? joined[0] : joined) as
+        | { name?: string; principal_mobile?: string | null }
+        | null;
+      return {
+        id: row.id,
+        instituteId: row.institute_id,
+        // A null join is a SCOPING answer, not a missing row — institute-scope.ts
+        // explains why the two must not read the same on screen.
+        instituteName: instituteNameFrom(
+          new Map(inst?.name ? [[row.institute_id, inst.name]] : []),
+          row.institute_id,
+          "visits",
+        ),
+        kind: row.kind === "meeting" ? "meeting" : "call",
+        dueDate: row.due_date,
+        note: row.note,
+        phone: inst?.principal_mobile ?? null,
+        doneAt: row.done_at,
+        outcome: row.outcome,
+      };
+    }),
+  };
+}

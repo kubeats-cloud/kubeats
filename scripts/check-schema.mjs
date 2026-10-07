@@ -115,14 +115,19 @@ const PROBES = [
   { id: "0034", table: "profiles", column: "created_by", needs: true },
   { id: "0036", table: "institutes", column: "rep_edits_used", needs: true },
   { id: "0037", table: "institute_counsellors", column: "id", needs: true },
+  { id: "0038", table: "visits", column: "next_action", needs: true },
 ];
 
 /*
  * WHAT THIS CHECK CANNOT SEE, stated rather than quietly omitted.
  *
- * 0023 and 0027 to 0030 add no column at all - they are triggers, policies,
- * foreign keys and function bodies - so there is nothing here to probe them
- * with. `institutes.registered_by` looks like a probe for 0028 and is not: that
+ * 0023, 0027 to 0030 and 0039 add no column at all - they are triggers,
+ * policies, foreign keys and function bodies - so there is nothing here to
+ * probe them with. 0039 in particular only widens close_visit()'s signature;
+ * its own assertion block is what proves it landed, and `follow_up_tasks`
+ * existing (0038) is the thing it refuses to apply without.
+ *
+ * `institutes.registered_by` looks like a probe for 0028 and is not: that
  * column is 0001's, and 0028 only changes what it MEANS. Listing it reported
  * 0028 as applied on a database that had never seen it, which is worse than not
  * checking at all, so it was taken out.

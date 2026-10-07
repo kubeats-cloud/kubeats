@@ -403,6 +403,52 @@ if (configured && !has0036) {
   );
 }
 
+const has0038 = configured
+  ? await admin
+      .from("follow_up_tasks")
+      .select("id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+/**
+ * 0039 adds no column, so it is probed by CALLING close_visit with one of the
+ * new named arguments. PGRST202 means the 21-argument signature is not there;
+ * any other answer (FO004 for a service-role caller with no session) means it
+ * resolved, which is all this needs to know.
+ */
+const has0039 = configured
+  ? await admin
+      .rpc("close_visit", { p_visit_id: null, p_daily_plan_id: null, p_follow_up_kind: null })
+      .then(({ error }) => error?.code !== "PGRST202")
+  : false;
+
+if (configured && !has0038) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0038 is not applied to this project.",
+      "    The follow_up_tasks suite is being SKIPPED, not passing - nothing",
+      "    here is checking FO031 or that one rep cannot see another's",
+      "    follow-ups.",
+      "",
+    ].join("\n"),
+  );
+}
+
+if (configured && !has0039) {
+  console.warn(
+    [
+      "",
+      "  ! migration 0039 is not applied to this project.",
+      "    The close_visit next-action suite is being SKIPPED, not passing -",
+      "    and in particular NOTHING is checking that a follow-up stays out of",
+      "    daily_plans, which is what the whole of Phase A rests on.",
+      "",
+    ].join("\n"),
+  );
+}
+
 if (configured && !has0037) {
   console.warn(
     [
@@ -908,10 +954,31 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       .select("id")
       .like("name", `${TAG}%`);
 
+    /*
+     * ORDER MATTERS, and every table that references an institute with ON
+     * DELETE RESTRICT has to be named here or the institute delete fails
+     * SILENTLY and the row accumulates on every run.
+     *
+     * That is not hypothetical: `follow_up_tasks` (0038) and
+     * `institute_status_history` (0011) were both missing from this list, and
+     * the Phase A suite left six institutes and five history rows behind on its
+     * first run. A leaked fixture is worse than a noisy one — it makes the next
+     * run's "before" snapshot wrong.
+     *
+     * `institute_counsellors` is NOT here and does not need to be: 0037 gives
+     * it ON DELETE CASCADE, so it goes with its parent.
+     */
     for (const { id } of institutes ?? []) {
+      await admin.from("follow_up_tasks").delete().eq("institute_id", id);
       await admin.from("visits").delete().eq("institute_id", id);
       await admin.from("daily_plans").delete().eq("institute_id", id);
-      await admin.from("institutes").delete().eq("id", id);
+      await admin.from("institute_status_history").delete().eq("institute_id", id);
+      const { error } = await admin.from("institutes").delete().eq("id", id);
+      // Loud rather than silent: a refused delete here is a leaked fixture, and
+      // the next run's baseline is wrong because of it.
+      if (error) {
+        console.warn(`  ! could not delete institute ${id}: ${error.message}`);
+      }
     }
     for (const member of members) {
       const { data: files } = await admin.storage.from("visit-photos").list(member.id);
@@ -921,6 +988,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .remove(files.map((f) => `${member.id}/${f.name}`));
       }
       await admin.from("targets").delete().eq("member", member.id);
+      await admin.from("follow_up_tasks").delete().eq("member", member.id);
       await admin.from("visits").delete().eq("member", member.id);
       await admin.from("daily_plans").delete().eq("member", member.id);
       await admin.from("profiles").delete().eq("id", member.id);
@@ -5843,6 +5911,325 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { data } = await admin
         .from("institutes").select("rep_edits_used").eq("id", fresh).single();
       expect(data?.rep_edits_used, "adding counsellors costs no correction").toBe(0);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* A3 - follow-up tasks, and the separation the whole phase rests on  */
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0038)("follow_up_tasks (migration 0038)", () => {
+    let mine: string;
+
+    beforeAll(async () => {
+      mine = await makeInstitute(repA.id, campusA, "follow-up");
+    });
+
+    it("lets the owning rep create one on their own institute", async () => {
+      const { error } = await repA.db.from("follow_up_tasks").insert({
+        member: repA.id, institute_id: mine, kind: "call", due_date: iso(1),
+        note: `${TAG} ring the principal`,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await repA.db
+        .from("follow_up_tasks").select("kind, note").eq("institute_id", mine);
+      expect((data ?? []).map((r) => r.kind)).toContain("call");
+    });
+
+    /**
+     * THE 0028 SECTION 2 TRAP AGAIN, one more table along. A policy that did
+     * not reach through the parent would let repB read repA's commitments
+     * without ever selecting from `institutes`.
+     */
+    it("hides it from another rep entirely", async () => {
+      const { data, error } = await repB.db
+        .from("follow_up_tasks").select("id").eq("institute_id", mine);
+      expect(error, error?.message).toBeNull();
+      expect(data, "repB must see nothing, not an error").toEqual([]);
+    });
+
+    it("refuses another rep creating one against it", async () => {
+      const { error } = await repB.db.from("follow_up_tasks").insert({
+        member: repB.id, institute_id: mine, kind: "call", due_date: iso(1),
+      });
+      expect(error, "the insert policy or FO031 must refuse").not.toBeNull();
+    });
+
+    /**
+     * FO031 - a task against an institute the member does not own is a dead
+     * end they could never act on. Reachable without tampering, because
+     * Pending shows a rep the institutes a colleague left open.
+     */
+    it("refuses a task whose institute is not its member's (FO031)", async () => {
+      const theirs = await makeInstitute(repB.id, campusA, "follow-up-theirs");
+      const { error } = await admin.from("follow_up_tasks").insert({
+        member: repA.id, institute_id: theirs, kind: "call", due_date: iso(1),
+      });
+      // The service role is exempt from FO031 (no caller), so this is asserted
+      // through a real session instead.
+      const asRep = await repA.db.from("follow_up_tasks").insert({
+        member: repA.id, institute_id: theirs, kind: "call", due_date: iso(1),
+      });
+      expect(asRep.error, "a rep must be refused").not.toBeNull();
+      // Tidy up whatever the service role was allowed to write.
+      if (!error) await admin.from("follow_up_tasks").delete().eq("institute_id", theirs);
+      await admin.from("institutes").delete().eq("id", theirs);
+    });
+
+    it("lets an admin read across institutes", async () => {
+      const { data, error } = await boss.db
+        .from("follow_up_tasks").select("id").eq("institute_id", mine);
+      expect(error, error?.message).toBeNull();
+      expect((data ?? []).length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("holds the vocabulary to call and meeting", async () => {
+      const { error } = await admin.from("follow_up_tasks").insert({
+        member: repA.id, institute_id: mine, kind: "email", due_date: iso(1),
+      });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses an outcome with nothing closed", async () => {
+      const { error } = await admin.from("follow_up_tasks").insert({
+        member: repA.id, institute_id: mine, kind: "call", due_date: iso(1),
+        outcome: "done",
+      });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses a purpose on a call, which can never become a plan row", async () => {
+      const { data: purpose } = await admin
+        .from("purposes").select("id").eq("is_active", true).limit(1).single();
+      const { error } = await admin.from("follow_up_tasks").insert({
+        member: repA.id, institute_id: mine, kind: "call", due_date: iso(1),
+        purpose_id: purpose!.id,
+      });
+      expect(error?.code).toBe(CHECK_VIOLATION);
+    });
+
+    /**
+     * THE LOCKSTEP RULE. A `current_date` default would date a task created
+     * after 18:30 UTC to the wrong Indian day, and no screen would say so.
+     */
+    it("defaults due_date to the Indian calendar day", async () => {
+      const { data, error } = await admin.from("follow_up_tasks").insert({
+        member: repA.id, institute_id: mine, kind: "meeting",
+      }).select("due_date").single();
+      expect(error, error?.message).toBeNull();
+
+      const { data: appToday } = await admin.rpc("app_today");
+      expect(data?.due_date).toBe(appToday);
+      await admin.from("follow_up_tasks").delete().eq("id", (data as never as { id: string }).id ?? "");
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* A3 - close_visit's new parameters, and the overload ceremony       */
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0039)("close_visit records what happens next (0039)", () => {
+    let school: string;
+
+    beforeEach(async () => {
+      school = await makeInstitute(repA.id, campusA, "next-action");
+    });
+
+    /** Logs a visit as repA and returns its id and plan id. */
+    const logOne = async () => {
+      const today = iso();
+      await ensureArrival(repA.id, school, today);
+      const { data: plan } = await admin
+        .from("daily_plans").select("id")
+        .eq("member", repA.id).eq("institute_id", school).eq("date", today)
+        .order("created_at", { ascending: false }).limit(1).single();
+
+      const { data: visitId, error } = await repA.db.rpc("log_visit", {
+        p_institute_id: school, p_activity: "meeting", p_lifecycle_status: null,
+        p_expected_date: null, p_latitude: null, p_longitude: null,
+        p_photo_url: photoFor(repA.id), p_notes: null,
+        p_status_set_to: "Session done", p_accuracy: null,
+        p_follow_up_date: null, p_follow_up_time: null, p_daily_plan_id: plan!.id,
+      });
+      if (error) throw new Error("log_visit: " + error.message);
+      return { visitId: visitId as string, planId: plan!.id as string };
+    };
+
+    /**
+     * ⚠ THE BACKWARD-COMPATIBILITY GUARANTEE.
+     *
+     * Every new parameter is DEFAULTED and supabase-js sends NAMED arguments,
+     * so a caller that has never heard of them still resolves. That is what
+     * makes applying 0039 ahead of the deploy safe, and PGRST202 here would
+     * mean every filed report broke the moment the migration landed.
+     */
+    it("still answers the old call, with none of the new parameters", async () => {
+      const { visitId, planId } = await logOne();
+      const { error } = await repA.db.rpc("close_visit", {
+        p_visit_id: visitId, p_daily_plan_id: planId, p_notes: "old-shape call",
+      });
+      expect(error?.code, "PGRST202 would mean the old call stopped resolving")
+        .not.toBe("PGRST202");
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("visits").select("reported_at, next_action").eq("id", visitId).single();
+      expect(data?.reported_at, "the report still files").not.toBeNull();
+      expect(data?.next_action, "and leaves no next action").toBeNull();
+    });
+
+    it("records a call and creates its task, in one transaction", async () => {
+      const { visitId, planId } = await logOne();
+      const due = iso(3);
+
+      const { error } = await repA.db.rpc("close_visit", {
+        p_visit_id: visitId, p_daily_plan_id: planId, p_notes: "call next",
+        p_next_action: "call", p_follow_up_kind: "call",
+        p_follow_up_due: due, p_follow_up_note: `${TAG} fees`,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: visit } = await admin
+        .from("visits").select("next_action, reported_at").eq("id", visitId).single();
+      expect(visit?.next_action).toBe("call");
+      expect(visit?.reported_at).not.toBeNull();
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("kind, due_date, note, from_visit_id")
+        .eq("from_visit_id", visitId).single();
+      expect(task?.kind).toBe("call");
+      expect(task?.due_date).toBe(due);
+      expect(task?.note).toBe(`${TAG} fees`);
+    });
+
+    it("records a meeting the same way", async () => {
+      const { visitId, planId } = await logOne();
+      const { error } = await repA.db.rpc("close_visit", {
+        p_visit_id: visitId, p_daily_plan_id: planId,
+        p_next_action: "meeting", p_follow_up_kind: "meeting", p_follow_up_due: iso(2),
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("kind").eq("from_visit_id", visitId).single();
+      expect(task?.kind).toBe("meeting");
+    });
+
+    it("falls back to tomorrow when no due date is sent", async () => {
+      const { visitId, planId } = await logOne();
+      const { error } = await repA.db.rpc("close_visit", {
+        p_visit_id: visitId, p_daily_plan_id: planId,
+        p_next_action: "call", p_follow_up_kind: "call",
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: appToday } = await admin.rpc("app_today");
+      const tomorrow = new Date(Date.parse(appToday as string) + 86_400_000)
+        .toISOString().slice(0, 10);
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("due_date").eq("from_visit_id", visitId).single();
+      expect(task?.due_date).toBe(tomorrow);
+    });
+
+    /**
+     * ★ THE REGRESSION GUARD THE WHOLE SEPARATION RESTS ON ★
+     *
+     * A day that contains follow-up tasks must leave `daily_plans` exactly as
+     * it was: the meeting gate reads that table, Rule 7 counts Meetings from
+     * it, and the Overview's "of planned" tile uses it as a denominator. If a
+     * follow-up ever leaked in there, none of those would LOOK wrong - they
+     * would just be counting phone calls as visits.
+     */
+    it("does NOT touch daily_plans, so Rule 7 and the Overview are unmoved", async () => {
+      const today = iso();
+
+      const countPlans = async () => {
+        const { count } = await admin
+          .from("daily_plans").select("id", { count: "exact", head: true })
+          .eq("member", repA.id).eq("date", today);
+        return count ?? 0;
+      };
+      const countMeetings = async () => {
+        const { count } = await admin
+          .from("daily_plans").select("id", { count: "exact", head: true })
+          .eq("member", repA.id).eq("meetings_actual", 1)
+          .gte("date", today).lte("date", today);
+        return count ?? 0;
+      };
+
+      const plansBefore = await countPlans();
+      const meetingsBefore = await countMeetings();
+
+      const { visitId, planId } = await logOne();
+      // logOne() adds exactly one plan row (the arrival), and log_visit marks
+      // it held - so these two move by one each, and that is the baseline.
+      const plansAfterVisit = await countPlans();
+      const meetingsAfterVisit = await countMeetings();
+
+      await repA.db.rpc("close_visit", {
+        p_visit_id: visitId, p_daily_plan_id: planId,
+        p_next_action: "call", p_follow_up_kind: "call", p_follow_up_due: iso(1),
+      });
+
+      // THE ASSERTION: filing a report WITH a follow-up moved neither number.
+      expect(await countPlans(), "the Overview denominator must not move")
+        .toBe(plansAfterVisit);
+      expect(await countMeetings(), "Rule 7's Meetings figure must not move")
+        .toBe(meetingsAfterVisit);
+
+      // And the task really was created - so this is not passing by doing
+      // nothing at all.
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("id").eq("from_visit_id", visitId).single();
+      expect(task, "the follow-up exists, in its own table").not.toBeNull();
+
+      // Sanity: the visit itself did add one plan row, so the counters work.
+      expect(plansAfterVisit).toBe(plansBefore + 1);
+      expect(meetingsAfterVisit).toBe(meetingsBefore + 1);
+    });
+
+    /**
+     * A follow-up that cannot be created must take the report down with it -
+     * one transaction, or the rep files a report and silently loses what they
+     * promised. SECURITY INVOKER is what makes FO031 apply inside the function.
+     */
+    it("rolls the whole report back if the task is refused", async () => {
+      const theirs = await makeInstitute(repB.id, campusA, "rollback");
+      const { visitId, planId } = await logOne();
+
+      // A task against repB's institute, attempted by repA: FO031 refuses it.
+      // The institute_id comes from the VISIT, so this is forced by pointing
+      // the visit at repA's own school and the task at... the same school.
+      // Instead, assert the guarantee directly: a refused close leaves the
+      // report unfiled.
+      const { error } = await repA.db.rpc("close_visit", {
+        p_visit_id: visitId, p_daily_plan_id: planId,
+        p_next_action: "call", p_follow_up_kind: "sms", p_follow_up_due: iso(1),
+      });
+      expect(error, "an invalid kind must refuse the whole call").not.toBeNull();
+
+      const { data } = await admin
+        .from("visits").select("reported_at").eq("id", visitId).single();
+      expect(data?.reported_at, "the report must NOT have been filed").toBeNull();
+
+      const { data: tasks } = await admin
+        .from("follow_up_tasks").select("id").eq("from_visit_id", visitId);
+      expect(tasks, "and no task was left behind").toEqual([]);
+
+      await admin.from("institutes").delete().eq("id", theirs);
+    });
+
+    it("is still exactly one overload, and still SECURITY INVOKER", async () => {
+      // Proven behaviourally: an ambiguous function answers PGRST203, and a
+      // DEFINER rewrite would let repA close repB's visit. Both are checked by
+      // the migration's own assertion block; this is the app-visible half.
+      const { visitId, planId } = await logOne();
+      const { error } = await repB.db.rpc("close_visit", {
+        p_visit_id: visitId, p_daily_plan_id: planId,
+      });
+      expect(error?.code, "repB must not be able to file repA's report").toBe("FO017");
     });
   });
 });

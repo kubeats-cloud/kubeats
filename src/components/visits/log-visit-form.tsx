@@ -37,6 +37,7 @@ import {
 } from "@/lib/validation/institute";
 import {
   type ActivityKey,
+  defaultFollowUpDue,
   eventDateLabel,
   eventDateRequired,
   fieldLabel,
@@ -47,6 +48,10 @@ import {
   postedEventDate,
 } from "@/lib/validation/visit";
 import { FormNotice } from "@/components/form-notice";
+import {
+  NextActionFields,
+  type NextActionValue,
+} from "@/components/visits/next-action-fields";
 import { RequiredMark } from "@/components/required-mark";
 
 /*
@@ -88,6 +93,8 @@ interface LogVisitDraft {
   statusSetTo: string;
   expectedDate: string;
   followUpDate: string;
+  /** A3 — what the rep will do next, and when. Drafted like every other field. */
+  nextAction: NextActionValue;
   feedback: FeedbackState;
 }
 
@@ -95,6 +102,7 @@ const EMPTY_DRAFT: LogVisitDraft = {
   statusSetTo: "",
   expectedDate: "",
   followUpDate: "",
+  nextAction: { kind: "", due: "", note: "" },
   feedback: EMPTY_FEEDBACK,
 };
 
@@ -198,6 +206,14 @@ export function LogVisitForm({
   const draftKey = logVisitDraftKey(plan.id);
   const [draft, patchDraft] = useDraft(draftKey, EMPTY_DRAFT, { resaveOn: serverState });
   const { statusSetTo, expectedDate, followUpDate, feedback } = draft;
+  /*
+   * A draft written before A3 shipped has no `nextAction` key, and a rep can
+   * have one sitting in localStorage right now. Defaulting here rather than
+   * trusting the stored shape is what stops that form mounting undefined into
+   * a controlled input — the same reason `checkoutFixFromFormData` tolerates an
+   * absent field during a deploy.
+   */
+  const nextAction = draft.nextAction ?? EMPTY_DRAFT.nextAction;
 
   const status = statusSetTo === "" ? null : statusSetTo;
   /*
@@ -546,6 +562,27 @@ export function LogVisitForm({
                 {fieldError("expected_date")}
               </div>
             )}
+
+            {/*
+              A3 — WHAT HAPPENS NEXT, asked after the status and its dates.
+
+              Here rather than beside them because it is the same question one
+              step on: the status says where this visit left the institute, and
+              this says what the rep will do about it. Inside `status && …` for
+              the reason the whole section is — nothing status-driven renders
+              before the pick, and a form that fills in as it is answered is
+              shorter to read than one that greys out.
+            */}
+            <NextActionFields
+              value={nextAction}
+              onChange={(patch) =>
+                patchDraft((current) => ({
+                  nextAction: { ...(current.nextAction ?? EMPTY_DRAFT.nextAction), ...patch },
+                }))
+              }
+              fieldErrors={fieldErrors}
+              defaultDue={defaultFollowUpDue()}
+            />
 
             <FeedbackFields
               asks={{

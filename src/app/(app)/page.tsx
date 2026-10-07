@@ -15,6 +15,7 @@ import { SEED_STATUS_CATALOGUE } from "@/lib/validation/institute";
 import { settled } from "@/lib/errors";
 import {
   getTodayPlan,
+  listFollowUpTasks,
   listInstitutesForPicker,
   listPurposes,
 } from "@/lib/visits";
@@ -56,7 +57,7 @@ export default async function DashboardPage() {
    * falls back to. Nothing downstream can tell the two routes apart, which is
    * why this needed no change to how the page reads any of it.
    */
-  const [plan, institutes, purposes, week, overview, catalogue, report] = await Promise.all([
+  const [plan, institutes, purposes, week, overview, catalogue, report, tasks] = await Promise.all([
     admin
       ? Promise.resolve({ ok: true as const, entries: [] })
       : settled(getTodayPlan(user.id), { ok: false as const }, "dashboard:plan"),
@@ -74,6 +75,24 @@ export default async function DashboardPage() {
     admin
       ? settled(getActivityReportModel(range, null), null, "dashboard:report")
       : Promise.resolve(null),
+    /*
+     * A3/A1 — today's follow-ups, from `follow_up_tasks`.
+     *
+     * `settled()` like every other fetch here, for the reason stated above: one
+     * rejection must cost one panel rather than the screen a rep lands on. The
+     * fallback is the helper's own `{ ok: false }`, so nothing downstream can
+     * tell the two routes apart.
+     *
+     * `todayISO()` and not `new Date()` — the helper takes "on or before this
+     * day", so an overdue call is still in front of the rep this morning.
+     */
+    admin
+      ? Promise.resolve({ ok: true as const, tasks: [] })
+      : settled(
+          listFollowUpTasks(user.id, todayISO()),
+          { ok: false as const },
+          "dashboard:tasks",
+        ),
   ]);
 
   const entries = plan.ok ? plan.entries : [];
@@ -106,6 +125,10 @@ export default async function DashboardPage() {
               purposes={purposes}
               entries={plan.entries}
               catalogue={catalogue}
+              // A failed read shows an empty calls section rather than taking
+              // the plan down with it — the same degradation every other panel
+              // on this screen gets.
+              tasks={tasks.ok ? tasks.tasks : []}
             />
           ) : (
             <ErrorState message="We could not load today's plan. Please try again in a moment." />

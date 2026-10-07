@@ -4,6 +4,11 @@ import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FeedbackFields } from "@/components/visits/feedback-fields";
 import {
+  NextActionFields,
+  type NextActionValue,
+} from "@/components/visits/next-action-fields";
+import { defaultFollowUpDue } from "@/lib/validation/visit";
+import {
   EMPTY_FEEDBACK,
   applyFeedbackPatch,
   type FeedbackAsks,
@@ -52,6 +57,23 @@ export function FeedbackOnlyForm({
 }) {
   const [state, formAction, isPending] = useActionState(submitFeedback, EMPTY_STATE);
   const [feedback, setFeedback] = useState<FeedbackState>(EMPTY_FEEDBACK);
+  /*
+   * A3 — this form asks what happens next too, and it has to.
+   *
+   * It is the ONE route that skips Log Visit: a visit whose report never went
+   * through, reached from Pending's "Finish these first". Without the question
+   * here, that path would file a report leaving nothing owed — and the rep
+   * would never be prompted again, because filing closes the visit.
+   *
+   * Not drafted, unlike Log Visit's copy. This form is reached rarely and
+   * finished in one sitting; a draft key for it would be machinery guarding a
+   * case that does not happen.
+   */
+  const [nextAction, setNextAction] = useState<NextActionValue>({
+    kind: "",
+    due: "",
+    note: "",
+  });
   const [locating, setLocating] = useState(false);
 
   /**
@@ -111,6 +133,13 @@ export function FeedbackOnlyForm({
         onChange={(patch) => setFeedback((prev) => applyFeedbackPatch(prev, patch))}
         fieldErrors={state.fieldErrors}
         openLoops={openLoops}
+      />
+
+      <NextActionFields
+        value={nextAction}
+        onChange={(patch) => setNextAction((prev) => ({ ...prev, ...patch }))}
+        fieldErrors={state.fieldErrors}
+        defaultDue={defaultFollowUpDue()}
       />
 
       {state.error && (

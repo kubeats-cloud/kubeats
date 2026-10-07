@@ -8,10 +8,16 @@ import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/states";
 import { FollowUpList } from "@/components/visits/follow-up-list";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
-import { getOpenFollowUps, getUnreportedVisits, listPurposes } from "@/lib/visits";
+import {
+  getOpenFollowUps,
+  getUnreportedVisits,
+  listFollowUpTasks,
+  listPurposes,
+} from "@/lib/visits";
+import { FollowUpCalls } from "@/components/dashboard/follow-up-calls";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { activityLabelFor } from "@/lib/validation/visit";
-import { formatDate } from "@/lib/dates";
+import { formatDate, todayISO } from "@/lib/dates";
 
 export const metadata = { title: "Pending" };
 
@@ -45,9 +51,24 @@ export const metadata = { title: "Pending" };
  * `/log?plan=` link for that visit. Remove it and the report is owed for ever
  * with no route to it, and the rep is told nothing. So it stays.
  */
-export default async function PendingPage() {
+const first = (value: string | string[] | undefined) =>
+  typeof value === "string" && value !== "" ? value : undefined;
+
+export default async function PendingPage(props: PageProps<"/pending">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+
+  const searchParams = await props.searchParams;
+  /*
+   * A4 — `?due=today`, and the default is everything.
+   *
+   * Lenient like every other presentation parameter in this app: an unknown
+   * value falls back to "all" rather than erroring, because a stale bookmark
+   * should land on a readable answer (the stance /institutes documents for its
+   * own filters). Nothing here changes which rows EXIST — RLS decides that —
+   * so a wrong value costs nothing but a wider list.
+   */
+  const dueFilter = first(searchParams.due) === "today" ? "today" : "all";
 
   const admin = isAdmin(user);
   const catalogue = await listStatusCatalogue();
@@ -57,7 +78,7 @@ export default async function PendingPage() {
     .filter((row) => row.category === "open")
     .map((row) => row.status);
 
-  const [result, unreported, purposes] = await Promise.all([
+  const [result, unreported, purposes, tasks] = await Promise.all([
     getOpenFollowUps(openStatuses, user.id),
     // An admin has no half-finished visits of their own: they do not log any.
     admin ? Promise.resolve([]) : getUnreportedVisits(user.id),
@@ -73,7 +94,23 @@ export default async function PendingPage() {
      * for ever — the feature looked present and could not be completed.
      */
     listPurposes(),
+    /*
+     * A4 — THE SAME SOURCE THE DASHBOARD READS.
+     *
+     * `follow_up_tasks`, asked the same question `DailyPlan` asks it. That is
+     * what makes a follow-up set at the end of a visit appear here AND on the
+     * plan with no write-sync between them: there is one row and two readers,
+     * rather than two rows that have to be kept in step.
+     *
+     * An admin gets none of their own — they do not log visits, so they owe no
+     * follow-ups. Their Pending stays the team's open institutes, read-only.
+     */
+    admin
+      ? Promise.resolve({ ok: true as const, tasks: [] })
+      : listFollowUpTasks(user.id, todayISO()),
   ]);
+
+  const dueTasks = tasks.ok ? tasks.tasks : [];
 
   return (
     <>
@@ -126,7 +163,44 @@ export default async function PendingPage() {
         </div>
       )}
 
-      {unreported.length > 0 && <SectionTitle>Follow-ups owed</SectionTitle>}
+      {/*
+        A4 — what is due TODAY, from follow_up_tasks, above the status-driven
+        list below it.
+
+        Two blocks rather than one merged list, because they answer different
+        questions: this is "what did I say I would do", the one below is "which
+        institutes are still open". A row can honestly be in both, and merging
+        them would have to pick one framing and lose the other.
+      */}
+      {!admin && dueTasks.length > 0 && (
+        <div className="mb-6">
+          <SectionTitle>
+            Due today
+            <span className="text-muted-foreground ml-2 text-xs font-normal">
+              {dueTasks.length} follow-up{dueTasks.length === 1 ? "" : "s"} you set
+            </span>
+          </SectionTitle>
+          <div className="mt-2">
+            <FollowUpCalls tasks={dueTasks} />
+          </div>
+          <p className="text-muted-foreground mt-2 text-xs">
+            The same list your dashboard shows — one row, two places to see it.
+          </p>
+        </div>
+      )}
+
+      {!admin && dueFilter === "today" && dueTasks.length === 0 && (
+        <div className="mb-6">
+          <SectionTitle>Due today</SectionTitle>
+          <p className="text-muted-foreground mt-2 text-sm">
+            Nothing you set is due today.
+          </p>
+        </div>
+      )}
+
+      {(unreported.length > 0 || dueTasks.length > 0) && (
+        <SectionTitle>Follow-ups owed</SectionTitle>
+      )}
 
       {result.ok ? (
         <FollowUpList

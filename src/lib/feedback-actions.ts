@@ -13,6 +13,7 @@ import {
 } from "@/lib/validation/feedback";
 import {
   makeVisitSchema,
+  nextActionSchema,
   visitFieldErrors,
   visitFormDataToInput,
 } from "@/lib/validation/visit";
@@ -88,6 +89,11 @@ const RPC_MESSAGES: Record<string, string> = {
   FO018: "That visit has already been filed.",
   FO019:
     "That earlier visit could not be closed from here. It may already be closed.",
+  // A3/0038 — a follow-up against an institute the rep does not own would be a
+  // task they could never act on. Reachable without tampering: Pending shows a
+  // rep the institutes a colleague left open.
+  FO031:
+    "That institute is not yours, so a follow-up there could not be acted on. Ask an admin to reassign it.",
 };
 
 export async function submitFeedback(
@@ -157,6 +163,32 @@ export async function submitFeedback(
   // thrown away.
   const checkoutFix = checkoutFixFromFormData(formData);
 
+  /*
+   * A3 — THE RECOVERY PATH ASKS THE SAME QUESTION, and it has to.
+   *
+   * This is the one route that skips Log Visit entirely: a visit whose report
+   * did not go through, reached from Pending's "Finish these first". If it did
+   * not ask, it would be the route that files a report leaving nothing owed —
+   * and the rep would never be prompted again, because the visit is then closed.
+   * The same reasoning the status-driven fields above already carry.
+   *
+   * Parsed with `nextActionSchema` rather than read raw, so the browser and the
+   * server judge it identically — and so an empty answer stays legal, because
+   * not every visit leaves something owed.
+   */
+  const nextAction = nextActionSchema.safeParse({
+    next_action: String(formData.get("next_action") ?? ""),
+    follow_up_due: String(formData.get("follow_up_due") ?? ""),
+    follow_up_note: String(formData.get("follow_up_note") ?? ""),
+  });
+
+  if (!nextAction.success) {
+    return {
+      error: CHECK_FIELDS,
+      fieldErrors: visitFieldErrors(nextAction.error),
+    };
+  }
+
   const { error } = await supabase.rpc("close_visit", {
     p_visit_id: input.visit_id,
     p_daily_plan_id: input.daily_plan_id,
@@ -185,6 +217,11 @@ export async function submitFeedback(
     p_checkout_lat: checkoutFix.latitude,
     p_checkout_lng: checkoutFix.longitude,
     p_checkout_accuracy: checkoutFix.accuracy,
+    // A3. Same one-answer-two-parameters split as logAndFileVisit below.
+    p_next_action: nextAction.data.next_action,
+    p_follow_up_kind: nextAction.data.next_action,
+    p_follow_up_due: nextAction.data.follow_up_due,
+    p_follow_up_note: nextAction.data.follow_up_note,
   });
 
   if (error) {
@@ -343,6 +380,28 @@ export async function logAndFileVisit(
     p_checkout_lat: checkoutFix.latitude,
     p_checkout_lng: checkoutFix.longitude,
     p_checkout_accuracy: checkoutFix.accuracy,
+    /*
+     * A3 — WHAT HAPPENS NEXT, FROM THE VISIT HALF.
+     *
+     * `visit.*` and not `feedback.*`, matching `p_follow_up_date` immediately
+     * above and for the identical reason: the follow-up is `visitSchema`'s,
+     * deliberately, because that is where the rule lives and where it is
+     * stored. CLAUDE.md states it plainly — "The follow-up is NOT part of this
+     * form" — and A3 is the same question one step on.
+     *
+     * ONE ANSWER, TWO PARAMETERS. `p_next_action` is recorded on the visit so
+     * the report reads as it was filed; `p_follow_up_kind` is what decides
+     * whether a task is created. The form asks once; keeping them separate in
+     * the RPC is what would let a later caller record an intention without
+     * creating a task.
+     *
+     * The task lands in `follow_up_tasks`, NEVER in `daily_plans` — 0038's
+     * header is the long version of why, and the whole of Phase A rests on it.
+     */
+    p_next_action: visit.next_action,
+    p_follow_up_kind: visit.next_action,
+    p_follow_up_due: visit.follow_up_due,
+    p_follow_up_note: visit.follow_up_note,
   });
 
   if (closeError) {

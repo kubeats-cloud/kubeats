@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { todayISO } from "@/lib/dates";
 import {
   SEED_STATUS_CATALOGUE,
   isOpenStatus,
@@ -289,6 +290,37 @@ const optionalTime = z
   .nullable()
   .refine((v) => v === null || TIME.test(v), { message: "Choose a valid time." });
 
+/**
+ * Like `optionalDate` / `optionalText` below, but tolerant of the key being
+ * ABSENT ENTIRELY — not merely empty.
+ *
+ * THIS IS A DEPLOY RULE, not a style choice, and `accuracy` already states it:
+ * during a deploy a rep's cached Log Visit page posts a form that has never
+ * heard of these fields, and a required key would turn that into "a few
+ * details still need filling in" on a visit that is otherwise perfect — at a
+ * school gate, with the photograph already taken.
+ *
+ * So absent and empty both mean null, and the rules that matter are applied in
+ * the superRefine, where they can be stated about the PAIR rather than about a
+ * key that may not be there.
+ */
+const absentableDate = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v) => (v === undefined || v === "" ? null : v))
+  .nullable()
+  .refine((v) => v === null || DATE.test(v), { message: "Choose a valid date." });
+
+const absentableText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? null : v))
+    .nullable();
+
 const optionalText = (max: number) =>
   z
     .string()
@@ -423,6 +455,40 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
      * values 0018-to-0023 recorded.
      */
     follow_up_time: optionalTime,
+    /**
+     * WHAT THE REP WILL DO NEXT (A3): call, meeting, or nothing.
+     *
+     * OPTIONAL, AND THAT IS A DECISION. Not every visit leaves something owed —
+     * a closed loop at an institute that said no is finished, and demanding an
+     * answer would make the rep invent one. `visits_next_action_valid` (0038)
+     * permits null for the same reason, and every visit logged before this
+     * existed carries one.
+     *
+     * ONE VALUE, TWO RPC PARAMETERS. `close_visit()` takes `p_next_action` and
+     * `p_follow_up_kind` separately — the first is recorded ON the visit so the
+     * report reads as it was filed, the second decides what task to create.
+     * The form asks once and the action passes the same value to both; keeping
+     * them apart in the RPC is what would let a later caller record an
+     * intention without creating a task, which is not a case the form has.
+     */
+    next_action: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => (v === undefined || v === "" ? null : v))
+      .nullable()
+      .refine((v) => v === null || v === "call" || v === "meeting", {
+        message: "Choose a call or a meeting.",
+      }),
+    /**
+     * When it is owed by. The form offers TOMORROW; see `defaultFollowUpDue()`.
+     *
+     * Required once a next action is chosen — enforced in the superRefine
+     * below, not here, because the rule is about the PAIR.
+     */
+    follow_up_due: absentableDate,
+    /** What it is about, in the rep's own words. 300 chars, like a plan note. */
+    follow_up_note: absentableText(300),
   })
   .superRefine((value, ctx) => {
     const lifecycle = hasLifecycle(value.activity);
@@ -516,7 +582,55 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
         message: `"${value.status_set_to}" leaves this open, so a follow-up date is needed.`,
       });
     }
+
+    /*
+     * A3 — A NEXT ACTION NEEDS A DAY, and the rule is about the PAIR rather
+     * than about either field, which is why it lives here.
+     *
+     * `follow_up_tasks.due_date` is NOT NULL (0038), so a task with no date
+     * cannot exist; without this the rep would reach the database and be
+     * refused there with a message about a column. The form pre-fills
+     * tomorrow, so meeting this rule costs them nothing unless they clear it.
+     *
+     * NOT THE SAME FIELD as `follow_up_date` above, and the two are deliberately
+     * separate: that one is Rule 5's — the date an OPEN STATUS owes, stored on
+     * the visit — and this one is when the task is due. They are usually the
+     * same day and are answers to different questions, so conflating them would
+     * make one of the two unanswerable.
+     */
+    if (value.next_action && !value.follow_up_due) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["follow_up_due"],
+        message: "Say when this follow-up is due.",
+      });
+    }
+    if (!value.next_action && value.follow_up_due) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["next_action"],
+        message: "Choose a call or a meeting, or clear the date.",
+      });
+    }
   });
+}
+
+/**
+ * The day a follow-up agreed during a visit is offered for: TOMORROW.
+ *
+ * `todayISO()` plus one day, which reads the Asia/Kolkata calendar day — never
+ * `new Date()`, and never the server's own clock. `close_visit()` falls back to
+ * `public.app_today() + 1` for a caller that sends no date, so the form and the
+ * database offer the same day by construction rather than by coincidence.
+ *
+ * Tomorrow rather than today because a follow-up settled at the end of a visit
+ * is, by default, the next working day's business. The rep can change it.
+ */
+export function defaultFollowUpDue(today: string = todayISO()): string {
+  const [y, m, d] = today.split("-").map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`;
 }
 
 export type VisitInput = z.infer<ReturnType<typeof makeVisitSchema>>;
@@ -541,6 +655,9 @@ export function visitFormDataToInput(formData: FormData) {
     status_set_to: text("status_set_to"),
     follow_up_date: text("follow_up_date"),
     follow_up_time: text("follow_up_time"),
+    next_action: text("next_action"),
+    follow_up_due: text("follow_up_due"),
+    follow_up_note: text("follow_up_note"),
   };
 }
 
@@ -767,3 +884,72 @@ export function visitFieldErrors(error: z.ZodError): Record<string, string> {
   }
   return fieldErrors;
 }
+
+/**
+ * The next-action trio on its own, for the RECOVERY path.
+ *
+ * `submitFeedback()` never parses `visitSchema` — the visit is already logged,
+ * and re-validating a photo and a status it cannot change would refuse reports
+ * for fields that are not on that form. But it still has to ask what happens
+ * next, because it is the one route that skips Log Visit entirely, and a report
+ * filed there with nothing owed is a loop that closes silently.
+ *
+ * So the three fields are extracted here and reused by both, rather than
+ * written out twice with a chance to diverge. The pair rule is the same one
+ * `baseVisitSchema` applies: an action needs a day, and a day needs an action.
+ */
+export const nextActionSchema = z
+  .object({
+    next_action: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => (v === undefined || v === "" ? null : v))
+      .nullable()
+      .refine((v) => v === null || v === "call" || v === "meeting", {
+        message: "Choose a call or a meeting.",
+      }),
+    follow_up_due: absentableDate,
+    follow_up_note: absentableText(300),
+  })
+  .superRefine((value, ctx) => {
+    if (value.next_action && !value.follow_up_due) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["follow_up_due"],
+        message: "Say when this follow-up is due.",
+      });
+    }
+    if (!value.next_action && value.follow_up_due) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["next_action"],
+        message: "Choose a call or a meeting, or clear the date.",
+      });
+    }
+  });
+
+/**
+ * The morning tick-list (A2): one purpose, several institutes.
+ *
+ * `min(1)` on both, because an empty submit is a tap that should say what is
+ * missing rather than quietly doing nothing. The institute ids are de-duplicated
+ * here rather than in the action — a checkbox list cannot normally produce a
+ * duplicate, but a tampered form can, and `daily_plans` would accept two
+ * identical rows (0033 removed the constraint that refused them).
+ *
+ * A cap of 60 is a guard rather than a rule: it is more institutes than a rep
+ * can visit in a day by an order of magnitude, and it stops a tampered form
+ * asking for ten thousand inserts in one statement.
+ */
+export const batchPlanSchema = z.object({
+  purpose: z
+    .string()
+    .trim()
+    .min(1, "Choose what these visits are for."),
+  institute_ids: z
+    .array(z.uuid("Pick registered institutes for these planned visits."))
+    .min(1, "Tick at least one institute.")
+    .max(60, "That is more institutes than one day can hold.")
+    .transform((ids) => [...new Set(ids)]),
+});

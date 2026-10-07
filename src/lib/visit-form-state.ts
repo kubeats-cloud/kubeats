@@ -8,6 +8,14 @@ export interface FormState {
   fieldErrors: Record<string, string>;
   /** Set on success so a form can confirm without navigating away. */
   ok?: boolean;
+  /**
+   * A sentence to show on success, where "it worked" is not the whole answer.
+   *
+   * A2's batch planner is the caller: it skips institutes already on the plan,
+   * and the rep who ticked six and got four needs the other two accounted for.
+   * Optional, because most actions have nothing to add to `ok`.
+   */
+  message?: string;
 }
 
 export const EMPTY_STATE: FormState = { error: null, fieldErrors: {} };

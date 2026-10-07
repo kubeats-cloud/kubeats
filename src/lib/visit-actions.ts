@@ -11,6 +11,7 @@ import { assignVisitSchema } from "@/lib/validation/closing-report";
 import { CHECK_FIELDS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
 import {
+  batchPlanSchema,
   dailyPlanFormDataToInput,
   dailyPlanSchema,
   dailyPlanSummary,
@@ -600,3 +601,190 @@ export async function removeFromDailyPlan(planId: string): Promise<FormState> {
  * log_visit() that skipped the feedback and the check-out entirely — which is
  * exactly the dodge the forced chain exists to close.
  */
+
+/* ------------------------------------------------------------------ */
+/* E. Follow-up tasks (A3) and the morning tick-list (A2)              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Mark a follow-up done, or record that nobody answered.
+ *
+ * `done_at` is what takes it off the Dashboard and out of Pending's filter, and
+ * the partial index (0038) is built on that predicate. An outcome without a
+ * `done_at` is refused by `follow_up_tasks_outcome_needs_done`, so the two are
+ * always written together.
+ *
+ * "No answer" CLOSES the task rather than leaving it open, deliberately: a call
+ * that went unanswered is a call that was made, and the rep decides whether to
+ * raise another one. Leaving it open would make the list grow with attempts
+ * rather than with work owed.
+ *
+ * RLS is the boundary — `follow_up_tasks_update` reaches through the parent
+ * institute (0038) — so the member filter below is for correctness of the
+ * answer, not for security.
+ */
+export async function closeFollowUpTask(
+  taskId: string,
+  outcome: "done" | "no_answer",
+): Promise<FormState> {
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
+  }
+
+  const parsed = planIdSchema.safeParse(taskId);
+  if (!parsed.success) {
+    return { error: "That follow-up could not be identified.", fieldErrors: {} };
+  }
+
+  const { error } = await supabase
+    .from("follow_up_tasks")
+    .update({ done_at: new Date().toISOString(), outcome })
+    .eq("id", parsed.data)
+    .eq("member", user.id)
+    // Already closed stays closed: a second tap must not rewrite the outcome of
+    // something somebody has already filed.
+    .is("done_at", null);
+
+  if (error) {
+    logError("tasks:close", error);
+    return {
+      error: toFriendlyMessage(error, "We could not update that follow-up."),
+      fieldErrors: {},
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/pending");
+  return { error: null, fieldErrors: {}, ok: true };
+}
+
+/**
+ * The morning tick-list: several institutes onto today's plan at once (A2).
+ *
+ * ORDINARY `daily_plans` ROWS, which is the point. This is not a new concept —
+ * it is the existing add form with checkboxes, so every row it writes is one
+ * the meeting gate, Rule 7 and the check-in chain already understand. That is
+ * also why A2 needed no migration: 0033 made `addToDailyPlan` an INSERT rather
+ * than an upsert, so several rows a day is exactly what the table now permits.
+ *
+ * ONE PURPOSE FOR THE BATCH, resolved server-side exactly as the single-add
+ * path resolves it. `daily_plans.purpose_id` is what derives the visit's
+ * activity (0024/0025), and therefore which weekly metric the work lands in —
+ * so a tick-list that collected institutes and no purpose would produce rows
+ * that can never be logged. The picker mounts EMPTY and is required for the
+ * reason `PurposesPanel` states: a default would let the wrong metric be chosen
+ * silently, for ever.
+ *
+ * ONE INSERT OF MANY ROWS, not a loop. PostgREST takes an array, so this is one
+ * round trip and one transaction — a partial failure cannot leave half a
+ * morning planned, and FO026 refusing one institute refuses the batch rather
+ * than silently planning the rest.
+ *
+ * ALREADY-PLANNED INSTITUTES ARE SKIPPED AND REPORTED, not refused. The
+ * single-add path's duplicate courtesy exists to absorb a double tap; across a
+ * batch, refusing the lot because one school is already on the list would make
+ * the rep work out which one. So they are filtered out and named back.
+ */
+export async function addManyToDailyPlan(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
+  }
+
+  const parsed = batchPlanSchema.safeParse({
+    purpose: String(formData.get("purpose") ?? ""),
+    institute_ids: formData.getAll("institute_ids").map(String),
+  });
+  if (!parsed.success) {
+    const fieldErrors = visitFieldErrors(parsed.error);
+    return { error: dailyPlanSummary(fieldErrors), fieldErrors };
+  }
+
+  // Resolved server-side and never trusted from the form — the purpose decides
+  // the activity, and therefore which weekly metric this work feeds.
+  const { data: purposeRow, error: purposeError } = await supabase
+    .from("purposes")
+    .select("id, label")
+    .eq("label", parsed.data.purpose)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (purposeError) {
+    logError("plan:batch-purpose", purposeError);
+    return {
+      error: toFriendlyMessage(purposeError, "We could not add those to today's plan."),
+      fieldErrors: {},
+    };
+  }
+  if (!purposeRow) {
+    return { error: "That purpose is no longer available. Pick another one.", fieldErrors: {} };
+  }
+
+  const today = todayISO();
+
+  // What is already on today's plan and not yet walked into. Same question the
+  // single-add path asks, asked once for the whole batch.
+  const { data: unstarted } = await supabase
+    .from("daily_plans")
+    .select("institute_id")
+    .eq("member", user.id)
+    .eq("date", today)
+    .in("institute_id", parsed.data.institute_ids)
+    .is("checkin_at", null);
+
+  const already = new Set((unstarted ?? []).map((row) => row.institute_id));
+  const toAdd = parsed.data.institute_ids.filter((id) => !already.has(id));
+
+  if (toAdd.length === 0) {
+    return {
+      error:
+        "Those are already on today's plan and you have not checked in yet. Finish or remove them before adding again.",
+      fieldErrors: {},
+    };
+  }
+
+  const { error } = await supabase.from("daily_plans").insert(
+    toAdd.map((instituteId) => ({
+      member: user.id,
+      date: today,
+      institute_id: instituteId,
+      purpose: purposeRow.label,
+      purpose_id: purposeRow.id,
+    })),
+  );
+
+  if (error) {
+    logError("plan:batch-add", error);
+    // FO026 — one of them is not this rep's. Refusing the batch is correct:
+    // a partial morning the rep did not ask for is worse than a sentence.
+    if (error.code === "FO026" || error.code === "FO023") {
+      return {
+        error:
+          "One of those institutes is not yours, so none were added. Remove it and try again.",
+        fieldErrors: {},
+      };
+    }
+    return {
+      error: toFriendlyMessage(error, "We could not add those to today's plan."),
+      fieldErrors: {},
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/log");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    // Said rather than silently swallowed, so the count on screen and the count
+    // the rep ticked can be reconciled.
+    message:
+      already.size > 0
+        ? `Added ${toAdd.length}. ${already.size} already on today's plan.`
+        : `Added ${toAdd.length} to today's plan.`,
+  };
+}
