@@ -200,6 +200,19 @@ create trigger profiles_campus_required
 -- and are not a rep editing their own row. FO028 draws the same line in the
 -- same words.
 --
+-- ⚠ (e) RUNS BEFORE THE NULL SHORT-CIRCUIT, which is not where it was first
+-- written. Clearing a link is as much a change as setting one, and with the
+-- check after the short-circuit a rep could not JOIN a team but could LEAVE
+-- one. The integration suite caught it; see the clause itself.
+--
+-- ⚠ AND (e) IS NOT REACHABLE BY A TEAM LEAD IN H1. profiles_update is still
+-- `id = auth.uid() or is_admin()`, so a team lead updating somebody else''s row
+-- matches NO ROWS and the trigger never fires - the refusal is the policy''s,
+-- silently, not this one''s. The clause is written for H3, which gives a team
+-- lead a SECURITY DEFINER RPC to add a rep to their own team; this is the guard
+-- that stops that RPC being able to staff anybody else''s. Until then it is
+-- correct and dormant, which is the same shape 0013''s lock had.
+--
 -- SECURITY DEFINER because (b) and (c) read the PARENT's profile row, which RLS
 -- would hide: a rep may read only their own. The question being asked is about
 -- the named team lead, not about the caller. Same reasoning as
@@ -225,6 +238,36 @@ begin
     raise exception
       'Only a rep belongs to a team lead.'
       using errcode = 'FO033';
+  end if;
+
+  /*
+   * (e) WHO MAY WRITE IT AT ALL — and it is checked HERE, before the null
+   * short-circuit below, because CLEARING a link is as much a change as
+   * setting one.
+   *
+   * ⚠ THIS SAT AFTER THE SHORT-CIRCUIT AND THE INTEGRATION SUITE CAUGHT IT. A
+   * rep could not JOIN a team but could LEAVE one: `set team_lead_id = null`
+   * returned early and never reached this check. After 0042 that is a rep
+   * removing themselves from supervision — their team lead simply stops seeing
+   * their work, with nothing on any screen to say why.
+   *
+   * A team lead may be on EITHER side of the change: taking a rep on, or
+   * releasing one of their own. An admin may do anything. Everything else —
+   * including a rep editing the row they are allowed to write — is refused.
+   */
+  if (tg_op = 'INSERT' and new.team_lead_id is not null)
+     or (tg_op = 'UPDATE' and new.team_lead_id is distinct from old.team_lead_id)
+  then
+    if caller is not null
+       and not public.is_admin()
+       and not (
+         public.is_team_lead()
+         and (new.team_lead_id = caller or old.team_lead_id = caller)
+       ) then
+      raise exception
+        'Only an admin, or the team lead taking them on, can change which team a rep is in.'
+        using errcode = 'FO033';
+    end if;
   end if;
 
   -- Nothing left to check. A null link is the ordinary state of every rep until
@@ -270,18 +313,6 @@ begin
   if v_lead_campus is distinct from new.campus_id then
     raise exception
       'A rep and their team lead must work from the same campus.'
-      using errcode = 'FO033';
-  end if;
-
-  -- (e) Who may write it at all. An admin assigns anybody; a team lead may add
-  --     a rep to THEIR OWN team and to nobody else's, which is what the brief
-  --     grants them. Everything else - including a rep editing their own row -
-  --     is refused.
-  if caller is not null
-     and not public.is_admin()
-     and not (public.is_team_lead() and new.team_lead_id = caller) then
-    raise exception
-      'Only an admin, or the team lead taking them on, can assign a rep to a team.'
       using errcode = 'FO033';
   end if;
 
@@ -474,14 +505,28 @@ stable
 security definer
 set search_path = ''
 as $$
-  select p_member = (select auth.uid())
+  /*
+   * coalesce, because a NULL p_member makes the first comparison NULL and the
+   * whole expression NULL rather than false — an institute with no owner, which
+   * `registered_by` legitimately is.
+   *
+   * ⚠ IT MATTERS MORE THAN IT LOOKS. Inside a policy NULL and false behave the
+   * same, so this would never have shown up there; but a boolean function that
+   * can return NULL is a trap for `not supervises(x)`, which is NULL rather
+   * than true and would silently match nothing. 0042 writes this predicate
+   * thirty times and must not have to remember which.
+   */
+  select coalesce(
+    p_member = (select auth.uid())
       or public.is_admin()
       or exists (
         select 1
         from public.profiles r
         where r.id = p_member
           and r.team_lead_id = (select auth.uid())
-      );
+      ),
+    false
+  );
 $$;
 
 comment on function public.supervises is

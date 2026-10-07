@@ -818,7 +818,7 @@ interface Member {
 const createdMembers: Member[] = [];
 
 async function makeMember(
-  role: "rep" | "admin",
+  role: "rep" | "team_lead" | "admin",
   label: string,
   campusId?: string,
 ): Promise<Member> {
@@ -839,7 +839,10 @@ async function makeMember(
       name: `${TAG} ${label}`,
       role,
       // Null for an admin, and FO021 insists on that too.
-      campus_id: role === "rep" ? (campusId ?? null) : null,
+      // `!== "admin"` since 0041: a team lead is campus-scoped exactly as a rep
+      // is, and FO021 gained the third branch to say so. Only an admin may
+      // carry none.
+      campus_id: role !== "admin" ? (campusId ?? null) : null,
     });
   if (profileError) throw new Error(`profile: ${profileError.message}`);
 
@@ -6832,6 +6835,374 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         date: today,
       });
       expect(error, "the meeting gate stopped refusing").not.toBeNull();
+    });
+  });
+  /* ---------------------------------------------------------------- */
+  /* H1 — the third role, the link, and the claim that nothing moved    */
+  /* ---------------------------------------------------------------- */
+
+  describe("Team leads - FO021, FO033 and supervises()", () => {
+    let leadA: Member;
+    let leadB: Member;
+    let repUnder: Member;
+    let repLoose: Member;
+    let campusB: string;
+
+    beforeAll(async () => {
+      // TWO LEADS ON ONE CAMPUS is the sharpest shape in the whole feature:
+      // campus cannot tell two teams apart, which is why the link is a column.
+      leadA = await makeMember("team_lead", "lead-a", campusA);
+      leadB = await makeMember("team_lead", "lead-b", campusA);
+      repUnder = await makeMember("rep", "tl-rep-under", campusA);
+      repLoose = await makeMember("rep", "tl-rep-loose", campusA);
+
+      /*
+       * NAMED FOR WHAT IT IS FOR, not by a letter — `campuses.name` is UNIQUE,
+       * every suite in this file runs in one process under one TAG, and both
+       * "campus B" and "correction campus" are already taken. The suite at
+       * §correct_member_campus writes the same warning for the same reason, and
+       * this one collided with it on the first run.
+       */
+      const { data, error } = await admin
+        .from("campuses")
+        .insert({ name: `${TAG} other-team campus`, city: "Pune", active: true })
+        .select("id")
+        .single();
+      if (error) throw new Error(`other-team campus: ${error.message}`);
+      campusB = data.id as string;
+    });
+
+    afterAll(async () => {
+      // The campus is this suite's own; every member it made is in
+      // createdMembers and the file's afterAll removes them first, which is
+      // what lets this delete succeed.
+      if (campusB) await admin.from("campuses").delete().eq("id", campusB);
+    });
+
+    /** Puts a link in place as the service role, which FO033 (e) exempts. */
+    const link = async (rep: string, lead: string | null) =>
+      admin.from("profiles").update({ team_lead_id: lead }).eq("id", rep);
+
+    /* ---- FO021: a team lead belongs to one campus ------------------- */
+
+    /**
+     * ⚠ THE HOLE 0041 OPENS AND THEN CLOSES. enforce_profile_campus() had two
+     * branches — rep demands a campus, admin forbids one — so a team_lead fell
+     * through BOTH and could be created posted nowhere.
+     */
+    it("refuses a team lead with no campus", async () => {
+      const { data: user } = await admin.auth.admin.createUser({
+        email: `${TAG}.no-campus@example.com`.replace(/:/g, "."),
+        password: `${TAG}-passphrase`,
+        email_confirm: true,
+      });
+      const { error } = await admin.from("profiles").insert({
+        id: user!.user!.id,
+        name: `${TAG} no-campus lead`,
+        role: "team_lead",
+        campus_id: null,
+      });
+      expect(error?.code).toBe("FO021");
+      await admin.auth.admin.deleteUser(user!.user!.id);
+    });
+
+    it("still demands one for a rep and still forbids one for an admin", async () => {
+      // Both unchanged by 0041, asserted so the rewritten function did not lose
+      // a branch while gaining one.
+      const repless = await admin
+        .from("profiles")
+        .update({ campus_id: null })
+        .eq("id", repUnder.id);
+      expect(repless.error?.code).toBe("FO021");
+
+      const bossed = await admin
+        .from("profiles")
+        .update({ campus_id: campusA })
+        .eq("id", boss.id);
+      expect(bossed.error?.code).toBe("FO021");
+    });
+
+    /* ---- FO033: the integrity of the link --------------------------- */
+
+    it("lets an admin assign a rep to a team lead", async () => {
+      const { error } = await link(repUnder.id, leadA.id);
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("profiles").select("team_lead_id").eq("id", repUnder.id).single();
+      expect(data?.team_lead_id).toBe(leadA.id);
+    });
+
+    it("refuses a team lead or an admin having a team lead of their own", async () => {
+      // (a) Only a rep reports to anybody — no chains, and the admin is the top.
+      const lead = await link(leadB.id, leadA.id);
+      expect(lead.error?.code).toBe("FO033");
+
+      const top = await link(boss.id, leadA.id);
+      expect(top.error?.code).toBe("FO033");
+    });
+
+    it("refuses a self-reference", async () => {
+      const { error } = await admin
+        .from("profiles")
+        .update({ team_lead_id: repLoose.id })
+        .eq("id", repLoose.id);
+      expect(error?.code).toBe("FO033");
+    });
+
+    /**
+     * (c) An ADMIN parent would quietly recreate the created_by confusion — a
+     * column that looks like supervision and is not — and a REP parent would be
+     * the reports-to chain FO028 refuses.
+     */
+    it("refuses a parent who is not a team lead", async () => {
+      const underAdmin = await link(repLoose.id, boss.id);
+      expect(underAdmin.error?.code).toBe("FO033");
+
+      const underRep = await link(repLoose.id, repUnder.id);
+      expect(underRep.error?.code).toBe("FO033");
+    });
+
+    /**
+     * (d) A rep under a lead on another campus is a rep whose institutes their
+     * lead cannot see: institutes are campus-scoped, so the team would be
+     * visible in the roster and invisible in the work.
+     */
+    it("refuses a rep and a lead on different campuses", async () => {
+      const elsewhere = await makeMember("rep", "tl-rep-elsewhere", campusB);
+      const { error } = await link(elsewhere.id, leadA.id);
+      expect(error?.code).toBe("FO033");
+    });
+
+    /* ---- FO033 (e): who may write it -------------------------------- */
+
+    /**
+     * ⚠ THE REASON THIS TRIGGER EXISTS, AND THE SHARPEST TEST IN THE SUITE.
+     *
+     * `profiles_update` is `id = auth.uid() or is_admin()`, so A REP MAY WRITE
+     * THEIR OWN ROW. Without clause (e) a rep joins any team they like with one
+     * PostgREST call, and the team an admin reads is partly written by the
+     * people it describes. FO028 was written for exactly this hole on
+     * created_by and says so.
+     */
+    it("refuses a rep assigning THEMSELVES to a team", async () => {
+      await link(repLoose.id, null);
+
+      const { error } = await repLoose.db
+        .from("profiles")
+        .update({ team_lead_id: leadA.id })
+        .eq("id", repLoose.id);
+      expect(error?.code, "a rep joined a team by hand").toBe("FO033");
+
+      // And the row is untouched, not merely the statement refused.
+      const { data } = await admin
+        .from("profiles").select("team_lead_id").eq("id", repLoose.id).single();
+      expect(data?.team_lead_id).toBeNull();
+    });
+
+    it("refuses a rep LEAVING the team an admin put them in", async () => {
+      await link(repUnder.id, leadA.id);
+
+      const { error } = await repUnder.db
+        .from("profiles")
+        .update({ team_lead_id: null })
+        .eq("id", repUnder.id);
+      expect(error?.code).toBe("FO033");
+
+      const { data } = await admin
+        .from("profiles").select("team_lead_id").eq("id", repUnder.id).single();
+      expect(data?.team_lead_id).toBe(leadA.id);
+    });
+
+    /**
+     * The other half of the same clause: moving (e) ahead of the null
+     * short-circuit must not have made the link unclearable. An admin takes a
+     * rep off a team, and an admin moves them to another one.
+     */
+    it("lets an admin take a rep off a team, and move them to another", async () => {
+      await link(repUnder.id, leadA.id);
+
+      const cleared = await link(repUnder.id, null);
+      expect(cleared.error, cleared.error?.message).toBeNull();
+
+      const moved = await link(repUnder.id, leadB.id);
+      expect(moved.error, moved.error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("profiles").select("team_lead_id").eq("id", repUnder.id).single();
+      expect(data?.team_lead_id).toBe(leadB.id);
+    });
+
+    /**
+     * ⚠ A TEAM LEAD CANNOT STAFF THEIR TEAM DIRECTLY IN H1, AND THAT IS
+     * CORRECT RATHER THAN MISSING.
+     *
+     * `profiles_update` is still `id = auth.uid() or is_admin()` — H1 changes
+     * no policy — so a team lead updating somebody else's row matches NO ROWS.
+     * The refusal is the POLICY'S and is silent: PostgREST reports success and
+     * nothing changes, which is why this asserts the ROW rather than an error
+     * code. FO033 (e) never even fires.
+     *
+     * The capability arrives in H3 as a SECURITY DEFINER RPC, and (e) is the
+     * guard that will stop that RPC staffing anybody else's team. Written now,
+     * dormant until then.
+     */
+    it("leaves a team lead unable to write another profile at all (H1)", async () => {
+      await link(repLoose.id, null);
+
+      const own = await leadA.db
+        .from("profiles")
+        .update({ team_lead_id: leadA.id })
+        .eq("id", repLoose.id);
+      expect(own.error, "the policy refuses by matching no rows, not by erroring")
+        .toBeNull();
+
+      const other = await leadA.db
+        .from("profiles")
+        .update({ team_lead_id: leadB.id })
+        .eq("id", repLoose.id);
+      expect(other.error).toBeNull();
+
+      // Neither attempt moved anything, which is the whole assertion.
+      const { data } = await admin
+        .from("profiles").select("team_lead_id").eq("id", repLoose.id).single();
+      expect(data?.team_lead_id, "a team lead wrote a row they may not").toBeNull();
+    });
+
+    /* ---- the role itself -------------------------------------------- */
+
+    it("refuses a rep promoting themselves to team lead", async () => {
+      const { error } = await repLoose.db
+        .from("profiles")
+        .update({ role: "team_lead" })
+        .eq("id", repLoose.id);
+      // guard_profile_role (0001, extended by 0041) raises a privilege error
+      // rather than an FO code.
+      expect(error, "a rep promoted themselves").not.toBeNull();
+
+      const { data } = await admin
+        .from("profiles").select("role").eq("id", repLoose.id).single();
+      expect(data?.role).toBe("rep");
+    });
+
+    it("still accepts the three roles and nothing else", async () => {
+      const { data: user } = await admin.auth.admin.createUser({
+        email: `${TAG}.bad-role@example.com`.replace(/:/g, "."),
+        password: `${TAG}-passphrase`,
+        email_confirm: true,
+      });
+      const { error } = await admin.from("profiles").insert({
+        id: user!.user!.id,
+        name: `${TAG} bad role`,
+        role: "supervisor",
+        campus_id: campusA,
+      });
+      expect(error?.code, "an unknown role was accepted").toBe(CHECK_VIOLATION);
+      await admin.auth.admin.deleteUser(user!.user!.id);
+    });
+
+    /* ---- supervises() ------------------------------------------------ */
+
+    const supervises = async (who: Member, member: string) => {
+      const { data, error } = await who.db.rpc("supervises", { p_member: member });
+      expect(error, error?.message).toBeNull();
+      return data as boolean;
+    };
+
+    it("answers the three branches it is written from", async () => {
+      await link(repUnder.id, leadA.id);
+      await link(repLoose.id, null);
+
+      // Themselves, always.
+      expect(await supervises(repUnder, repUnder.id), "own rows").toBe(true);
+      // An admin, everyone.
+      expect(await supervises(boss, repUnder.id), "admin sees all").toBe(true);
+      expect(await supervises(boss, repLoose.id)).toBe(true);
+      // A team lead, their own reps and nobody else's.
+      expect(await supervises(leadA, repUnder.id), "own rep").toBe(true);
+      expect(await supervises(leadA, repLoose.id), "unassigned rep").toBe(false);
+      expect(await supervises(leadB, repUnder.id), "another team's rep").toBe(false);
+      // A rep supervises nobody but themselves.
+      expect(await supervises(repUnder, repLoose.id)).toBe(false);
+      expect(await supervises(repUnder, leadA.id)).toBe(false);
+    });
+
+    /**
+     * ⚠ THE PROPERTY THAT MAKES 0042 SAFE TO APPLY TO A LIVE DATABASE.
+     *
+     * With no team_lead_id set, supervises(x) must be EXACTLY
+     * `x = auth.uid() or is_admin()` — the predicate thirty policies already
+     * carry. If that ever stopped holding, 0042 would stop being a no-op on the
+     * day it lands, which is the whole basis of the phasing.
+     */
+    it("reduces to the old predicate for an unassigned rep", async () => {
+      await link(repUnder.id, null);
+      await link(repLoose.id, null);
+
+      for (const [who, label] of [
+        [leadA, "lead A"],
+        [leadB, "lead B"],
+      ] as const) {
+        expect(await supervises(who, repUnder.id), label).toBe(false);
+        expect(await supervises(who, repLoose.id), label).toBe(false);
+      }
+      // Self and admin, which is what the old predicate said.
+      expect(await supervises(repUnder, repUnder.id)).toBe(true);
+      expect(await supervises(boss, repUnder.id)).toBe(true);
+    });
+
+    it("is false for a null member, for everyone but an admin", async () => {
+      // An institute with no owner: `null = auth.uid()` is null, the exists()
+      // is false. Identical to today's `registered_by = auth.uid()`.
+      // FALSE, not null. A boolean function that can return null is a trap for
+      // `not supervises(x)` — null rather than true — and 0042 writes this
+      // predicate thirty times. The coalesce in 0041 is what makes this hold.
+      const { data: asRep } = await repUnder.db.rpc("supervises", { p_member: null });
+      expect(asRep).toBe(false);
+      const { data: asLead } = await leadA.db.rpc("supervises", { p_member: null });
+      expect(asLead).toBe(false);
+      const { data: asAdmin } = await boss.db.rpc("supervises", { p_member: null });
+      expect(asAdmin).toBe(true);
+    });
+
+    it("knows which role the caller is", async () => {
+      for (const [who, isLead, isRepRole] of [
+        [leadA, true, false],
+        [repUnder, false, true],
+        [boss, false, false],
+      ] as const) {
+        const lead = await who.db.rpc("is_team_lead");
+        const rep = await who.db.rpc("is_rep");
+        expect(lead.data, "is_team_lead").toBe(isLead);
+        expect(rep.data, "is_rep").toBe(isRepRole);
+      }
+    });
+
+    /* ---- the no-op claim --------------------------------------------- */
+
+    /**
+     * ⚠ 0041 PROMISED TO CHANGE NO POLICY, and this is that promise measured
+     * from outside rather than read off the file. A team lead is a NEW ROLE
+     * with no RLS of its own yet: until 0042 they see exactly what any
+     * non-admin sees, which is their own rows and nothing else.
+     *
+     * If this ever starts passing MORE than it does today without 0042 having
+     * been applied, something widened a policy quietly.
+     */
+    it("gives a team lead no visibility a rep would not have", async () => {
+      await link(repUnder.id, leadA.id);
+
+      // Their own rep's visits are still invisible: visits_select is
+      // `member = auth.uid() or is_admin()` and has not been touched.
+      const { data: visits } = await leadA.db
+        .from("visits").select("id").eq("member", repUnder.id);
+      expect(visits ?? [], "0042 has not been applied, so this must be empty")
+        .toHaveLength(0);
+
+      // And their own rep's profile likewise — profiles_select is unchanged.
+      const { data: profiles } = await leadA.db
+        .from("profiles").select("id").eq("id", repUnder.id);
+      expect(profiles ?? []).toHaveLength(0);
     });
   });
 });

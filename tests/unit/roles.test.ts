@@ -258,6 +258,41 @@ describe("H1 is behaviour-neutral, and the migration says so at source level", (
   });
 
   /**
+   * ⚠ THE AUTHORISATION CHECK MUST PRECEDE THE NULL SHORT-CIRCUIT, and this
+   * pins an ordering the integration suite caught the first time round.
+   *
+   * With the check after it, `set team_lead_id = null` returned early and never
+   * reached clause (e) — so a rep could not JOIN a team but could LEAVE one,
+   * which after 0042 is a rep quietly removing themselves from supervision. The
+   * two statements are ten lines apart in one function and nothing about either
+   * looks wrong on its own.
+   */
+  it("checks who may write the link BEFORE the null short-circuit", () => {
+    const body = code();
+    const fn = body.slice(body.indexOf("create or replace function public.enforce_team_lead_link"));
+    const authorise = fn.indexOf("is_team_lead()");
+    const shortCircuit = fn.indexOf("if new.team_lead_id is null then");
+    expect(authorise, "clause (e) is missing").toBeGreaterThan(-1);
+    expect(shortCircuit, "the short-circuit is missing").toBeGreaterThan(-1);
+    expect(
+      authorise,
+      "clause (e) sits after the null short-circuit, so clearing a link is unguarded",
+    ).toBeLessThan(shortCircuit);
+  });
+
+  /**
+   * supervises() must return a real boolean. Inside a policy null and false
+   * behave alike, so this would never surface there — but `not supervises(x)`
+   * on a null member is null rather than true, and 0042 writes the predicate
+   * thirty times.
+   */
+  it("never lets supervises() return null", () => {
+    const body = code();
+    const fn = body.slice(body.indexOf("create or replace function public.supervises"));
+    expect(fn.slice(0, 700)).toContain("coalesce");
+  });
+
+  /**
    * The trigger that runs guard_profile_role() is 0001's `profiles_guard_role`.
    * A different name here would leave 0001's attached and add a SECOND trigger
    * firing the same function on every row — which is what this nearly shipped
