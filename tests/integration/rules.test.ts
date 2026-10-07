@@ -972,6 +972,11 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
      * it ON DELETE CASCADE, so it goes with its parent.
      */
     for (const { id } of institutes ?? []) {
+      // institute_slabs is ON DELETE CASCADE (0044), so this is not strictly
+      // required — listed anyway, because the comment above says every table
+      // referencing an institute is named here, and a reader checking that
+      // claim should find it true.
+      await admin.from("institute_slabs").delete().eq("institute_id", id);
       await admin.from("follow_up_tasks").delete().eq("institute_id", id);
       await admin.from("visits").delete().eq("institute_id", id);
       await admin.from("daily_plans").delete().eq("institute_id", id);
@@ -7827,6 +7832,412 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const q = new Set((qSees ?? []).map((r) => r.id as string));
       expect(q.has(repQ.id)).toBe(true);
       expect(q.has(repP.id), "⚠ LEAK: lead Q sees team P's rep").toBe(false);
+    });
+  });
+  /* ---------------------------------------------------------------- */
+  /* Slabs — the rules, the workflow, and the boundary                 */
+  /* ---------------------------------------------------------------- */
+
+  describe("Admission slabs", () => {
+    let slabLeadA: Member;
+    let slabLeadB: Member;
+    let slabRepA: Member;
+    let slabRepB: Member;
+    let schoolA: string;
+    let schoolB: string;
+
+    beforeAll(async () => {
+      // Two teams on one campus again: the only shape that can tell a team
+      // boundary from a campus one.
+      slabLeadA = await makeMember("team_lead", "slab-lead-a", campusA);
+      slabLeadB = await makeMember("team_lead", "slab-lead-b", campusA);
+      slabRepA = await makeMember("rep", "slab-rep-a", campusA);
+      slabRepB = await makeMember("rep", "slab-rep-b", campusA);
+      schoolA = await makeInstitute(slabRepA.id, campusA, "slab-a");
+      schoolB = await makeInstitute(slabRepB.id, campusA, "slab-b");
+
+      for (const [rep, lead] of [
+        [slabRepA, slabLeadA],
+        [slabRepB, slabLeadB],
+      ] as const) {
+        const { error } = await admin
+          .from("profiles").update({ team_lead_id: lead.id }).eq("id", rep.id);
+        if (error) throw new Error(`link: ${error.message}`);
+      }
+    });
+
+    const save = async (
+      who: Member,
+      institute: string,
+      slabs: { start: number; end: number | null }[],
+      scope: "total" | "program" = "total",
+      college: string | null = null,
+      program: string | null = null,
+    ) =>
+      who.db.rpc("save_slabs", {
+        p_institute: institute,
+        p_scope: scope,
+        p_college: college,
+        p_program: program,
+        p_slabs: slabs.map((s) => ({ start: s.start, end: s.end })),
+      });
+
+    const decide = async (
+      who: Member,
+      institute: string,
+      status: "approved" | "rejected",
+      note: string | null = null,
+      scope: "total" | "program" = "total",
+      college: string | null = null,
+      program: string | null = null,
+    ) =>
+      who.db.rpc("decide_slabs", {
+        p_institute: institute,
+        p_scope: scope,
+        p_college: college,
+        p_program: program,
+        p_status: status,
+        p_note: note,
+      });
+
+    /*
+     * ⚠ `id` AND THE DECISION COLUMNS ARE IN THE SELECT ON PURPOSE, so that
+     * "the set is unchanged" can be asserted as a SNAPSHOT rather than as a
+     * row count.
+     *
+     * The freeze is tested against save_slabs(), which REPLACES — delete then
+     * insert. A count plus "every row is approved" would be satisfied by a set
+     * that had been destroyed and rebuilt identically, which is precisely the
+     * silent un-approval the freeze exists to stop; the ids are what make that
+     * indistinguishable case distinguishable. decided_by/decided_at carry the
+     * approver's record, which is the other thing a delete would take with it.
+     */
+    const rowsOf = async (institute: string) => {
+      const { data } = await admin
+        .from("institute_slabs")
+        .select(
+          "id, start_count, end_count, status, note, scope, decided_by, decided_at",
+        )
+        .eq("institute_id", institute)
+        .order("scope")
+        .order("start_count");
+      return data ?? [];
+    };
+
+    const clear = async (institute: string) =>
+      admin.from("institute_slabs").delete().eq("institute_id", institute);
+
+    /* ---- (1) dumb-proof validation ---------------------------------- */
+
+    it("accepts a contiguous set with one open end, in both scopes", async () => {
+      await clear(schoolA);
+
+      const total = await save(slabRepA, schoolA, [
+        { start: 0, end: 99 },
+        { start: 100, end: 499 },
+        { start: 500, end: null },
+      ]);
+      expect(total.error, total.error?.message).toBeNull();
+
+      const program = await save(
+        slabRepA, schoolA,
+        [{ start: 0, end: 49 }, { start: 50, end: null }],
+        "program", "Engineering", "B.Tech CSE",
+      );
+      expect(program.error, program.error?.message).toBeNull();
+
+      const rows = await rowsOf(schoolA);
+      expect(rows).toHaveLength(5);
+      expect(rows.every((r) => r.status === "pending")).toBe(true);
+    });
+
+    /**
+     * ⚠ EVERY FORBIDDEN SHAPE, each refused on its own. These are the client's
+     * "dumb-proof" list, and the database is the copy that holds against a
+     * hand-rolled request — the app's is in validation/slabs.ts and
+     * tests/unit/slabs.test.ts checks the two say the same thing.
+     */
+    it("refuses every forbidden set", async () => {
+      await clear(schoolA);
+
+      const cases: [string, { start: number; end: number | null }[]][] = [
+        ["a gap", [{ start: 0, end: 99 }, { start: 200, end: null }]],
+        ["an overlap", [{ start: 0, end: 99 }, { start: 50, end: null }]],
+        ["a duplicate", [{ start: 0, end: 99 }, { start: 0, end: null }]],
+        ["wrong order", [
+          { start: 0, end: 9 }, { start: 20, end: 29 }, { start: 10, end: null },
+        ]],
+        ["end before start", [{ start: 100, end: 50 }, { start: 101, end: null }]],
+        ["two open-ended", [{ start: 0, end: null }, { start: 100, end: null }]],
+        ["a closed last slab", [{ start: 0, end: 99 }]],
+        ["a negative start", [{ start: -5, end: null }]],
+      ];
+
+      for (const [label, slabs] of cases) {
+        const { error } = await save(slabRepA, schoolA, slabs);
+        expect(error?.code, `${label} was accepted`).toBe("FO036");
+      }
+
+      // And nothing was written by any of them.
+      expect(await rowsOf(schoolA)).toHaveLength(0);
+    });
+
+    it("refuses a scope whose shape is wrong", async () => {
+      const totalWithNames = await save(
+        slabRepA, schoolA, [{ start: 0, end: null }], "total", "Engineering", "CSE",
+      );
+      expect(totalWithNames.error?.code).toBe("FO036");
+
+      const programWithout = await save(
+        slabRepA, schoolA, [{ start: 0, end: null }], "program", "", "",
+      );
+      expect(programWithout.error?.code).toBe("FO036");
+    });
+
+    /** Replaced, not merged — which is what makes a half-edited set impossible. */
+    it("replaces a set rather than adding to it", async () => {
+      await clear(schoolA);
+      await save(slabRepA, schoolA, [{ start: 0, end: 99 }, { start: 100, end: null }]);
+      await save(slabRepA, schoolA, [{ start: 0, end: null }]);
+
+      const rows = await rowsOf(schoolA);
+      expect(rows, "the old set survived the replacement").toHaveLength(1);
+      expect(rows[0].start_count).toBe(0);
+      expect(rows[0].end_count).toBeNull();
+    });
+
+    /* ---- (2) the workflow -------------------------------------------- */
+
+    it("submits as pending, and pending stays editable", async () => {
+      await clear(schoolA);
+      await save(slabRepA, schoolA, [{ start: 0, end: null }]);
+      expect((await rowsOf(schoolA))[0].status).toBe("pending");
+
+      const again = await save(slabRepA, schoolA, [
+        { start: 0, end: 9 }, { start: 10, end: null },
+      ]);
+      expect(again.error, "pending was not editable").toBeNull();
+      expect(await rowsOf(schoolA)).toHaveLength(2);
+    });
+
+    it("lets an admin approve, and freezes what they approved", async () => {
+      const approved = await decide(boss, schoolA, "approved");
+      expect(approved.error, approved.error?.message).toBeNull();
+      expect((await rowsOf(schoolA)).every((r) => r.status === "approved")).toBe(true);
+
+      /*
+       * ⚠ FROZEN AGAINST BOTH VERBS, and the first version of this test only
+       * checked one.
+       *
+       * save_slabs() REPLACES — delete then insert — so the freeze cannot live
+       * in a BEFORE INSERT OR UPDATE trigger alone: the approved rows would go
+       * in a statement the trigger never sees, and the rep would silently
+       * un-approve their own work. That is exactly what happened on the first
+       * run. The RPC refuses an approved set before deleting anything, and the
+       * trigger now covers DELETE for the direct path.
+       */
+      // What is on disk BEFORE either attempt, to compare against after each.
+      const frozen = await rowsOf(schoolA);
+      expect(frozen, "the approved set to be frozen is not there").toHaveLength(2);
+      expect(frozen.every((r) => r.status === "approved")).toBe(true);
+      expect(
+        frozen.every((r) => r.decided_by !== null && r.decided_at !== null),
+        "the approver's record was not stamped",
+      ).toBe(true);
+
+      // (a) EDITING it, through the RPC that replaces a set.
+      const edit = await save(slabRepA, schoolA, [{ start: 0, end: null }]);
+      expect(edit.error?.code, "a rep replaced an approved set").toBe("FO035");
+      expect(edit.error?.message).toMatch(/revoke/i);
+      expect(
+        await rowsOf(schoolA),
+        "the set was altered by the edit the database refused",
+      ).toEqual(frozen);
+
+      /*
+       * (b) DELETING it outright through the policy, which would drop the
+       * empanelled badge and the approver's record with it.
+       *
+       * ⚠ THE ERROR IS ASSERTED, not discarded. An earlier version of this
+       * test fired the delete and checked only that the rows survived — which
+       * the row count does catch if the DELETE guard is removed outright, but
+       * NOT if the refusal quietly degrades into a no-op that matches no rows.
+       * "Refused" has to mean a refusal came back and said why.
+       */
+      const removed = await slabRepA.db
+        .from("institute_slabs").delete().eq("institute_id", schoolA);
+      expect(removed.error?.code, "a rep deleted an approved set").toBe("FO035");
+      expect(removed.error?.message).toMatch(/revoke/i);
+
+      /*
+       * Unchanged on disk, row for row — ids included, so a set destroyed and
+       * rebuilt identically fails here rather than passing as "still two
+       * approved rows".
+       */
+      expect(
+        await rowsOf(schoolA),
+        "the set was altered by the delete the database refused",
+      ).toEqual(frozen);
+    });
+
+    /**
+     * ⚠ REVOKE IS A REJECT, AND IT MOVES THE WHOLE SET. Revoking one slab of a
+     * contiguous cover would leave a gap the rules forbid, so there is no
+     * single-row form — and no fourth status: a revoked set is one the rep must
+     * edit and resubmit, which is what rejected already means.
+     */
+    it("revokes an approved set to rejected, whole, and lets the rep resubmit", async () => {
+      const revoked = await decide(boss, schoolA, "rejected", "Ranges look wrong");
+      expect(revoked.error, revoked.error?.message).toBeNull();
+
+      const rows = await rowsOf(schoolA);
+      expect(rows.every((r) => r.status === "rejected"), "the set did not move together").toBe(true);
+      expect(rows.every((r) => r.note === "Ranges look wrong")).toBe(true);
+
+      const resubmitted = await save(slabRepA, schoolA, [
+        { start: 0, end: 49 }, { start: 50, end: null },
+      ]);
+      expect(resubmitted.error, "a rejected set was not editable").toBeNull();
+      expect((await rowsOf(schoolA)).every((r) => r.status === "pending")).toBe(true);
+    });
+
+    it("refuses a decision that would change nothing", async () => {
+      await decide(boss, schoolA, "rejected");
+      const again = await decide(boss, schoolA, "rejected");
+      expect(again.error?.code, "rejecting a rejected set was allowed").toBe("FO037");
+    });
+
+    /** Revoke is only ever reachable FROM approved, without a rule of its own. */
+    it("has no revoke to offer on a set that is not approved", async () => {
+      await clear(schoolA);
+      await save(slabRepA, schoolA, [{ start: 0, end: null }]);
+      // Pending -> rejected is "send back", which is legal. Rejected -> rejected
+      // (the revoke of a revoked set) is the one refused above.
+      const sendBack = await decide(boss, schoolA, "rejected", "not yet");
+      expect(sendBack.error).toBeNull();
+      const revokeAgain = await decide(boss, schoolA, "rejected");
+      expect(revokeAgain.error?.code).toBe("FO037");
+    });
+
+    /* ---- FO035: a rep never decides ---------------------------------- */
+
+    it("forces a rep's own insert to pending, whatever they send", async () => {
+      await clear(schoolA);
+      const { error } = await slabRepA.db.from("institute_slabs").insert({
+        institute_id: schoolA, scope: "total",
+        start_count: 0, end_count: null, status: "approved",
+      });
+      expect(error, error?.message).toBeNull();
+
+      const rows = await rowsOf(schoolA);
+      expect(rows[0].status, "a rep approved their own slabs").toBe("pending");
+    });
+
+    it("refuses a rep moving a status by hand", async () => {
+      const { data: row } = await admin
+        .from("institute_slabs").select("id").eq("institute_id", schoolA).limit(1).single();
+      const { error } = await slabRepA.db
+        .from("institute_slabs").update({ status: "approved" }).eq("id", row!.id);
+      expect(error?.code).toBe("FO035");
+    });
+
+    /* ---- (3) empanelled, computed ------------------------------------ */
+
+    it("computes empanelled from the approved sets, live", async () => {
+      await clear(schoolA);
+      const empanelled = async () => {
+        const { data } = await admin.rpc("institute_is_empanelled", { p_institute: schoolA });
+        return data as boolean;
+      };
+
+      await save(slabRepA, schoolA, [{ start: 0, end: null }]);
+      expect(await empanelled(), "pending slabs are not empanelment").toBe(false);
+
+      await decide(boss, schoolA, "approved");
+      expect(await empanelled()).toBe(true);
+
+      // A SECOND approved set, so the last-one-standing case is real.
+      await save(slabRepA, schoolA, [{ start: 0, end: null }], "program", "Eng", "CSE");
+      await decide(boss, schoolA, "approved", null, "program", "Eng", "CSE");
+      expect(await empanelled()).toBe(true);
+
+      await decide(boss, schoolA, "rejected", "no", "program", "Eng", "CSE");
+      expect(await empanelled(), "one approved set remains").toBe(true);
+
+      // ⚠ REVOKING THE LAST APPROVED SET DROPS THE BADGE, with no second write.
+      await decide(boss, schoolA, "rejected", "no");
+      expect(await empanelled(), "the badge survived the last revoke").toBe(false);
+    });
+
+    /* ---- (4) the boundary -------------------------------------------- */
+
+    it("keeps one rep out of another rep's slabs", async () => {
+      await clear(schoolA);
+      await clear(schoolB);
+      await save(slabRepA, schoolA, [{ start: 0, end: null }]);
+      await save(slabRepB, schoolB, [{ start: 0, end: null }]);
+
+      const { data: seen } = await slabRepB.db
+        .from("institute_slabs").select("institute_id");
+      const institutes = new Set((seen ?? []).map((r) => r.institute_id as string));
+      expect(institutes.has(schoolB)).toBe(true);
+      expect(institutes.has(schoolA), "⚠ LEAK: a rep read another rep's slabs").toBe(false);
+
+      // And cannot write them: the policy matches no rows, silently.
+      await slabRepB.db.from("institute_slabs").delete().eq("institute_id", schoolA);
+      expect(await rowsOf(schoolA), "⚠ LEAK: a rep deleted another rep's slabs").toHaveLength(1);
+
+      const written = await save(slabRepB, schoolA, [{ start: 0, end: null }]);
+      expect(written.error, "⚠ LEAK: a rep wrote another rep's slabs").not.toBeNull();
+    });
+
+    it("scopes slabs to a team lead's own reps, both ways", async () => {
+      const { data: aSees } = await slabLeadA.db
+        .from("institute_slabs").select("institute_id");
+      const a = new Set((aSees ?? []).map((r) => r.institute_id as string));
+      expect(a.has(schoolA), "lead A cannot see their own rep's slabs").toBe(true);
+      expect(a.has(schoolB), "⚠ LEAK: lead A sees team B's slabs").toBe(false);
+
+      const { data: bSees } = await slabLeadB.db
+        .from("institute_slabs").select("institute_id");
+      const b = new Set((bSees ?? []).map((r) => r.institute_id as string));
+      expect(b.has(schoolB)).toBe(true);
+      expect(b.has(schoolA), "⚠ LEAK: lead B sees team A's slabs").toBe(false);
+
+      // A cross-team write, through the policy.
+      await slabLeadA.db.from("institute_slabs").delete().eq("institute_id", schoolB);
+      expect(await rowsOf(schoolB), "⚠ LEAK: lead A deleted team B's slabs").toHaveLength(1);
+    });
+
+    /**
+     * ⚠ APPROVAL IS ADMIN-ONLY BY DECISION. The brief asked for a team lead to
+     * approve their own team's and the client chose otherwise, so a lead is
+     * refused even for their OWN rep — which is the case worth asserting,
+     * because it is the one that would quietly start working if the predicate
+     * were widened by habit.
+     */
+    it("refuses a team lead approving, even their own rep's", async () => {
+      const own = await decide(slabLeadA, schoolA, "approved");
+      expect(own.error?.code, "a team lead approved slabs").toBe("FO037");
+
+      const other = await decide(slabLeadA, schoolB, "approved");
+      expect(other.error?.code).toBe("FO037");
+
+      const byRep = await decide(slabRepA, schoolA, "approved");
+      expect(byRep.error?.code, "a rep approved their own slabs").toBe("FO037");
+
+      expect((await rowsOf(schoolA))[0].status).toBe("pending");
+    });
+
+    it("leaves an admin seeing and deciding everything", async () => {
+      const { data: seen } = await boss.db.from("institute_slabs").select("institute_id");
+      const institutes = new Set((seen ?? []).map((r) => r.institute_id as string));
+      expect(institutes.has(schoolA) && institutes.has(schoolB)).toBe(true);
+
+      const a = await decide(boss, schoolA, "approved");
+      const b = await decide(boss, schoolB, "approved");
+      expect(a.error, a.error?.message).toBeNull();
+      expect(b.error, b.error?.message).toBeNull();
     });
   });
 });

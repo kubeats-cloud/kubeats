@@ -119,12 +119,13 @@ const PROBES = [
   { id: "0040", table: "alert_events", column: "id", needs: true },
   { id: "0040", table: "targets", column: "calls", needs: true },
   { id: "0041", table: "profiles", column: "team_lead_id", needs: true },
+  { id: "0044", table: "institute_slabs", column: "start_count", needs: true },
 ];
 
 /*
  * WHAT THIS CHECK CANNOT SEE, stated rather than quietly omitted.
  *
- * 0023, 0027 to 0030 and 0039 add no column at all - they are triggers,
+ * 0023, 0027 to 0030, 0039, 0042 and 0043 add no column at all - they are triggers,
  * policies, foreign keys and function bodies - so there is nothing here to
  * probe them with. 0039 in particular only widens close_visit()'s signature;
  * its own assertion block is what proves it landed, and `follow_up_tasks`

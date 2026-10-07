@@ -26,6 +26,8 @@ import {
   listCounsellors,
 } from "@/lib/institutes";
 import { CounsellorsPanel } from "@/components/institutes/counsellors-panel";
+import { SlabsPanel } from "@/components/institutes/slabs-panel";
+import { listSlabSets, isEmpanelled } from "@/lib/slabs";
 import { activityLabel } from "@/lib/activities";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
@@ -113,16 +115,21 @@ export default async function InstituteDetailPage(
   // Independent reads, so the slower one does not hold up the others. The reps
   // list is fetched for an ADMIN only: it is the reassign picker's, and a rep
   // has nothing to reassign.
-  const [history, statusHistory, catalogue, reps, counsellorList] = await Promise.all([
-    getInstituteVisits(id),
-    getInstituteStatusHistory(id),
-    listStatusCatalogue(),
-    admin ? listRepsForCampus(institute.campus_id) : Promise.resolve([]),
-    // Scoped by RLS through the parent institute (0037), so this needs no
-    // ownership test of its own — a rep who cannot see the institute has
-    // already been sent to notFound() above.
-    listCounsellors(id),
-  ]);
+  const [history, statusHistory, catalogue, reps, counsellorList, slabList] =
+    await Promise.all([
+      getInstituteVisits(id),
+      getInstituteStatusHistory(id),
+      listStatusCatalogue(),
+      admin ? listRepsForCampus(institute.campus_id) : Promise.resolve([]),
+      // Scoped by RLS through the parent institute (0037), so this needs no
+      // ownership test of its own — a rep who cannot see the institute has
+      // already been sent to notFound() above.
+      listCounsellors(id),
+      // Slabs, and with them whether this institute is EMPANELLED — computed
+      // from the sets rather than stored, so revoking the last approved one
+      // drops the badge with no second write. See lib/slabs.ts.
+      listSlabSets(id),
+    ]);
   const total = class12Total(institute.class12);
 
   /*
@@ -227,6 +234,19 @@ export default async function InstituteDetailPage(
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
         <Badge variant="secondary">{TYPE_LABELS[institute.type]}</Badge>
+        {/*
+          EMPANELLED, COMPUTED. At least one APPROVED slab set — derived from
+          the sets already fetched for the panel below, so it cannot disagree
+          with what is on screen beside it, and revoking the last approved set
+          drops this badge with no second write and nothing to go stale.
+
+          Absent rather than shown as "Not empanelled": an institute with no
+          approved slabs is the ordinary starting state, and a negative badge on
+          every row of a new registry is noise rather than information.
+        */}
+        {slabList.ok && isEmpanelled(slabList.sets) && (
+          <Badge variant="success">Empanelled</Badge>
+        )}
         {institute.status_updated_at && (
           <span className="text-muted-foreground text-xs">
             updated {formatDate(institute.status_updated_at)}
@@ -414,6 +434,39 @@ export default async function InstituteDetailPage(
             // An admin, or the rep who owns this institute. Not tied to the
             // one-time edit allowance — see the panel's own note.
             canWrite={admin || institute.registered_by === (user?.id ?? null)}
+          />
+        )}
+      </FormSection>
+
+      {/*
+        ADMISSION SLABS, and the Empanelled badge that falls out of them.
+
+        `canEdit` is the same predicate the counsellors panel uses — an admin,
+        or the rep who owns this institute — and NOT the one-time edit
+        allowance: slabs are submitted and resubmitted as often as an approver
+        sends them back, which is the opposite of a single correction. A team
+        lead reaches this page for their own reps and their writes are allowed
+        by `institute_slabs_*`, scoped through the parent exactly as every other
+        child of `institutes` is since 0042.
+
+        `canDecide` is ADMIN ONLY, by the client's decision rather than by
+        omission — the brief asked for a team lead to approve their own team's.
+        slab-actions.ts and 0044 both say where the one predicate would change.
+      */}
+      <FormSection
+        title="Admission slabs"
+        description="Admission-count ranges, per programme or across the whole institute. A rep submits them; an admin approves."
+      >
+        {!slabList.ok ? (
+          <p className="text-muted-foreground text-sm">
+            We could not load the slabs just now.
+          </p>
+        ) : (
+          <SlabsPanel
+            instituteId={institute.id}
+            sets={slabList.sets}
+            canEdit={admin || institute.registered_by === (user?.id ?? null)}
+            canDecide={admin}
           />
         )}
       </FormSection>
