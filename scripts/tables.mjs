@@ -17,6 +17,14 @@
  * list below, which is the check that stops this happening again — but it can
  * only compare against what it is told, so a new table goes in one of the two
  * lists here as part of the migration that creates it.
+ *
+ * IT HAPPENED AGAIN, which is why that check matters: follow_up_tasks (0038)
+ * and institute_counsellors (0037) reached production unlisted and stopped a
+ * pre-deploy backup dead. The guard did its job - it refused rather than
+ * writing a snapshot that looked complete and was missing every follow-up
+ * commitment and every named counsellor. Both are listed below now, along with
+ * alert_events (0040) and institute_slabs (0044), so the batch is covered
+ * before it ships rather than after the next backup refuses.
  */
 export const BACKUP_TABLES = [
   // Before profiles and institutes: both carry a campus_id that references it,
@@ -36,6 +44,40 @@ export const BACKUP_TABLES = [
   // database and irreplaceable: nothing can reconstruct who changed a status
   // and when, so losing it loses the audit trail outright.
   { name: "institute_status_history", conflict: "id" },
+  /*
+   * THE FOUR ADDED BY 0037, 0038, 0040 AND 0044 - placed HERE, after visits
+   * and institute_status_history, because every one of them has a parent
+   * already listed above and a restore replays in this order:
+   *
+   *   institute_counsellors  -> institutes, profiles
+   *   follow_up_tasks        -> institutes, profiles, purposes, VISITS
+   *   alert_events           -> profiles
+   *   institute_slabs        -> institutes, profiles
+   *
+   * follow_up_tasks is the one that pins the position: `from_visit_id`
+   * references visits, so it cannot be listed before them.
+   *
+   * ⚠ TWO OF THESE ARE AHEAD OF PRODUCTION, and that is the normal state
+   * rather than drift. A table is listed here in the same commit as the
+   * migration that creates it, so the gap is the window between merging and
+   * applying - which, as the loop in backup.mjs says at length, is exactly
+   * when somebody wants a backup. assertCoverage() warns about a listed table
+   * the database lacks and carries on; the loop skips it, counts it absent and
+   * writes no file. So adding alert_events (0040) and institute_slabs (0044)
+   * before they exist in a given database costs that database nothing, and the
+   * first backup taken after the migrations land covers them with no further
+   * change here.
+   *
+   * `conflict: "id"` and no regenerateId for all four: each has
+   * `id uuid primary key default gen_random_uuid()`, so an explicit id
+   * restores cleanly. alert_events additionally carries
+   * `unique (member, kind, for_date)`, which the id upsert does not conflict
+   * with - a restore replays the same rows it saved, so the pair agrees.
+   */
+  { name: "institute_counsellors", conflict: "id" },
+  { name: "follow_up_tasks", conflict: "id" },
+  { name: "alert_events", conflict: "id" },
+  { name: "institute_slabs", conflict: "id" },
   { name: "targets", conflict: "id" },
   /*
    * THE WEEKLY COMMITMENTS, EITHER SIDE OF 0013'S RENAME — and they are ONE
