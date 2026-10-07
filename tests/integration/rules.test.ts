@@ -7455,6 +7455,122 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     /**
+     * ⚠ SUPERVISION READS A RECORD AND NEVER ERASES ONE.
+     *
+     * 0042's uniform substitution — `member = auth.uid() or is_admin()` becomes
+     * supervises(member) — is right for every predicate that asks "may this
+     * person SEE it" and was wrong for these two deletes. It handed a team lead
+     * the power to DESTROY a rep's visit ten lines under a visits_update that
+     * deliberately withholds the power to EDIT one, and the weaker verb must
+     * not be the stronger permission.
+     *
+     * ⚠ THE REFUSAL IS SILENT, BY CONSTRUCTION, AND THAT IS WHY THE ROW IS THE
+     * ASSERTION. An RLS policy cannot raise: a DELETE whose `using` clause
+     * matches no row affects nothing and PostgREST reports success. So there is
+     * no error code to check here and checking for one would be the bug — the
+     * only honest proof is that the row is still on disk afterwards, read back
+     * with the service role.
+     *
+     * ⚠ AND THE LEAD IS PROVED TO *SEE* EACH ROW FIRST. Without that, "the
+     * delete removed nothing" is equally well explained by the row having been
+     * invisible to them for some unrelated reason, and the test would pass just
+     * as happily against a broken select policy. Reading it and failing to
+     * delete it is the thing being asserted.
+     *
+     * Own throwaway rows rather than visitX/planX, so this cannot disturb a
+     * later test by deleting a fixture it depends on.
+     */
+    it("refuses a team lead deleting their own rep's visit or plan row", async () => {
+      const { data: purpose } = await admin
+        .from("purposes").select("id,label").eq("is_active", true).limit(1).single();
+
+      /** A CLOSED arrival, so FO013's one-open-visit index is untouched. */
+      const makePlan = async () => {
+        const inAt = new Date(Date.parse(`${today}T00:00:00Z`) + 11 * 3_600_000).toISOString();
+        const { data, error } = await admin.from("daily_plans").insert({
+          member: repX.id, date: today, institute_id: schoolX,
+          purpose: purpose!.label, purpose_id: purpose!.id,
+          checkin_at: inAt, checkin_lat: 23.03, checkin_lng: 72.58, checkin_accuracy: 10,
+          checkout_at: new Date(Date.parse(inAt) + 30 * 60_000).toISOString(),
+          checkout_lat: 23.03, checkout_lng: 72.58, checkout_accuracy: 10,
+        }).select("id").single();
+        if (error) throw new Error(`plan: ${error.message}`);
+        return data.id as string;
+      };
+
+      const makeVisit = async (tag: string) => {
+        const { data, error } = await admin.from("visits").insert({
+          institute_id: schoolX, member: repX.id, activity: "olympiad",
+          lifecycle_status: null, date: today, photo_url: `${repX.id}/proof.jpg`,
+          status_set_to: "Will not come", notes: `${TAG} ${tag}`,
+        }).select("id").single();
+        if (error) throw new Error(`visit: ${error.message}`);
+        return data.id as string;
+      };
+
+      const stillThere = async (table: string, id: string) => {
+        const { count } = await admin.from(table)
+          .select("id", { count: "exact", head: true }).eq("id", id);
+        return count;
+      };
+
+      const visitId = await makeVisit("delete-guard visit");
+      const planId = await makePlan();
+
+      // The lead SEES both — supervision is intact, so a no-op below cannot be
+      // explained away by the rows being hidden from them.
+      const { data: seenVisit } = await leadX.db
+        .from("visits").select("id").eq("id", visitId).maybeSingle();
+      expect(seenVisit?.id, "lead X cannot even read their own rep's visit").toBe(visitId);
+      const { data: seenPlan } = await leadX.db
+        .from("daily_plans").select("id").eq("id", planId).maybeSingle();
+      expect(seenPlan?.id, "lead X cannot even read their own rep's plan row").toBe(planId);
+
+      // And cannot destroy either. No error is expected: the policy matches no
+      // row, so this reports success and must change nothing.
+      await leadX.db.from("visits").delete().eq("id", visitId);
+      expect(
+        await stillThere("visits", visitId),
+        "⚠ LEAK: lead X deleted their own rep's VISIT — supervision must not erase evidence",
+      ).toBe(1);
+
+      await leadX.db.from("daily_plans").delete().eq("id", planId);
+      expect(
+        await stillThere("daily_plans", planId),
+        "⚠ LEAK: lead X deleted their own rep's PLAN ROW — that is the presence record",
+      ).toBe(1);
+
+      // Nor may the OTHER team's lead, which was already true and stays true.
+      await leadY.db.from("visits").delete().eq("id", visitId);
+      expect(await stillThere("visits", visitId), "⚠ LEAK: lead Y deleted team X's visit").toBe(1);
+
+      /*
+       * THE REP KEEPS BOTH, which is the half a tightening could easily take
+       * away by accident. Order matters: the visit goes first, because
+       * visits.daily_plan_id references the plan row.
+       */
+      const mineVisit = await repX.db.from("visits").delete().eq("id", visitId);
+      expect(mineVisit.error, mineVisit.error?.message).toBeNull();
+      expect(await stillThere("visits", visitId), "a rep could not delete their own visit").toBe(0);
+
+      const minePlan = await repX.db.from("daily_plans").delete().eq("id", planId);
+      expect(minePlan.error, minePlan.error?.message).toBeNull();
+      expect(await stillThere("daily_plans", planId), "a rep could not delete their own plan row").toBe(0);
+
+      // AND AN ADMIN DELETES ANY, on a fresh pair.
+      const adminVisit = await makeVisit("delete-guard admin visit");
+      const adminPlan = await makePlan();
+
+      const bossVisit = await boss.db.from("visits").delete().eq("id", adminVisit);
+      expect(bossVisit.error, bossVisit.error?.message).toBeNull();
+      expect(await stillThere("visits", adminVisit), "an admin could not delete a rep's visit").toBe(0);
+
+      const bossPlan = await boss.db.from("daily_plans").delete().eq("id", adminPlan);
+      expect(bossPlan.error, bossPlan.error?.message).toBeNull();
+      expect(await stillThere("daily_plans", adminPlan), "an admin could not delete a rep's plan row").toBe(0);
+    });
+
+    /**
      * Rule 6's reopen, one tier down — and the trigger must agree with the
      * policy. A widened policy with an unwidened trigger is a button that
      * always fails.

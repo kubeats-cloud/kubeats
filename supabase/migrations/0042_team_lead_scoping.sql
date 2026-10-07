@@ -49,6 +49,18 @@
 --   visits_update           stays `member = auth.uid()`. An ADMIN cannot edit a
 --                           rep's visit either; a visit is what one person
 --                           recorded, and supervision is reading it.
+--   visits_delete           stay `member = auth.uid() or is_admin()`, which is
+--   daily_plans_delete      the ONE pair this file was corrected for. They were
+--                           written as supervises(member) by the uniform
+--                           substitution, which handed a team lead the power to
+--                           DESTROY a rep's visit while visits_update was
+--                           deliberately withholding the power to EDIT one.
+--                           A lead who may not correct a record must not be
+--                           able to delete it instead, and a deleted visit
+--                           takes its photograph's only reference with it -
+--                           FO008 makes photo_url immutable but says nothing
+--                           about the row. Reading is supervision; erasing is
+--                           not. See section 2 for the full reasoning.
 --   institutes_delete       stays is_admin(). Deleting a school is not
 --   targets_delete          supervision.
 --   alert_events insert     stay refused to EVERYONE. E1's guarantee is that
@@ -143,10 +155,33 @@ create policy visits_update on public.visits
   using (member = (select auth.uid()))
   with check (member = (select auth.uid()));
 
+/*
+ * ⚠ NOT supervises(member), AND THIS ONE WAS WRONG ON THE FIRST WRITE.
+ *
+ * The uniform substitution this file performs - `member = auth.uid() or
+ * is_admin()` becomes supervises(member) - is correct for every predicate that
+ * asks "may this person SEE it". It is wrong here, and the review caught it:
+ * it handed a team lead the power to DESTROY a rep's visit ten lines under a
+ * visits_update that deliberately withholds the power to EDIT one.
+ *
+ * A lead who may not correct a record must not be able to delete it instead.
+ * The weaker verb cannot be the stronger permission.
+ *
+ * And a visit is the one row in this schema that is evidence. FO008
+ * (visits_photo_final) makes photo_url immutable for everyone, the service
+ * role included, precisely so a photograph cannot be swapped after the fact -
+ * but it says nothing about the ROW, so deleting the visit is how you would
+ * get rid of an inconvenient photograph without ever updating one. The
+ * retention sweep then collects the orphaned object and the evidence is gone
+ * with nothing to say it existed.
+ *
+ * So this stays exactly what 0001 wrote: the rep's own, or an admin's. Reading
+ * is supervision; erasing is not.
+ */
 drop policy if exists visits_delete on public.visits;
 create policy visits_delete on public.visits
   for delete to authenticated
-  using (public.supervises(member));
+  using (member = (select auth.uid()) or public.is_admin());
 
 
 -- daily_plans ------------------------------------------------------------------
@@ -179,10 +214,29 @@ create policy daily_plans_update on public.daily_plans
   using (public.supervises(member))
   with check (public.supervises(member));
 
+/*
+ * ⚠ NOT supervises(member), for the reason visits_delete gives, and with one
+ * of its own.
+ *
+ * A plan row is the other half of a visit's record: it carries the check-in,
+ * the coordinates, the manual-location reason and the duration. Deleting it
+ * destroys the presence record for a visit that still exists - and because
+ * `daily_plans_one_open_visit` (FO013) is keyed on the member alone, deleting
+ * an OPEN row is also how a lead would silently clear a rep's one-open-visit
+ * slot, which is a write to that rep's working day dressed as housekeeping.
+ *
+ * A lead who needs a stuck visit cleared has the supported path: the "Still
+ * checked in" panel on Overview, which goes through `checkout_missing` and
+ * stamps who did it (FO020). That is the audited door, and it is an admin's.
+ *
+ * `daily_plans_update` IS supervises()-scoped and stays so, because that is
+ * what the Assign screen writes through. Withdrawing an assignment you made is
+ * an update, not a delete.
+ */
 drop policy if exists daily_plans_delete on public.daily_plans;
 create policy daily_plans_delete on public.daily_plans
   for delete to authenticated
-  using (public.supervises(member));
+  using (member = (select auth.uid()) or public.is_admin());
 
 
 -- targets -----------------------------------------------------------------------
@@ -674,7 +728,13 @@ begin
        )
   loop
     -- The ones that are deliberately NOT supervises()-scoped.
-    continue when (pol.tablename = 'visits' and pol.cmd in ('INSERT', 'UPDATE'));
+    --
+    -- ⚠ visits DELETE and daily_plans DELETE are on this list by CORRECTION,
+    -- not by original design - see section 2. They are asserted positively in
+    -- 6c, because an exemption here only stops a complaint; it is 6c that
+    -- refuses to let the widening come back.
+    continue when (pol.tablename = 'visits' and pol.cmd in ('INSERT', 'UPDATE', 'DELETE'));
+    continue when (pol.tablename = 'daily_plans' and pol.cmd = 'DELETE');
     continue when (pol.tablename = 'targets' and pol.cmd in ('INSERT', 'DELETE'));
     continue when (pol.tablename = 'institutes' and pol.cmd in ('INSERT', 'DELETE'));
     continue when (pol.tablename = 'alert_events' and pol.cmd in ('INSERT', 'DELETE'));
@@ -710,7 +770,41 @@ begin
     end if;
   end loop;
 
-  -- 6c. The three that must NOT have widened.
+  /*
+   * 6c. THE ONES THAT MUST NOT HAVE WIDENED.
+   *
+   * ⚠ THE TWO DELETES ARE CHECKED POSITIVELY: they must test auth.uid() and
+   * must NOT test supervises(). Asserting only the absence of supervises()
+   * would pass a policy rewritten to `using (true)`, and asserting only the
+   * presence of auth.uid() would pass `auth.uid() is not null`. Both halves,
+   * for the reason 0020b gives about using/with_check.
+   *
+   * This is the assertion the review's finding earns. The uniform substitution
+   * is right for every reader predicate in this file and wrong for these two,
+   * so the next person applying a sweeping change needs the file itself to
+   * refuse rather than a comment asking them not to.
+   */
+  for pol in
+    select tablename, policyname, cmd, qual from pg_policies
+     where schemaname = 'public'
+       and cmd = 'DELETE'
+       and tablename in ('visits', 'daily_plans')
+  loop
+    if coalesce(pol.qual, '') like '%supervises%' then
+      problems := array_append(problems, format(
+        '%s.%s calls supervises() - a team lead could DESTROY a rep''s record '
+        'while being refused permission to EDIT it',
+        pol.tablename, pol.policyname));
+    end if;
+
+    if coalesce(pol.qual, '') not like '%auth.uid()%'
+       or coalesce(pol.qual, '') not like '%is_admin%' then
+      problems := array_append(problems, format(
+        '%s.%s is not "the member''s own row, or an admin" - it reads: %s',
+        pol.tablename, pol.policyname, coalesce(pol.qual, '(null)')));
+    end if;
+  end loop;
+
   if not exists (
     select 1 from pg_policies
      where schemaname = 'public' and tablename = 'visits' and cmd = 'INSERT'
@@ -849,7 +943,7 @@ begin
   end if;
 
   raise notice
-    '0042 applied: every supervision predicate now reads supervises(); campus is out of the institute boundary; visits and institutes stay rep-only to insert; alert_events stays unwritable. NOTHING MOVES until a team_lead_id is set.';
+    '0042 applied: every supervision predicate now reads supervises(); campus is out of the institute boundary; visits and institutes stay rep-only to insert; alert_events stays unwritable; visits_delete and daily_plans_delete stay the rep''s own or an admin''s, so supervision reads a record and never erases one. NOTHING MOVES until a team_lead_id is set.';
 end $$;
 
 
