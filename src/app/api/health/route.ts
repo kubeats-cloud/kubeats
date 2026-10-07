@@ -90,7 +90,7 @@ async function databaseReachable(): Promise<boolean> {
 }
 
 /**
- * The two pg_cron jobs this app's rules actually depend on.
+ * The seven pg_cron jobs this app's rules actually depend on.
  *
  * WHY THEY ARE WORTH A MONITOR'S ATTENTION. Neither failure shows up anywhere
  * else. No screen goes red and no request 500s:
@@ -100,6 +100,13 @@ async function databaseReachable(): Promise<boolean> {
  *   sweep-open-checkins   a rep who forgot to finish a visit is still checked
  *                         in the next morning, and FO013 then refuses them
  *                         every other institute for the rest of the day.
+ *   alerts-*              (0040) the five in-app alerts. This is the worst of
+ *                         the set to lose silently: an alert that never fires
+ *                         is indistinguishable on screen from a rep who had
+ *                         nothing to be alerted about, and `follow_ups_missed`
+ *                         is also the missed-follow-up RECORD — so a stopped
+ *                         job does not merely fail to warn, it quietly makes
+ *                         every rep's record look clean.
  *
  * THREE ANSWERS, NOT TWO, and the third is the point:
  *
@@ -112,7 +119,19 @@ async function databaseReachable(): Promise<boolean> {
  *              missing would teach them to ignore this endpoint. It is reported
  *              so a human notices; it does not raise the alarm.
  */
-const CRON_JOBS = ["purge-visit-photos", "sweep-open-checkins"] as const;
+const CRON_JOBS = [
+  "purge-visit-photos",
+  "sweep-open-checkins",
+  // 0040. Named here AND in health_cron_jobs()'s own list, which that
+  // migration's assertion block checks against this set — the function returns
+  // one row per job FOUND, so a name only this side knows is reported missing
+  // for ever, and a name only that side knows is never asked about.
+  "alerts-follow-ups-due",
+  "alerts-day-plan-not-set",
+  "alerts-follow-ups-pending",
+  "alerts-follow-ups-missed",
+  "alerts-weekly-plan-not-set",
+] as const;
 
 type CronStatus = "ok" | "missing" | "unknown";
 

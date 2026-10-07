@@ -6441,4 +6441,397 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(narrowed.count).toBeLessThan(everything.count);
     });
   });
+  /* ---------------------------------------------------------------- */
+  /* E1 — the alerts, and the record of what was missed                */
+  /* ---------------------------------------------------------------- */
+
+  describe("Alerts - what cron writes, and who may read it", () => {
+    let alertRep: Member;
+    let otherRep: Member;
+    let school: string;
+    let theirSchool: string;
+    let today: string;
+    /**
+     * ⚠ THE ROWS THIS SUITE CANNOT CLEAN BY MEMBER, which is why they are
+     * recorded by id instead.
+     *
+     * `materialise_daily_alerts()` evaluates EVERY rep in the database, not
+     * only this suite's two - that is the whole point of it. So each `run()`
+     * below also writes genuine alerts for every other rep the dev database
+     * happens to hold, and the file's afterAll, which deletes by `member` over
+     * `createdMembers`, cannot see them. The first verification run left six
+     * such rows behind and the next run's baseline was wrong because of it.
+     *
+     * Recording what existed BEFORE and deleting only what appeared is exact:
+     * it cannot touch a row that was already there, and it cannot miss one this
+     * suite caused.
+     */
+    const preExistingAlerts = new Set<string>();
+
+    beforeAll(async () => {
+      alertRep = await makeMember("rep", "alerts-a", campusA);
+      otherRep = await makeMember("rep", "alerts-b", campusA);
+      school = await makeInstitute(alertRep.id, campusA, "alerts");
+      theirSchool = await makeInstitute(otherRep.id, campusA, "alerts-other");
+
+      const { data } = await admin.rpc("app_today");
+      today = data as string;
+
+      const { data: existing } = await admin.from("alert_events").select("id");
+      for (const row of existing ?? []) preExistingAlerts.add(row.id as string);
+    });
+
+    afterAll(async () => {
+      const { data: now } = await admin.from("alert_events").select("id");
+      const mine = (now ?? [])
+        .map((r) => r.id as string)
+        .filter((id) => !preExistingAlerts.has(id));
+      if (mine.length > 0) {
+        const { error } = await admin.from("alert_events").delete().in("id", mine);
+        // Loud rather than silent: a leaked alert row makes the NEXT run's
+        // baseline wrong, which is the one failure teardown exists to prevent.
+        if (error) console.warn(`  ! alert_events not cleaned: ${error.message}`);
+      }
+    });
+
+    /** Clears this suite's rows so each test seeds exactly its own condition. */
+    const reset = async () => {
+      for (const m of [alertRep.id, otherRep.id]) {
+        await admin.from("alert_events").delete().eq("member", m);
+        await admin.from("follow_up_tasks").delete().eq("member", m);
+        await admin.from("daily_plans").delete().eq("member", m);
+        await admin.from("targets").delete().eq("member", m);
+      }
+    };
+
+    const run = async (kind: string) => {
+      const { data, error } = await admin.rpc("materialise_daily_alerts", { p_kind: kind });
+      expect(error, error?.message).toBeNull();
+      return data as number;
+    };
+
+    const alertsFor = async (member: string, kind?: string) => {
+      let q = admin.from("alert_events").select("kind, for_date, payload").eq("member", member);
+      if (kind) q = q.eq("kind", kind);
+      const { data, error } = await q;
+      expect(error, error?.message).toBeNull();
+      return data ?? [];
+    };
+
+    const anyPurpose = async () => {
+      const { data } = await admin
+        .from("purposes").select("id,label").eq("is_active", true).limit(1).single();
+      return data!;
+    };
+
+    /* ---- the five predicates ---------------------------------------- */
+
+    it("writes day_plan_not_set for a rep with nothing on today's plan", async () => {
+      await reset();
+      await run("day_plan_not_set");
+
+      const rows = await alertsFor(alertRep.id, "day_plan_not_set");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].for_date).toBe(today);
+    });
+
+    /**
+     * ⚠ "NOTHING BEYOND THE AUTO PLAN WAS ADDED BY THE REP" is `assigned_by is
+     * null`, and this pins which way round it goes. 0005 gives that column to an
+     * ADMIN assignment, so a day entirely assigned TO a rep is still a day they
+     * have not planned - and the alert must still fire.
+     */
+    it("still fires when the only plan rows were assigned by an admin", async () => {
+      await reset();
+      const purpose = await anyPurpose();
+
+      await admin.from("daily_plans").insert({
+        member: alertRep.id, date: today, institute_id: school,
+        purpose: purpose.label, purpose_id: purpose.id,
+        assigned_by: boss.id,
+      });
+
+      await run("day_plan_not_set");
+      expect(await alertsFor(alertRep.id, "day_plan_not_set")).toHaveLength(1);
+    });
+
+    it("stays silent once the rep has planned something themselves", async () => {
+      await reset();
+      const purpose = await anyPurpose();
+
+      await admin.from("daily_plans").insert({
+        member: alertRep.id, date: today, institute_id: school,
+        purpose: purpose.label, purpose_id: purpose.id,
+      });
+
+      await run("day_plan_not_set");
+      expect(await alertsFor(alertRep.id, "day_plan_not_set")).toHaveLength(0);
+    });
+
+    it("counts today's open follow-ups into the payload, at all three times", async () => {
+      await reset();
+      await admin.from("follow_up_tasks").insert([
+        { member: alertRep.id, institute_id: school, kind: "call", due_date: today },
+        { member: alertRep.id, institute_id: school, kind: "call", due_date: today },
+        { member: alertRep.id, institute_id: school, kind: "meeting", due_date: today },
+      ]);
+
+      for (const kind of ["follow_ups_due", "follow_ups_pending", "follow_ups_missed"]) {
+        await run(kind);
+        const rows = await alertsFor(alertRep.id, kind);
+        expect(rows, kind).toHaveLength(1);
+        expect(rows[0].payload, kind).toEqual({ count: 3 });
+      }
+    });
+
+    /** A task already closed is not owed, so it must not reach the count. */
+    it("ignores a follow-up that has been closed", async () => {
+      await reset();
+      await admin.from("follow_up_tasks").insert([
+        { member: alertRep.id, institute_id: school, kind: "call", due_date: today },
+        {
+          member: alertRep.id, institute_id: school, kind: "call", due_date: today,
+          done_at: new Date().toISOString(), outcome: "done",
+        },
+      ]);
+
+      await run("follow_ups_missed");
+      expect((await alertsFor(alertRep.id, "follow_ups_missed"))[0].payload).toEqual({ count: 1 });
+    });
+
+    it("writes no follow-up alert at all when nothing is owed", async () => {
+      await reset();
+      await run("follow_ups_due");
+      expect(await alertsFor(alertRep.id, "follow_ups_due")).toHaveLength(0);
+    });
+
+    it("warns about an uncommitted week, and names next Monday", async () => {
+      await reset();
+      await run("weekly_plan_not_set");
+
+      const rows = await alertsFor(alertRep.id, "weekly_plan_not_set");
+      expect(rows).toHaveLength(1);
+      const monday = (rows[0].payload as { week_start: string }).week_start;
+      // Whatever day the suite runs on, the payload must name a MONDAY in the
+      // future: the arithmetic is date_trunc('week') + 7, not today + 1.
+      expect(new Date(`${monday}T00:00:00Z`).getUTCDay()).toBe(1);
+      expect(monday > today).toBe(true);
+    });
+
+    /** A DRAFT is not a commitment: Rule 6's lock only applies once submitted. */
+    it("still warns when next week is drafted but not submitted", async () => {
+      await reset();
+      await run("weekly_plan_not_set");
+      const monday = (
+        (await alertsFor(alertRep.id, "weekly_plan_not_set"))[0].payload as { week_start: string }
+      ).week_start;
+
+      await admin.from("alert_events").delete().eq("member", alertRep.id);
+      await admin.from("targets").insert({
+        member: alertRep.id, period: "weekly", period_start: monday, meetings: 5,
+      });
+
+      await run("weekly_plan_not_set");
+      expect(
+        await alertsFor(alertRep.id, "weekly_plan_not_set"),
+        "a draft silenced the nudge",
+      ).toHaveLength(1);
+
+      // Submitted, and it goes quiet.
+      await admin.from("alert_events").delete().eq("member", alertRep.id);
+      await admin.from("targets")
+        .update({ submitted_at: new Date().toISOString(), locked: true })
+        .eq("member", alertRep.id).eq("period_start", monday);
+
+      await run("weekly_plan_not_set");
+      expect(await alertsFor(alertRep.id, "weekly_plan_not_set")).toHaveLength(0);
+    });
+
+    /* ---- idempotency ------------------------------------------------- */
+
+    /**
+     * ⚠ THE GUARANTEE THE RECORD RESTS ON. A cron run that fires twice - a retry
+     * after a transient failure, or an admin running it by hand - must write ONE
+     * row, because the missed record COUNTS rows. Without this a retry inflates
+     * a rep's record and nothing on screen would say so.
+     */
+    it("is idempotent: a second run writes nothing", async () => {
+      await reset();
+      await admin.from("follow_up_tasks").insert({
+        member: alertRep.id, institute_id: school, kind: "call", due_date: today,
+      });
+
+      expect(await run("follow_ups_missed")).toBe(1);
+      expect(await run("follow_ups_missed")).toBe(0);
+      expect(await alertsFor(alertRep.id, "follow_ups_missed")).toHaveLength(1);
+    });
+
+    it("refuses a kind it does not know, rather than doing nothing quietly", async () => {
+      const { error } = await admin.rpc("materialise_daily_alerts", { p_kind: "nonsense" });
+      expect(error).not.toBeNull();
+    });
+
+    /* ---- who may call it, and who may read ---------------------------- */
+
+    /**
+     * ⚠ A USER MUST NOT BE ABLE TO CALL IT. It is SECURITY DEFINER and reads
+     * every member's plans and tasks; if `authenticated` held execute, a rep
+     * could write alert rows against a colleague - and follow_ups_missed rows
+     * ARE the record.
+     */
+    it("is not callable by a signed-in rep or by an admin", async () => {
+      for (const who of [alertRep, boss]) {
+        const { error } = await who.db.rpc("materialise_daily_alerts", {
+          p_kind: "follow_ups_due",
+        });
+        expect(error, "a user reached materialise_daily_alerts").not.toBeNull();
+      }
+    });
+
+    it("lets a rep read their own alerts and nobody else's", async () => {
+      await reset();
+      await admin.from("follow_up_tasks").insert([
+        { member: alertRep.id, institute_id: school, kind: "call", due_date: today },
+        { member: otherRep.id, institute_id: theirSchool, kind: "call", due_date: today },
+      ]);
+      await run("follow_ups_due");
+
+      const { data: mine } = await alertRep.db.from("alert_events").select("member");
+      expect(mine ?? []).not.toHaveLength(0);
+      expect(
+        (mine ?? []).every((r) => r.member === alertRep.id),
+        "a rep read a colleague's alert",
+      ).toBe(true);
+
+      const { data: ours } = await boss.db.from("alert_events").select("member");
+      const members = new Set((ours ?? []).map((r) => r.member as string));
+      expect(members.has(alertRep.id), "an admin cannot see one rep's").toBe(true);
+      expect(members.has(otherRep.id), "an admin cannot see the other's").toBe(true);
+    });
+
+    /* ---- the grants that make the record trustworthy ------------------ */
+
+    /**
+     * ⚠ NOBODY MAY MANUFACTURE OR ERASE A MISS. These are the three writes that
+     * would make the record meaningless, and all three are refused by GRANTS
+     * rather than by policies - so they hold against a hand-rolled request too.
+     */
+    it("refuses a rep's insert, delete, and any update but seen_at", async () => {
+      await reset();
+      await admin.from("follow_up_tasks").insert({
+        member: alertRep.id, institute_id: school, kind: "call", due_date: today,
+      });
+      await run("follow_ups_missed");
+      const { data: row } = await admin.from("alert_events")
+        .select("id").eq("member", alertRep.id).single();
+
+      const inserted = await alertRep.db.from("alert_events").insert({
+        member: alertRep.id, kind: "follow_ups_missed", for_date: today,
+      });
+      expect(inserted.error, "a rep inserted an alert").not.toBeNull();
+
+      // RLS answers a refused DELETE with "no rows matched" rather than an
+      // error, so the proof is that the row SURVIVES.
+      await alertRep.db.from("alert_events").delete().eq("id", row!.id);
+      const { count } = await admin.from("alert_events")
+        .select("id", { count: "exact", head: true }).eq("id", row!.id);
+      expect(count, "a rep deleted their own missed-follow-up record").toBe(1);
+
+      const edited = await alertRep.db.from("alert_events")
+        .update({ payload: { count: 0 } }).eq("id", row!.id);
+      expect(edited.error, "a rep rewrote an alert's payload").not.toBeNull();
+
+      // And the one write they DO hold.
+      const seen = await alertRep.db.from("alert_events")
+        .update({ seen_at: new Date().toISOString() }).eq("id", row!.id);
+      expect(seen.error, seen.error?.message).toBeNull();
+    });
+
+    /* ---- the record ---------------------------------------------------- */
+
+    it("counts days missed and follow-ups missed as separate figures", async () => {
+      await reset();
+      await admin.from("follow_up_tasks").insert([
+        { member: alertRep.id, institute_id: school, kind: "call", due_date: today },
+        { member: alertRep.id, institute_id: school, kind: "call", due_date: today },
+      ]);
+      await run("follow_ups_missed");
+
+      // A second day, seeded directly: the function only ever writes today.
+      const earlier = new Date(Date.parse(today) - 3 * 86_400_000).toISOString().slice(0, 10);
+      await admin.from("alert_events").insert({
+        member: alertRep.id, kind: "follow_ups_missed", for_date: earlier,
+        payload: { count: 5 },
+      });
+
+      const { data } = await admin.from("alert_events")
+        .select("for_date, payload").eq("member", alertRep.id).eq("kind", "follow_ups_missed");
+
+      expect(data, "one row per DAY, never per follow-up").toHaveLength(2);
+      const total = (data ?? []).reduce(
+        (sum, r) => sum + ((r.payload as { count?: number }).count ?? 0), 0);
+      expect(total, "the follow-up total is the payloads summed").toBe(7);
+    });
+
+    /* ---- the cron jobs, and the monitor -------------------------------- */
+
+    it("has all five jobs scheduled and active, and keeps 0031's two", async () => {
+      const { data, error } = await admin.rpc("health_cron_jobs");
+      expect(error, error?.message).toBeNull();
+
+      const active = new Set(
+        ((data ?? []) as { jobname: string; active: boolean }[])
+          .filter((j) => j.active).map((j) => j.jobname),
+      );
+      for (const job of [
+        "alerts-follow-ups-due", "alerts-day-plan-not-set",
+        "alerts-follow-ups-pending", "alerts-follow-ups-missed",
+        "alerts-weekly-plan-not-set",
+      ]) {
+        expect(active.has(job), `${job} is not scheduled or not active`).toBe(true);
+      }
+      expect(active.has("purge-visit-photos"), "0031's purge job was dropped").toBe(true);
+      expect(active.has("sweep-open-checkins"), "0031's sweep job was dropped").toBe(true);
+    });
+
+    /* ---- the regression guard ------------------------------------------ */
+
+    /**
+     * ⚠ E1 MUST NOT HAVE MOVED RULE 7, THE MEETING GATE OR THE OVERVIEW
+     * DENOMINATOR. It reads daily_plans, follow_up_tasks and targets and writes
+     * none of them - this is that claim asserted rather than trusted, the same
+     * closing move the Phase A suite makes.
+     */
+    it("leaves the daily plan, the meeting gate and Rule 7 untouched", async () => {
+      await reset();
+      const purpose = await anyPurpose();
+
+      await admin.from("daily_plans").insert({
+        member: alertRep.id, date: today, institute_id: school,
+        purpose: purpose.label, purpose_id: purpose.id,
+      });
+
+      const before = await admin.from("daily_plans")
+        .select("id", { count: "exact", head: true }).eq("member", alertRep.id);
+
+      for (const kind of [
+        "day_plan_not_set", "follow_ups_due", "follow_ups_pending",
+        "follow_ups_missed", "weekly_plan_not_set",
+      ]) {
+        await run(kind);
+      }
+
+      const after = await admin.from("daily_plans")
+        .select("id", { count: "exact", head: true }).eq("member", alertRep.id);
+      expect(after.count, "an alert job wrote a daily_plans row").toBe(before.count);
+
+      // And the meeting gate still refuses a meeting with no plan row, which is
+      // the rule a stray daily_plans write would have silently satisfied.
+      const { error } = await alertRep.db.from("visits").insert({
+        ...visitRow({ institute_id: theirSchool, member: alertRep.id, activity: "meeting" }),
+        date: today,
+      });
+      expect(error, "the meeting gate stopped refusing").not.toBeNull();
+    });
+  });
 });

@@ -116,6 +116,8 @@ const PROBES = [
   { id: "0036", table: "institutes", column: "rep_edits_used", needs: true },
   { id: "0037", table: "institute_counsellors", column: "id", needs: true },
   { id: "0038", table: "visits", column: "next_action", needs: true },
+  { id: "0040", table: "alert_events", column: "id", needs: true },
+  { id: "0040", table: "targets", column: "calls", needs: true },
 ];
 
 /*

@@ -298,6 +298,37 @@ const weekStart = z
  * to re-check for no reason. target-actions.ts supplies the literal 'weekly'
  * when it writes the row — see the note above the progress helpers.
  */
+/**
+ * The OPTIONAL total-calls commitment (E1) — blank is an answer, not a zero.
+ *
+ * ⚠ IT IS NOT A METRIC AND MUST NOT JOIN `METRICS`. Seven of the eight metrics
+ * are counted by (activity, lifecycle_status) and the eighth from daily_plans;
+ * ACTIVITY_COLUMNS folds all eight into six export columns; and
+ * metricsMissingFromExport() plus the .xlsx byte-identity test assert that the
+ * mapping is exhaustive. A ninth entry would either fail that test or add a
+ * column to the client's template — and no activity could ever feed it, because
+ * a call is not a visit. `targets.institutes_covered` is the precedent: a
+ * column on that table deliberately outside METRICS since 0013.
+ *
+ * `null` RATHER THAN 0, which is the whole difference between this and `count`.
+ * `count` maps "" to 0 because a rep answers all eight; this one they may
+ * decline, and "committed to zero calls" is a different fact from "did not
+ * commit". The Targets screen renders the first as a bar at 0% and the second
+ * as no bar at all — which is only possible if the two survive as distinct
+ * values all the way to the column, where 0040 keeps `calls` nullable.
+ */
+const optionalCount = z
+  .union([z.string(), z.number(), z.null(), z.undefined()])
+  .transform((v) =>
+    v === null || v === undefined
+      ? ""
+      : typeof v === "number"
+        ? String(v)
+        : v.trim(),
+  )
+  .refine((v) => v === "" || /^\d{1,4}$/.test(v), "Whole numbers from 0 to 9999.")
+  .transform((v) => (v === "" ? null : Number(v)));
+
 export const targetsSchema = z.object({
   week_start: weekStart,
   meetings: count,
@@ -308,6 +339,15 @@ export const targetsSchema = z.object({
   olympiad: count,
   application: count,
   admission: count,
+  /*
+   * OPTIONAL IN THE DEPLOY SENSE TOO. A Targets page cached from before this
+   * field existed posts a form with no `calls` key at all, and a required one
+   * would refuse the rep's whole week over a control that is not on their
+   * screen. `accuracy` and Phase A's three fields carry the same tolerance for
+   * the same reason, and this is the schema change that would otherwise repeat
+   * the bug the existing suite caught there.
+   */
+  calls: optionalCount.optional().default(null),
 });
 
 export type TargetsInput = z.infer<typeof targetsSchema>;
@@ -329,6 +369,10 @@ export function targetsFormDataToInput(formData: FormData) {
       MetricKey,
       string
     >),
+    // Read by name rather than through METRIC_KEYS, because `calls` is
+    // deliberately not a metric — see the note above targetsSchema. A blank
+    // box and an absent key both become null downstream.
+    calls: text("calls"),
   };
 }
 

@@ -19,7 +19,7 @@ state, they live in different places, and they come back in a particular order.
 | **1. Table rows** | `public` schema | `pg_dump`, or `npm run backup` |
 | **2. Auth users** | `auth` schema, behind the Auth API | Dump the `auth` schema, or `npm run backup`. **Passwords cannot move** unless you dump `auth` at the SQL level. |
 | **3. Files** | Storage, two private buckets: `visit-photos` and `materials` | Files, not rows. `npm run backup`, or the Storage API. Both buckets, since the four-pass audit: `materials` holds posters and fee sheets that exist nowhere else. |
-| **4. Supabase-only pieces** | Vault + pg_cron | **Cannot be exported at all.** Re-created by re-running migrations `0004` (the photo purge) **and `0018`** (the nightly check-in sweep). There are two scheduled jobs, not one. |
+| **4. Supabase-only pieces** | Vault + pg_cron | **Cannot be exported at all.** Re-created by re-running migrations `0004` (the photo purge), `0018` (the nightly check-in sweep) **and `0040`** (the five in-app alert jobs). There are **seven** scheduled jobs, not one. |
 
 Skip domain 2 and the restore fails immediately: `profiles.id` references
 `auth.users`, so every row that names a person is refused. Skip domain 4 and
@@ -406,9 +406,9 @@ A visit whose photo is missing shows "Photo expired" rather than an error, so a
 partial photo restore degrades gracefully. Do not let that tempt you into
 skipping it.
 
-### 6. Re-establish Vault and cron — migrations 0004 and 0018
+### 6. Re-establish Vault and cron — migrations 0004, 0018 and 0040
 
-Nothing exports these, and there are **two** scheduled jobs.
+Nothing exports these, and there are **seven** scheduled jobs.
 
 **The photo purge.** Run `0004_photo_retention_schedule.sql` in the new
 project's SQL editor, filling in the two placeholders on lines 51 and 52 **in
@@ -420,12 +420,25 @@ find-and-replace on it.
 no Vault secret and no placeholders: unlike the purge it is pure SQL and calls
 no HTTP API, so the whole file is safe to paste as it stands.
 
+**The five alert jobs.** Re-running `0040_alert_events.sql` reinstates all five.
+Like the sweep they are pure SQL — no Vault secret, no pg_net, no placeholders —
+so the whole file pastes as it stands. Its own assertion block refuses to finish
+unless all five are scheduled AND active AND known to `health_cron_jobs()`, so a
+partial restore cannot pass quietly here.
+
+Losing these is the quietest failure of the three. A missing photo purge shows
+up as a growing bucket and a missing sweep strands a rep the next morning, but a
+missing alert job looks exactly like a team with nothing to be alerted about —
+and `follow_ups_missed` is also the missed-follow-up **record**, so the record
+reads clean rather than empty. That is why `/api/health` knows all seven names.
+
 Then confirm:
 
 ```sql
-select jobid, schedule, jobname, active from cron.job;   -- TWO active jobs
+select jobid, schedule, jobname, active from cron.job order by jobname;  -- SEVEN active jobs
 select * from public.purge_old_visit_photos();           -- considered = 0 is correct
 select public.sweep_open_checkins();                     -- 0 is correct
+select public.materialise_daily_alerts('follow_ups_due');-- a count; running it twice gives 0
 ```
 
 Skip the purge and photos accumulate until the storage tier fills.

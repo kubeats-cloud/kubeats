@@ -42,6 +42,7 @@ export function TargetsForm({
   weekStart,
   targets,
   achieved,
+  calls,
   locked,
   submittedAt,
   reopenedAt,
@@ -49,6 +50,8 @@ export function TargetsForm({
   weekStart: string;
   targets: MetricCounts;
   achieved: MetricCounts;
+  /** The OPTIONAL calls commitment. `null` means the rep did not set one. */
+  calls: number | null;
   locked: boolean;
   submittedAt: string | null;
   reopenedAt: string | null;
@@ -65,6 +68,11 @@ export function TargetsForm({
     Object.fromEntries(
       METRICS.map((m) => [m.key, String(targets[m.key])]),
     ) as Record<MetricKey, string>,
+  );
+  // Separate state, because it is a separate kind of value: "" is a real
+  // answer here (no commitment) where in `values` it would become 0.
+  const [callsValue, setCallsValue] = useState(
+    calls === null ? "" : String(calls),
   );
   const [confirming, setConfirming] = useState(false);
 
@@ -171,6 +179,46 @@ export function TargetsForm({
               </div>
             );
           })}
+
+          {/*
+            THE OPTIONAL ONE, rendered OUTSIDE the METRICS map — which is the
+            visible form of the rule stated at targetsSchema. It is not one of
+            the eight: nothing counts calls achieved, so it gets no Achieved
+            line, no progress bar and no status badge. Giving it those would
+            mean inventing an achieved figure, which is a ninth metric by the
+            back door and exactly what metricsMissingFromExport() exists to
+            catch.
+
+            Blank is a real answer. The placeholder says so rather than showing
+            a 0 the rep did not type.
+          */}
+          <div className="space-y-2 sm:col-span-2">
+            <Label htmlFor="calls">
+              Total calls
+              <span className="text-muted-foreground ml-2 text-xs font-normal">
+                optional
+              </span>
+            </Label>
+            <Input
+              id="calls"
+              name="calls"
+              inputMode="numeric"
+              className="h-11"
+              placeholder="No target set"
+              disabled={locked}
+              aria-invalid={fieldErrors.calls ? true : undefined}
+              value={callsValue}
+              onChange={(event) =>
+                setCallsValue(event.target.value.replace(/\D/g, "").slice(0, 4))
+              }
+            />
+            <p className="text-muted-foreground text-xs">
+              Leave this blank if you are not committing to a number of calls.
+            </p>
+            {fieldErrors.calls && (
+              <p className="text-danger text-xs">{fieldErrors.calls}</p>
+            )}
+          </div>
         </CardContent>
       </Card>
 

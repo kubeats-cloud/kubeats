@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { FileTextIcon } from "lucide-react";
+import { FileTextIcon, HistoryIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
@@ -201,6 +201,26 @@ export default async function PendingPage(props: PageProps<"/pending">) {
       {(unreported.length > 0 || dueTasks.length > 0) && (
         <SectionTitle>Follow-ups owed</SectionTitle>
       )}
+
+      {/*
+        E1 — the way in to the missed record, for BOTH roles. Here rather than
+        on the nav bar: CLAUDE.md's screen-ownership rule says a new tab has to
+        earn its place in a thumb-reachable bar, and this is consulted
+        occasionally. Pending is the screen about what is owed, so the record of
+        what went unanswered belongs one tap off it rather than somewhere a rep
+        would have to be told about.
+
+        Not role-gated. A rep follows it to their own days, an admin to the
+        team's; `alert_events_select` is what decides which, not this link.
+      */}
+      <div className="mb-4">
+        <Button asChild variant="outline" className="h-11">
+          <Link href="/missed">
+            <HistoryIcon className="size-4" aria-hidden />
+            Missed follow-ups
+          </Link>
+        </Button>
+      </div>
 
       {result.ok ? (
         <FollowUpList

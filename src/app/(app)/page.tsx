@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/states";
+import { AlertBanner } from "@/components/dashboard/alert-banner";
 import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
 import { MetricList } from "@/components/weekly/metric-list";
@@ -19,6 +20,7 @@ import {
   listInstitutesForPicker,
   listPurposes,
 } from "@/lib/visits";
+import { listUnseenAlerts } from "@/lib/alerts";
 import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
 import { formatDate, todayISO } from "@/lib/dates";
@@ -57,7 +59,8 @@ export default async function DashboardPage() {
    * falls back to. Nothing downstream can tell the two routes apart, which is
    * why this needed no change to how the page reads any of it.
    */
-  const [plan, institutes, purposes, week, overview, catalogue, report, tasks] = await Promise.all([
+  const [plan, institutes, purposes, week, overview, catalogue, report, tasks, alerts] =
+    await Promise.all([
     admin
       ? Promise.resolve({ ok: true as const, entries: [] })
       : settled(getTodayPlan(user.id), { ok: false as const }, "dashboard:plan"),
@@ -93,6 +96,17 @@ export default async function DashboardPage() {
           { ok: false as const },
           "dashboard:tasks",
         ),
+    /*
+     * E1 — what the database noticed, for WHOEVER is reading.
+     *
+     * NOT gated on `!admin`, unlike every fetch above it. The others are a
+     * rep's own fieldwork, which an admin does not have; an alert is addressed
+     * to a member, and an admin who is sent one (today none of the five
+     * predicates selects a non-rep, but that is the function's business and
+     * not this page's) should see it. Scoping is RLS's either way: read by
+     * `member = auth.uid() or is_admin()`, and this asks for its own id.
+     */
+    settled(listUnseenAlerts(user.id), { ok: false as const }, "dashboard:alerts"),
   ]);
 
   const entries = plan.ok ? plan.entries : [];
@@ -108,6 +122,13 @@ export default async function DashboardPage() {
             : "Plan today's visits here, then log them as they happen."
         }
       />
+
+      {/* Above everything, because an alert is the reason the rep opened the
+          app. A failed read renders nothing rather than an error strip: an
+          alert that cannot be loaded is not worth taking a line of the
+          dashboard to apologise for, and the work it points at is still on
+          the plan below. */}
+      {alerts.ok && <AlertBanner alerts={alerts.alerts} />}
 
       {/* Fieldwork belongs to reps. An admin's landing screen is supervision:
           what the team did, who was out, what is still open. */}

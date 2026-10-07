@@ -110,6 +110,16 @@ async function writeTargets(
     period_start: input.week_start,
   };
   for (const key of METRIC_KEYS) payload[key] = input[key];
+  /*
+   * `calls` written BY NAME, outside the METRIC_KEYS loop, and that is the
+   * point rather than an oversight: it is not a metric (see targetsSchema), so
+   * it must never arrive through the loop that walks METRICS. If it ever does,
+   * metricsMissingFromExport() and the .xlsx byte-identity test are what fail.
+   *
+   * `null` is written as null, not coerced to 0 — the column is nullable in
+   * 0040 exactly so "did not set a calls target" survives being stored.
+   */
+  payload.calls = input.calls;
   if (submit) payload.locked = true;
 
   const { error } = await supabase

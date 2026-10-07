@@ -154,6 +154,7 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
         <TargetsForm
           weekStart={weekStart}
           targets={record.targets}
+          calls={record.calls}
           achieved={achieved}
           locked={record.locked}
           submittedAt={record.submitted_at}

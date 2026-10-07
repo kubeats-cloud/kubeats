@@ -49,6 +49,15 @@ export interface WeekTargets {
   submitted_at: string | null;
   reopened_at: string | null;
   targets: MetricCounts;
+  /**
+   * The OPTIONAL total-calls commitment (E1), `null` when the rep did not set
+   * one. Kept OUTSIDE `targets` on purpose: that is a MetricCounts, keyed by
+   * METRIC_KEYS, and the whole rule about `calls` is that it is not a metric —
+   * no activity feeds it, nothing counts it achieved, and metricsMissingFromExport()
+   * plus the .xlsx byte-identity test assert the eight-to-six mapping is
+   * exhaustive. Folding it in would break both.
+   */
+  calls: number | null;
 }
 
 export interface WeekSummary {
@@ -70,13 +79,17 @@ function emptyRecord(member: string, weekStart: string): WeekTargets {
     submitted_at: null,
     reopened_at: null,
     targets: { ...ZERO_COUNTS },
+    // Null, not 0: a week with no row is a week nobody committed to, which is
+    // the same absence a blank field means. 0 would render a bar at 0%.
+    calls: null,
   };
 }
 
 // Built from METRIC_KEYS so the column list cannot drift from the metrics.
 // supabase-js can only infer a row type from a literal select string, so the
 // rows come back untyped and `toRecord` below checks each field itself.
-const ROW_COLUMNS = `id, member, period_start, locked, submitted_at, reopened_at, ${METRIC_KEYS.join(", ")}`;
+// `calls` appended BY NAME rather than through METRIC_KEYS — see WeekTargets.
+const ROW_COLUMNS = `id, member, period_start, locked, submitted_at, reopened_at, calls, ${METRIC_KEYS.join(", ")}`;
 
 type RawRow = Record<string, unknown> & {
   id: string;
@@ -101,6 +114,11 @@ function toRecord(row: RawRow): WeekTargets {
     submitted_at: row.submitted_at,
     reopened_at: row.reopened_at,
     targets,
+    // A database that has not had 0040 applied returns no `calls` key at all,
+    // which lands here as undefined and reads as "no target" — the screen
+    // degrades to what it showed before the column existed rather than
+    // throwing. Same tolerance the schema gives a cached form post.
+    calls: typeof row.calls === "number" ? row.calls : null,
   };
 }
 
