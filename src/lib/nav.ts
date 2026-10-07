@@ -7,6 +7,8 @@
  * "Functions cannot be passed directly to Client Components". So an item names
  * its icon and the nav components resolve the name on their own side.
  */
+import type { Role } from "@/lib/auth";
+
 export type NavIconName =
   | "dashboard"
   | "institutes"
@@ -72,6 +74,36 @@ export const ADMIN_NAV: NavItem[] = [
   { href: "/team", label: "Team", icon: "team" },
   { href: "/institutes", label: "Institutes", icon: "institutes" },
   { href: "/settings", label: "Settings", icon: "settings" },
+];
+
+/**
+ * A team lead's bar: the admin's, minus Settings.
+ *
+ * FIVE, AND THE ONE THAT IS MISSING IS THE WHOLE DECISION. Settings holds the
+ * status vocabulary, the purposes, the location tree and sign-in security —
+ * all of which the WHOLE COMPANY shares. A status one team lead retires
+ * disappears for every rep on every campus; a purpose they add becomes a metric
+ * for everyone. There is no per-team copy to scope to, so granting it would
+ * mean one team lead's edit landing on every other team, which is the opposite
+ * of "their team only". /data and /materials/manage are out for the same
+ * reason — a backup has no team, and materials are scoped by CAMPUS, which two
+ * team leads share.
+ *
+ * Everything a team lead DOES get is scoped by RLS rather than by this list:
+ * Review, Assign, Team, Institutes and the Overview all return their own reps'
+ * rows once 0042 lands, and return exactly what an admin sees until then,
+ * because nobody is a team lead yet.
+ *
+ * Adding reps to their own team hangs off /team, NOT off Settings — which is
+ * what keeps the global panels behind one unchanged gate instead of behind a
+ * new per-panel check inside a route a team lead can now enter.
+ */
+export const TEAM_LEAD_NAV: NavItem[] = [
+  { href: "/", label: "Overview", icon: "dashboard" },
+  { href: "/review", label: "Review", icon: "review" },
+  { href: "/assign", label: "Assign", icon: "assign" },
+  { href: "/team", label: "Team", icon: "team" },
+  { href: "/institutes", label: "Institutes", icon: "institutes" },
 ];
 
 /**
@@ -142,11 +174,29 @@ export const MFA_VERIFY_PATH = "/verify";
  */
 export const REP_ONLY_PATHS = ["/log"] as const;
 
-/** The mirror: admin workspace routes a rep may not reach. */
+/**
+ * The supervision workspace: reachable by an admin OR a team lead, never a rep.
+ *
+ * SPLIT OUT OF `ADMIN_ONLY_PATHS` (H1), and the line between the two lists is
+ * not seniority — it is whether the thing on the other side HAS A TEAM
+ * DIMENSION. Everything here returns rows, and rows belong to somebody, so RLS
+ * can narrow them to one team. Everything in `ADMIN_ONLY_PATHS` below manages
+ * something the whole company shares, which cannot be narrowed to a team at
+ * all.
+ *
+ * Nobody is a team lead yet, so this list behaves exactly as it did while it
+ * was part of ADMIN_ONLY_PATHS: a rep is turned away, an admin is let through.
+ */
+export const STAFF_PATHS = ["/review", "/assign", "/team"] as const;
+
+/**
+ * The mirror: routes only an ADMIN may reach — not a rep, and not a team lead.
+ *
+ * Three entries, each managing something with no team dimension. See
+ * TEAM_LEAD_NAV above for the argument; it is the same one, and it is the
+ * decision this whole feature turns on.
+ */
 export const ADMIN_ONLY_PATHS = [
-  "/review",
-  "/assign",
-  "/team",
   "/data",
   "/settings",
   // Only the management half. /materials itself is shared — an admin browses
@@ -191,8 +241,29 @@ export const ADMIN_ONLY_PATHS = [
  */
 const ADMIN_ONLY_PATTERNS: readonly RegExp[] = [
   /*
+   * EMPTY, AND DELIBERATELY KEPT. Its one entry — /institutes/report — moved to
+   * STAFF_PATTERNS below in H1, because a report about rows narrows to a team
+   * the moment RLS does, and a team lead is exactly who reads it.
+   *
+   * The mechanism stays because the NEXT route whose admin-ness sits past a
+   * dynamic segment will need it, and rebuilding it from the paragraph above
+   * would mean rediscovering the anchoring rules. nav.test.ts pins the length
+   * at 0 so an entry cannot be added back without a reader passing through
+   * here.
+   */
+];
+
+/**
+ * Supervision routes whose staff-ness sits AFTER a dynamic segment.
+ *
+ * Same second mechanism, same reason a prefix cannot reach: the registry is
+ * SHARED — a rep browses their own institutes and opens their detail pages —
+ * and no prefix of a shared route can express "and one leaf is not".
+ */
+const STAFF_PATTERNS: readonly RegExp[] = [
+  /*
    * The pipeline report. Same shape as the editor above and here for the same
-   * reason: the registry is shared, and only this leaf is an admin's.
+   * reason: the registry is shared, and only this leaf is a supervisor's.
    *
    * It must come BEFORE nothing and AFTER nothing — order is irrelevant, the
    * patterns are tested with `.some()`. What matters is that `/institutes` and
@@ -220,6 +291,23 @@ export function isAdminOnlyPath(pathname: string): boolean {
   );
 }
 
+/**
+ * A supervision route — an admin or a team lead, never a rep.
+ *
+ * `/institutes/report` is HERE rather than in ADMIN_ONLY_PATTERNS, which is the
+ * one entry that moved. The pipeline report is a report ABOUT ROWS, and rows
+ * have owners, so it narrows to a team the moment RLS does. The registry it
+ * sits inside stays shared, which is why it is still a pattern rather than a
+ * prefix — `/institutes` and `/institutes/<id>` must stay out of it, which the
+ * anchored `^` guarantees and nav.test.ts pins.
+ */
+export function isStaffOnlyPath(pathname: string): boolean {
+  return (
+    matches(pathname, STAFF_PATHS) ||
+    STAFF_PATTERNS.some((pattern) => pattern.test(pathname))
+  );
+}
+
 export function isPublicPath(pathname: string): boolean {
   return matches(pathname, PUBLIC_PATHS);
 }
@@ -229,12 +317,31 @@ export function isAuthPath(pathname: string): boolean {
 }
 
 /**
- * `showAdmin` should come from `isAdmin()`, which additionally requires the
- * profile row to have actually loaded — so a failed lookup degrades to rep
- * navigation rather than revealing the admin workspace.
+ * Which bar, from the role to BEHAVE as.
+ *
+ * TAKES A ROLE, NOT A BOOLEAN (H1). It was `navItemsFor(showAdmin: boolean)`,
+ * which could not express a third answer — a team lead would have been handed
+ * REP_NAV, including the "Log Visit" tab they are now turned away from, so the
+ * bar would have advertised a screen that redirects.
+ *
+ * Pass `effectiveRole(user)` from auth.ts, which is where the degradation rule
+ * lives: a profile that could not be read behaves as `rep`, so a failed lookup
+ * still degrades to rep navigation rather than revealing a workspace. That is
+ * unchanged from the boolean version, where `isAdmin()` required a loaded row
+ * for the same reason.
+ *
+ * The exhaustive switch is deliberate: a fourth role would fail to compile here
+ * rather than silently falling through to a rep's bar.
  */
-export function navItemsFor(showAdmin: boolean): NavItem[] {
-  return showAdmin ? ADMIN_NAV : REP_NAV;
+export function navItemsFor(role: Role): NavItem[] {
+  switch (role) {
+    case "admin":
+      return ADMIN_NAV;
+    case "team_lead":
+      return TEAM_LEAD_NAV;
+    case "rep":
+      return REP_NAV;
+  }
 }
 
 /** Dashboard only matches exactly; every other tab matches its subtree. */

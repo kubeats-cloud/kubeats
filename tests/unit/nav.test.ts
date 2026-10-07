@@ -4,6 +4,10 @@ import {
   AUTH_PATHS,
   PUBLIC_PATHS,
   REP_NAV,
+  TEAM_LEAD_NAV,
+  STAFF_PATHS,
+  ADMIN_ONLY_PATHS,
+  isStaffOnlyPath,
   isActive,
   isAdminOnlyPath,
   isAuthPath,
@@ -23,13 +27,13 @@ import {
 
 describe("navItemsFor", () => {
   it("gives a rep the fieldwork screens", () => {
-    const hrefs = navItemsFor(false).map((i) => i.href);
+    const hrefs = navItemsFor("rep").map((i) => i.href);
     expect(hrefs).toContain("/log");
     expect(hrefs).toContain("/pending");
   });
 
   it("gives an admin the workspace and none of the fieldwork", () => {
-    const hrefs = navItemsFor(true).map((i) => i.href);
+    const hrefs = navItemsFor("admin").map((i) => i.href);
     expect(hrefs).toContain("/review");
     expect(hrefs).toContain("/assign");
     expect(hrefs).toContain("/team");
@@ -40,21 +44,107 @@ describe("navItemsFor", () => {
     expect(hrefs).not.toContain("/pending");
   });
 
-  it("never shows a rep an admin screen", () => {
-    for (const item of navItemsFor(false)) {
+  /**
+   * The middle tier's bar is the admin's minus the one thing that has no team
+   * dimension. Settings holds the status vocabulary, the purposes and the
+   * location tree, all shared by the whole company — a team lead editing them
+   * would write across every other team, which is the opposite of "their team
+   * only".
+   */
+  it("gives a team lead the workspace without Settings", () => {
+    const hrefs = navItemsFor("team_lead").map((i) => i.href);
+    expect(hrefs).toContain("/review");
+    expect(hrefs).toContain("/assign");
+    expect(hrefs).toContain("/team");
+    expect(hrefs).not.toContain("/settings");
+    // Not a field role either: no Log Visit, and the proxy refuses it too.
+    expect(hrefs).not.toContain("/log");
+  });
+
+  it("never shows a rep an admin or staff screen", () => {
+    for (const item of navItemsFor("rep")) {
       expect(isAdminOnlyPath(item.href), item.href).toBe(false);
+      expect(isStaffOnlyPath(item.href), item.href).toBe(false);
     }
   });
 
   it("never shows an admin a rep-only screen", () => {
-    for (const item of navItemsFor(true)) {
+    for (const item of navItemsFor("admin")) {
       expect(isRepOnlyPath(item.href), item.href).toBe(false);
     }
   });
 
-  it("keeps both bars small enough to sit in a phone's thumb bar", () => {
+  /**
+   * ⚠ EVERY TAB A TEAM LEAD IS GIVEN MUST BE ONE THEY CAN ACTUALLY REACH.
+   *
+   * This is the assertion that catches the bar and the gate disagreeing — a tab
+   * that redirects the moment it is tapped, which is how the old boolean
+   * `navItemsFor` would have failed: it had no third answer, so a team lead
+   * would have been handed REP_NAV including "Log Visit", a screen the proxy
+   * now turns them away from.
+   */
+  it("gives a team lead nothing the proxy would turn them away from", () => {
+    for (const item of navItemsFor("team_lead")) {
+      expect(isAdminOnlyPath(item.href), item.href).toBe(false);
+      expect(isRepOnlyPath(item.href), item.href).toBe(false);
+    }
+  });
+
+  it("keeps every bar small enough to sit in a phone's thumb bar", () => {
     expect(REP_NAV.length).toBeLessThanOrEqual(6);
     expect(ADMIN_NAV.length).toBeLessThanOrEqual(6);
+    expect(TEAM_LEAD_NAV.length).toBeLessThanOrEqual(6);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * The split between the two path lists (H1).
+ *
+ * THE LINE IS NOT SENIORITY, IT IS WHETHER THE THING HAS A TEAM DIMENSION.
+ * Everything in STAFF_PATHS returns rows, and rows belong to somebody, so RLS
+ * can narrow them to one team. Everything in ADMIN_ONLY_PATHS manages something
+ * the whole company shares and cannot be narrowed at all.
+ */
+describe("the admin / staff path split", () => {
+  it("keeps the three un-scopable surfaces admin-only", () => {
+    for (const path of ["/settings", "/data", "/materials/manage"]) {
+      expect(isAdminOnlyPath(path), path).toBe(true);
+      expect(isStaffOnlyPath(path), path).toBe(false);
+    }
+  });
+
+  it("opens the three row-shaped workspaces to staff", () => {
+    for (const path of ["/review", "/assign", "/team"]) {
+      expect(isStaffOnlyPath(path), path).toBe(true);
+      expect(isAdminOnlyPath(path), path).toBe(false);
+    }
+  });
+
+  /** The lists must not overlap, or the proxy's two rules would contradict. */
+  it("never puts a path in both lists", () => {
+    for (const path of [...STAFF_PATHS, ...ADMIN_ONLY_PATHS]) {
+      expect(
+        isStaffOnlyPath(path) && isAdminOnlyPath(path),
+        `${path} is in both lists`,
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * The pipeline report moved from ADMIN_ONLY_PATTERNS to STAFF_PATTERNS, and
+   * the anchoring that kept the shared registry out of it must survive the
+   * move — `/institutes/x/reporting` is not `/institutes/report`.
+   */
+  it("moves the pipeline report to staff without widening it", () => {
+    expect(isStaffOnlyPath("/institutes/report")).toBe(true);
+    expect(isStaffOnlyPath("/institutes/report/anything")).toBe(true);
+    expect(isAdminOnlyPath("/institutes/report")).toBe(false);
+
+    expect(isStaffOnlyPath("/institutes")).toBe(false);
+    expect(isStaffOnlyPath("/institutes/abc-123")).toBe(false);
+    expect(isStaffOnlyPath("/institutes/abc/reporting")).toBe(false);
   });
 });
 
@@ -83,10 +173,19 @@ describe("path guards", () => {
     expect(isAdminOnlyPath("/pending/8b1a9953-4c22-4d1f-9b1a-99534c224d1f")).toBe(false);
   });
 
-  it("catches the admin-only routes and their children", () => {
+  /**
+   * ⚠ ONE LIST BECAME TWO (H1), AND A REP IS TURNED AWAY FROM BOTH.
+   *
+   * That is the invariant this preserves: before the split a rep was refused
+   * all five of these by `isAdminOnlyPath`; now three answer `isStaffOnlyPath`
+   * instead, and a gate that checked only the first would let a rep into
+   * Review. The proxy checks both, so this asserts both.
+   */
+  it("catches the workspace routes and their children, in whichever list", () => {
     for (const path of ["/review", "/assign", "/team", "/data", "/settings"]) {
-      expect(isAdminOnlyPath(path), path).toBe(true);
-      expect(isAdminOnlyPath(`${path}/anything`), path).toBe(true);
+      const gated = (p: string) => isAdminOnlyPath(p) || isStaffOnlyPath(p);
+      expect(gated(path), path).toBe(true);
+      expect(gated(`${path}/anything`), path).toBe(true);
     }
   });
 
@@ -107,14 +206,18 @@ describe("path guards", () => {
    * `profiles.created_by` is a record and not a permission, but who created
    * whom is still the team's business and not the field's.
    */
-  it("keeps the hierarchy behind the admin gate, through its parent", () => {
-    expect(isAdminOnlyPath("/team/hierarchy")).toBe(true);
+  it("keeps the hierarchy behind the workspace gate, through its parent", () => {
+    // Staff rather than admin since H1 — /team moved, and the subtree with it.
+    // A rep is still refused, which is the guarantee this test exists for; a
+    // team lead now reaches it and RLS decides what they see in it.
+    expect(isStaffOnlyPath("/team/hierarchy")).toBe(true);
     expect(isRepOnlyPath("/team/hierarchy")).toBe(false);
     // The parent is what provides it. Said out loud so the failure above is
     // self-explanatory rather than mysterious.
-    expect(isAdminOnlyPath("/team")).toBe(true);
-    // And it is not in the bar: six tabs, and this is read a few times a year.
+    expect(isStaffOnlyPath("/team")).toBe(true);
+    // And it is not in either bar: six tabs, and this is read a few times a year.
     expect(ADMIN_NAV.map((i) => i.href)).not.toContain("/team/hierarchy");
+    expect(TEAM_LEAD_NAV.map((i) => i.href)).not.toContain("/team/hierarchy");
   });
 
   /*
@@ -145,11 +248,14 @@ describe("path guards", () => {
     expect(isAdminOnlyPath("/institutes/new")).toBe(false);
   });
 
-  it("keeps exactly one pattern — the pipeline report — after B1", () => {
+  it("keeps exactly one pattern — the pipeline report — after B1 and H1", () => {
     const id = "8b1a9953-4c22-4d1f-9b1a-99534c224d1f";
-    // The report is still gated...
-    expect(isAdminOnlyPath("/institutes/report")).toBe(true);
-    // ...and nothing else under /institutes is.
+    // Still exactly one gated leaf under /institutes; it answers the STAFF
+    // matcher now rather than the admin one, because a report about rows
+    // narrows to a team the moment RLS does.
+    expect(isStaffOnlyPath("/institutes/report")).toBe(true);
+    expect(isAdminOnlyPath("/institutes/report")).toBe(false);
+    // ...and nothing else under /institutes is gated by either.
     for (const path of [
       "/institutes",
       "/institutes/new",
@@ -158,6 +264,7 @@ describe("path guards", () => {
       `/institutes/${id}/edit/anything`,
     ]) {
       expect(isAdminOnlyPath(path), path).toBe(false);
+      expect(isStaffOnlyPath(path), path).toBe(false);
     }
   });
 
@@ -170,18 +277,23 @@ describe("path guards", () => {
    * first is how a screen gets mistaken for broken.
    */
   it("gates the pipeline report, which hangs off the shared registry", () => {
-    expect(isAdminOnlyPath("/institutes/report")).toBe(true);
+    // Staff, not admin, since H1 — see the split suite above.
+    expect(isStaffOnlyPath("/institutes/report")).toBe(true);
     expect(isRepOnlyPath("/institutes/report")).toBe(false);
 
     // The registry around it stays shared.
     expect(isAdminOnlyPath("/institutes")).toBe(false);
+    expect(isStaffOnlyPath("/institutes")).toBe(false);
     expect(isAdminOnlyPath("/institutes/new")).toBe(false);
+    expect(isStaffOnlyPath("/institutes/new")).toBe(false);
 
-    // Anchored at both ends, like every other pattern here.
-    expect(isAdminOnlyPath("/institutes/reporting")).toBe(false);
-    expect(isAdminOnlyPath("/institutes/report-card")).toBe(false);
-    expect(isAdminOnlyPath("/institutes/report/anything")).toBe(true);
-    expect(isAdminOnlyPath("/report")).toBe(false);
+    // Anchored at both ends, like every other pattern here. The anchoring is
+    // the half that had to survive the move from ADMIN_ONLY_PATTERNS to
+    // STAFF_PATTERNS, so it is asserted against the matcher that now owns it.
+    expect(isStaffOnlyPath("/institutes/reporting")).toBe(false);
+    expect(isStaffOnlyPath("/institutes/report-card")).toBe(false);
+    expect(isStaffOnlyPath("/institutes/report/anything")).toBe(true);
+    expect(isStaffOnlyPath("/report")).toBe(false);
 
     /*
      * AND IT MUST NOT SWALLOW AN INSTITUTE DETAIL PAGE. Next resolves the

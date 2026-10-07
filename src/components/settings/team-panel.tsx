@@ -180,7 +180,11 @@ export function TeamPanel({
     const parsed = memberUpdateSchema.safeParse({
       member: editing.id,
       name: editName,
-      campus_id: editing.role === "rep" ? editCampus : "",
+      // `!== "admin"` rather than `=== "rep"` since 0041: a team lead is
+      // campus-scoped exactly as a rep is, and sending "" for one would have
+      // the editor refuse (FO021) a row that is perfectly valid. The admin
+      // branch is the one that must send nothing.
+      campus_id: editing.role !== "admin" ? editCampus : "",
       role: editing.role,
       retag: editRetag,
     });
@@ -197,7 +201,7 @@ export function TeamPanel({
   /** Whether this edit would move the rep, which is what the warning is about. */
   const campusMoving =
     editing !== null &&
-    editing.role === "rep" &&
+    editing.role !== "admin" &&
     editCampus !== "" &&
     editCampus !== (editing.campusId ?? "");
 
@@ -731,8 +735,10 @@ export function TeamPanel({
 
                     {/* An admin has no campus and must not be given one —
                         FO021 refuses it, so offering the field would be
-                        offering a choice that can only be rejected. */}
-                    {editing.role === "rep" ? (
+                        offering a choice that can only be rejected. A team
+                        lead DOES have one (0041), so the test is "not an
+                        admin" rather than "is a rep". */}
+                    {editing.role !== "admin" ? (
                       <div className="space-y-2">
                         <Label>Campus</Label>
                         <input

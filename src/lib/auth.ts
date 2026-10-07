@@ -4,7 +4,19 @@ import { cache } from "react";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
-export type Role = "rep" | "admin";
+/**
+ * Three tiers (H1, migration 0041).
+ *
+ * ⚠ THE `team_lead` ENTRY IS LOAD-BEARING EVEN WHILE NOBODY HOLDS THE ROLE, and
+ * it is why this change ships ahead of the UI that assigns it. `profileSchema`
+ * below validates against this union; a build that did not know the value would
+ * fail the parse, report `profileStatus: "unavailable"` and fall back to
+ * `role: "rep"` — and because a team lead HAS a campus (FO021), they would
+ * degrade into a working rep who can reach /log and log visits in their own
+ * name. Least privilege is the right default everywhere else in this file; for
+ * this one value it is not a safe landing.
+ */
+export type Role = "rep" | "team_lead" | "admin";
 
 export interface Profile {
   id: string;
@@ -49,7 +61,7 @@ export interface CurrentUser {
 const profileSchema = z.object({
   id: z.string(),
   name: z.string().nullable().default(null),
-  role: z.enum(["rep", "admin"]),
+  role: z.enum(["rep", "team_lead", "admin"]),
   mobile: z.string().nullable().default(null),
 });
 
@@ -119,7 +131,57 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   };
 });
 
-/** True only when a profile row was actually read and says `admin`. */
+/**
+ * True only when a profile row was actually read and says `admin`.
+ *
+ * ⚠ ITS MEANING HAS NOT CHANGED AND MUST NOT. A third role is exactly the
+ * moment somebody widens this one by habit, and `isAdmin()` gates the shared
+ * vocabulary (statuses, purposes, locations), /data, /materials/manage and
+ * every Settings mutation — none of which has a team dimension to scope to, so
+ * a team lead editing them would write across every other team. Widen call
+ * sites to `isStaff()` one at a time instead, which is a visible diff.
+ */
 export function isAdmin(user: CurrentUser | null): boolean {
   return user?.profileStatus === "ready" && user.role === "admin";
+}
+
+/** True only when a profile row was actually read and says `team_lead`. */
+export function isTeamLead(user: CurrentUser | null): boolean {
+  return user?.profileStatus === "ready" && user.role === "team_lead";
+}
+
+/**
+ * Admin OR team lead — the workspace roles, as opposed to the field role.
+ *
+ * Most call sites that ask `isAdmin()` today are really asking "is this person
+ * a supervisor looking at somebody else's work", and those become this. The
+ * ones that are genuinely asking "may this person change something the whole
+ * company shares" stay `isAdmin()`.
+ *
+ * Nobody is a team lead until H3, so this currently returns exactly what
+ * `isAdmin()` returns. That equivalence is the point: it can be adopted at a
+ * call site now and reviewed as a no-op.
+ */
+export function isStaff(user: CurrentUser | null): boolean {
+  return (
+    user?.profileStatus === "ready" &&
+    (user.role === "admin" || user.role === "team_lead")
+  );
+}
+
+/**
+ * The role to BEHAVE as — which is not always the role on the row.
+ *
+ * ONE PLACE FOR THE DEGRADATION RULE. `getCurrentUser()` already returns
+ * `role: "rep"` when the profile could not be read, and `isAdmin()` additionally
+ * insists the row actually loaded. With two roles those two facts could be
+ * carried separately; with three, every caller that wants "which bar, which
+ * gate" would have to re-derive the same ternary, and the first one to get it
+ * wrong hands a team lead a rep's navigation.
+ *
+ * So: unready profile → `rep`, exactly as today. Nothing here is a security
+ * boundary — `proxy.ts` and RLS are — this decides what to render.
+ */
+export function effectiveRole(user: CurrentUser | null): Role {
+  return user?.profileStatus === "ready" ? user.role : "rep";
 }

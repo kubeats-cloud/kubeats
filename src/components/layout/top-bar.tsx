@@ -2,6 +2,21 @@ import Image from "next/image";
 import { DesktopNav } from "@/components/layout/desktop-nav";
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import type { NavItem } from "@/lib/nav";
+import type { Role } from "@/lib/auth";
+
+/**
+ * How each role is named on screen.
+ *
+ * A MAP RATHER THAN `capitalize`, which is what this used. The CSS was fine for
+ * two values and wrong on the third: `team_lead` renders as "Team_lead", the
+ * underscore and all. One place to name a role, so the bar and the badge below
+ * cannot disagree.
+ */
+const ROLE_LABEL: Record<Role, string> = {
+  rep: "Rep",
+  team_lead: "Team lead",
+  admin: "Admin",
+};
 
 /**
  * The app bar.
@@ -29,7 +44,7 @@ export function TopBar({
   items,
 }: {
   name: string;
-  role: "rep" | "admin";
+  role: Role;
   /** Only true when a profile row actually loaded, so we never label a guess. */
   showRole: boolean;
   items: NavItem[];
@@ -68,15 +83,19 @@ export function TopBar({
           <div className="hidden text-right md:block">
             <p className="text-[13px] leading-tight font-medium">{name}</p>
             {showRole && (
-              <p className="text-muted-foreground text-[11px] leading-tight capitalize">
-                {role}
+              <p className="text-muted-foreground text-[11px] leading-tight">
+                {ROLE_LABEL[role]}
               </p>
             )}
           </div>
 
-          {showRole && role === "admin" && (
+          {/* The narrow-screen badge, where the name block above is hidden.
+              A team lead gets one too: on a phone it is the only thing on
+              screen saying which workspace you are in, and "no badge" has
+              meant "rep" since this was written. */}
+          {showRole && role !== "rep" && (
             <span className="bg-secondary text-muted-foreground rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase md:hidden">
-              Admin
+              {ROLE_LABEL[role]}
             </span>
           )}
 

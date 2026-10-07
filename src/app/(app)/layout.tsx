@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { BottomNav } from "@/components/layout/bottom-nav";
 import { TopBar } from "@/components/layout/top-bar";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { effectiveRole, getCurrentUser, isAdmin } from "@/lib/auth";
 import { navItemsFor } from "@/lib/nav";
 
 /**
@@ -30,16 +30,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  // isAdmin() insists the profile row actually loaded, so a failed lookup
-  // degrades to rep navigation rather than exposing the admin tab.
-  const items = navItemsFor(isAdmin(user));
+  // effectiveRole() insists the profile row actually loaded, so a failed lookup
+  // degrades to rep navigation rather than exposing a workspace — the same
+  // guarantee isAdmin() gave when this took a boolean, now covering three
+  // answers instead of two.
+  const role = effectiveRole(user);
+  const items = navItemsFor(role);
   const notice = PROFILE_NOTICE[user.profileStatus];
 
   return (
     <div className="flex min-h-dvh flex-col">
       <TopBar
         name={user.name}
-        role={user.role}
+        role={role}
         showRole={user.profileStatus === "ready"}
         items={items}
       />

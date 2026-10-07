@@ -4,6 +4,7 @@ import { publicEnv } from "@/lib/env";
 import {
   MFA_VERIFY_PATH,
   isAdminOnlyPath,
+  isStaffOnlyPath,
   isAuthPath,
   isPublicPath,
   isRepOnlyPath,
@@ -184,24 +185,46 @@ export async function proxy(request: NextRequest) {
   // already loaded, so one more query buys a genuine 307 — and it costs that
   // query only on requests that ask for an admin path.
   const wantsAdminArea = isAdminOnlyPath(pathname);
+  const wantsStaffArea = isStaffOnlyPath(pathname);
   const wantsRepArea = isRepOnlyPath(pathname);
 
-  if (user && (wantsAdminArea || wantsRepArea)) {
+  if (user && (wantsAdminArea || wantsStaffArea || wantsRepArea)) {
     const { data } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .maybeSingle();
 
-    // Least privilege: an unreadable profile is not an admin.
+    // Least privilege: an unreadable profile is neither an admin nor a team
+    // lead. Both booleans are false in that case, which is what keeps the
+    // three rules below behaving as the two they replaced.
     const admin = data?.role === "admin";
+    const staff = admin || data?.role === "team_lead";
 
-    // An admin has no business on the fieldwork screens either. The gate runs
-    // both ways because "log a visit" records a person standing somewhere, and
-    // an admin at a desk was not there — letting them reach the form at all
-    // invites a row that says otherwise.
+    /*
+     * THREE RULES, AND THEY ARE BEHAVIOUR-NEUTRAL FOR THE TWO ROLES THAT EXIST
+     * TODAY. Worth checking rather than trusting, because this is the edge gate:
+     *
+     *   rep        admin area refused (!admin), staff area refused (!staff),
+     *              /log allowed (!staff) — all three as before.
+     *   admin      admin area allowed, staff area allowed, /log refused — as
+     *              before, since the old rule was `wantsRepArea && admin`.
+     *   unreadable admin and staff both false, so admin and staff areas are
+     *              refused and /log is allowed. EXACTLY as before — and the
+     *              reason the last rule tests `staff` rather than
+     *              `role !== "rep"`, which would have started refusing a user
+     *              whose profile simply failed to load.
+     *   team lead  workspace yes, Settings/data/materials-manage no, /log no.
+     *              The only new behaviour, and nobody holds the role until H3.
+     *
+     * The fieldwork gate runs against every supervisor for the reason it always
+     * ran against admins: "log a visit" records a person standing somewhere,
+     * and somebody at a desk was not there — letting them reach the form at all
+     * invites a row that says otherwise. A team lead is at a desk.
+     */
     if (wantsAdminArea && !admin) return redirectTo("/");
-    if (wantsRepArea && admin) return redirectTo("/");
+    if (wantsStaffArea && !staff) return redirectTo("/");
+    if (wantsRepArea && staff) return redirectTo("/");
   }
 
   return withCsp(response);

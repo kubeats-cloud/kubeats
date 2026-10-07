@@ -251,7 +251,24 @@ export const removeSchema = z.object({
 /* Team                                                                */
 /* ------------------------------------------------------------------ */
 
-export const ROLES = ["rep", "admin"] as const;
+/**
+ * The role vocabulary the member forms validate against.
+ *
+ * ⚠ `team_lead` IS HERE FOR TOLERANCE, NOT TO OFFER IT (H1). The create form's
+ * role `<Select>` lists its options as hard-coded JSX rather than mapping this
+ * array, so widening it adds no control anywhere — the promotion UI is H3. What
+ * it does buy is that `memberUpdateSchema`, which carries the TARGET's existing
+ * role so the campus rule can be checked without a lookup, does not reject a
+ * team lead's own row the moment one exists.
+ *
+ * It must stay in step with `profiles_role_valid` (0041) and with `Role` in
+ * auth.ts. Three copies of one vocabulary is two too many, but the other two
+ * are a database CHECK and a zod enum in a server-only module, so this is the
+ * shape the codebase already lives with — `purposes_activity_valid` and
+ * `visits_activity_valid` are the precedent, and 0024's assertion block is what
+ * stops those two drifting.
+ */
+export const ROLES = ["rep", "team_lead", "admin"] as const;
 export type MemberRole = (typeof ROLES)[number];
 
 /**
@@ -333,11 +350,17 @@ export const newMemberSchema = z
     message: "The password must not be the email address.",
   })
   .superRefine((v, ctx) => {
-    if (v.role === "rep" && !v.campus_id) {
+    // A team lead is campus-scoped exactly as a rep is — FO021 gained that third
+    // branch in 0041, and a rejection the form could have prevented is a
+    // rejection the form should have prevented.
+    if (v.role !== "admin" && !v.campus_id) {
       ctx.addIssue({
         code: "custom",
         path: ["campus_id"],
-        message: "A rep works from one campus. Choose which.",
+        message:
+          v.role === "team_lead"
+            ? "A team lead works from one campus. Choose which."
+            : "A rep works from one campus. Choose which.",
       });
     }
     if (v.role === "admin" && v.campus_id) {
@@ -396,12 +419,16 @@ export const memberUpdateSchema = z
   .superRefine((v, ctx) => {
     // The same two branches newMemberSchema applies, for the same reason: FO021
     // would refuse it anyway, and a rejection the form could have prevented is
-    // a rejection the form should have prevented.
-    if (v.role === "rep" && !v.campus_id) {
+    // a rejection the form should have prevented. Since 0041 the first branch
+    // covers a team lead too — they are campus-scoped exactly as a rep is.
+    if (v.role !== "admin" && !v.campus_id) {
       ctx.addIssue({
         code: "custom",
         path: ["campus_id"],
-        message: "A rep works from one campus. Choose which.",
+        message:
+          v.role === "team_lead"
+            ? "A team lead works from one campus. Choose which."
+            : "A rep works from one campus. Choose which.",
       });
     }
     if (v.role === "admin" && v.campus_id) {
