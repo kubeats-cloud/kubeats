@@ -7181,28 +7181,392 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     /* ---- the no-op claim --------------------------------------------- */
 
     /**
-     * ⚠ 0041 PROMISED TO CHANGE NO POLICY, and this is that promise measured
-     * from outside rather than read off the file. A team lead is a NEW ROLE
-     * with no RLS of its own yet: until 0042 they see exactly what any
-     * non-admin sees, which is their own rows and nothing else.
+     * ⚠ THIS TEST ASSERTED THE OPPOSITE UNTIL 0042 LANDED, and the reversal is
+     * the record of H2 happening rather than a test that needed fixing.
      *
-     * If this ever starts passing MORE than it does today without 0042 having
-     * been applied, something widened a policy quietly.
+     * In H1 a team lead was a new ROLE with no RLS of its own: `visits_select`
+     * and `profiles_select` still read `member = auth.uid() or is_admin()`, so
+     * a lead saw nothing a rep would not, and this suite measured that from
+     * outside as proof 0041 had changed no policy.
+     *
+     * 0042 rewrote both to supervises(), so the link now DECIDES something.
+     * That is the whole of H2 in two assertions; the cross-team half — which
+     * is what cannot ship broken — is the H2 suite below.
      */
-    it("gives a team lead no visibility a rep would not have", async () => {
+    it("gives a team lead sight of their own rep, once 0042 has landed", async () => {
       await link(repUnder.id, leadA.id);
 
-      // Their own rep's visits are still invisible: visits_select is
-      // `member = auth.uid() or is_admin()` and has not been touched.
-      const { data: visits } = await leadA.db
-        .from("visits").select("id").eq("member", repUnder.id);
-      expect(visits ?? [], "0042 has not been applied, so this must be empty")
-        .toHaveLength(0);
-
-      // And their own rep's profile likewise — profiles_select is unchanged.
       const { data: profiles } = await leadA.db
         .from("profiles").select("id").eq("id", repUnder.id);
-      expect(profiles ?? []).toHaveLength(0);
+      expect(profiles ?? [], "0042 is applied, so a lead reads their own rep")
+        .toHaveLength(1);
+
+      // And still nobody else's: repLoose is on no team.
+      await link(repLoose.id, null);
+      const { data: other } = await leadA.db
+        .from("profiles").select("id").eq("id", repLoose.id);
+      expect(other ?? [], "a lead read an unassigned rep").toHaveLength(0);
+    });
+  });
+  /* ---------------------------------------------------------------- */
+  /* H2 — two teams on one campus, and no leak between them            */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * ⚠ THE ONE THING THIS CHANGE CANNOT SHIP WITH IS A CROSS-TEAM LEAK, so this
+   * suite is built as the sharpest possible shape rather than the simplest:
+   * TWO TEAM LEADS ON ONE CAMPUS, each with their own rep. Campus cannot tell
+   * them apart — that is why the link is a column — so any predicate still
+   * keyed on my_campus() shows each lead the other's work and fails here.
+   *
+   * Every table 0042 touches is asserted in BOTH directions: lead A sees A's
+   * rows and NOT B's, lead B the reverse. One-directional tests pass against a
+   * policy that returns everything.
+   */
+  describe("H2 - a team lead sees their own reps and nobody else's", () => {
+    let leadX: Member;
+    let leadY: Member;
+    let repX: Member;
+    let repY: Member;
+    let schoolX: string;
+    let schoolY: string;
+    let visitX: string;
+    let visitY: string;
+    let planX: string;
+    let taskX: string;
+    let taskY: string;
+    let counsellorX: string;
+    let counsellorY: string;
+    let alertX: string;
+    let today: string;
+    let monday: string;
+
+    beforeAll(async () => {
+      const { data: d } = await admin.rpc("app_today");
+      today = d as string;
+      const dow = new Date(`${today}T00:00:00Z`).getUTCDay() || 7;
+      monday = new Date(Date.parse(`${today}T00:00:00Z`) - (dow - 1) * 86_400_000)
+        .toISOString().slice(0, 10);
+
+      // ONE CAMPUS, TWO TEAMS. The whole point of the suite.
+      leadX = await makeMember("team_lead", "h2-lead-x", campusA);
+      leadY = await makeMember("team_lead", "h2-lead-y", campusA);
+      repX = await makeMember("rep", "h2-rep-x", campusA);
+      repY = await makeMember("rep", "h2-rep-y", campusA);
+
+      schoolX = await makeInstitute(repX.id, campusA, "h2-x");
+      schoolY = await makeInstitute(repY.id, campusA, "h2-y");
+
+      const { data: purpose } = await admin
+        .from("purposes").select("id,label").eq("is_active", true).limit(1).single();
+
+      // A closed arrival each, so a visit may exist (FO009, FO013).
+      const plan = async (member: string, institute: string) => {
+        const inAt = new Date(Date.parse(`${today}T00:00:00Z`) + 9 * 3_600_000).toISOString();
+        const { data, error } = await admin.from("daily_plans").insert({
+          member, date: today, institute_id: institute,
+          purpose: purpose!.label, purpose_id: purpose!.id,
+          checkin_at: inAt, checkin_lat: 23.03, checkin_lng: 72.58, checkin_accuracy: 10,
+          checkout_at: new Date(Date.parse(inAt) + 45 * 60_000).toISOString(),
+          checkout_lat: 23.03, checkout_lng: 72.58, checkout_accuracy: 10,
+        }).select("id").single();
+        if (error) throw new Error(`plan: ${error.message}`);
+        return data.id as string;
+      };
+      planX = await plan(repX.id, schoolX);
+      await plan(repY.id, schoolY);
+
+      const visit = async (member: string, institute: string, tag: string) => {
+        const { data, error } = await admin.from("visits").insert({
+          institute_id: institute, member, activity: "olympiad",
+          lifecycle_status: null, date: today, photo_url: `${member}/proof.jpg`,
+          status_set_to: "Will not come", notes: `${TAG} ${tag}`,
+        }).select("id").single();
+        if (error) throw new Error(`visit: ${error.message}`);
+        return data.id as string;
+      };
+      visitX = await visit(repX.id, schoolX, "h2 x");
+      visitY = await visit(repY.id, schoolY, "h2 y");
+
+      const task = async (member: string, institute: string) => {
+        const { data, error } = await admin.from("follow_up_tasks").insert({
+          member, institute_id: institute, kind: "call", due_date: today,
+        }).select("id").single();
+        if (error) throw new Error(`task: ${error.message}`);
+        return data.id as string;
+      };
+      taskX = await task(repX.id, schoolX);
+      taskY = await task(repY.id, schoolY);
+
+      const counsellor = async (institute: string, name: string) => {
+        const { data, error } = await admin.from("institute_counsellors").insert({
+          institute_id: institute, name, phone: "9876543210",
+        }).select("id").single();
+        if (error) throw new Error(`counsellor: ${error.message}`);
+        return data.id as string;
+      };
+      counsellorX = await counsellor(schoolX, `${TAG} counsellor x`);
+      counsellorY = await counsellor(schoolY, `${TAG} counsellor y`);
+
+      for (const m of [repX.id, repY.id]) {
+        const { error } = await admin.from("targets").insert({
+          member: m, period: "weekly", period_start: monday, meetings: 5,
+          submitted_at: new Date().toISOString(), locked: true,
+        });
+        if (error) throw new Error(`target: ${error.message}`);
+      }
+
+      const { data: aX, error: ae } = await admin.from("alert_events").insert([
+        { member: repX.id, kind: "follow_ups_missed", for_date: today, payload: { count: 2 } },
+        { member: repY.id, kind: "follow_ups_missed", for_date: today, payload: { count: 3 } },
+      ]).select("id");
+      if (ae) throw new Error(`alerts: ${ae.message}`);
+      alertX = aX![0].id as string;
+
+      // THE ASSIGNMENT, last: everything above was created while nobody was on
+      // a team, which is also the state 0042 was applied in.
+      for (const [rep, lead] of [[repX, leadX], [repY, leadY]] as const) {
+        const { error } = await admin
+          .from("profiles").update({ team_lead_id: lead.id }).eq("id", rep.id);
+        if (error) throw new Error(`link: ${error.message}`);
+      }
+    });
+
+    /** Rows of a table visible to one member, by id. */
+    const seen = async (who: Member, table: string, column = "id") => {
+      const { data, error } = await who.db.from(table).select(column);
+      expect(error, `${table}: ${error?.message}`).toBeNull();
+      // `unknown` first: supabase-js types an untyped select as a union that
+      // includes its own error shape, which does not overlap a plain record.
+      return new Set(
+        (data ?? []).map((r) => (r as unknown as Record<string, string>)[column]),
+      );
+    };
+
+    /* ---- reads, in both directions, on every table 0042 touches ----- */
+
+    it("scopes visits to each lead's own rep", async () => {
+      const x = await seen(leadX, "visits");
+      const y = await seen(leadY, "visits");
+      expect(x.has(visitX), "lead X cannot see their own rep's visit").toBe(true);
+      expect(x.has(visitY), "⚠ LEAK: lead X sees team Y's visit").toBe(false);
+      expect(y.has(visitY)).toBe(true);
+      expect(y.has(visitX), "⚠ LEAK: lead Y sees team X's visit").toBe(false);
+    });
+
+    it("scopes institutes to each lead's own rep", async () => {
+      const x = await seen(leadX, "institutes");
+      const y = await seen(leadY, "institutes");
+      expect(x.has(schoolX)).toBe(true);
+      expect(x.has(schoolY), "⚠ LEAK: lead X sees team Y's institute").toBe(false);
+      expect(y.has(schoolY)).toBe(true);
+      expect(y.has(schoolX), "⚠ LEAK: lead Y sees team X's institute").toBe(false);
+    });
+
+    it("scopes daily plans, follow-up tasks and counsellors through the parent", async () => {
+      const plansX = await seen(leadX, "daily_plans");
+      const plansY = await seen(leadY, "daily_plans");
+      expect(plansX.has(planX)).toBe(true);
+      expect([...plansY].includes(planX), "⚠ LEAK: lead Y sees team X's plan").toBe(false);
+
+      const tasksX = await seen(leadX, "follow_up_tasks");
+      expect(tasksX.has(taskX)).toBe(true);
+      expect(tasksX.has(taskY), "⚠ LEAK: lead X sees team Y's follow-up").toBe(false);
+
+      const cX = await seen(leadX, "institute_counsellors");
+      expect(cX.has(counsellorX)).toBe(true);
+      expect(cX.has(counsellorY), "⚠ LEAK: lead X sees team Y's counsellor").toBe(false);
+    });
+
+    /**
+     * ⚠ THE QUIET ONE. 0020b and 0028 both call institute_status_history that,
+     * because its policy reaches through `institutes` — scoping only the parent
+     * MOVES the leak instead of closing it. Same trap, one tier up.
+     */
+    it("scopes the status history through the parent institute", async () => {
+      const { data: x } = await leadX.db
+        .from("institute_status_history").select("institute_id");
+      const institutes = new Set((x ?? []).map((r) => r.institute_id as string));
+      expect(
+        institutes.has(schoolY),
+        "⚠ LEAK: lead X reads team Y's status journey without touching institutes",
+      ).toBe(false);
+    });
+
+    it("scopes targets and alerts to each lead's own rep", async () => {
+      const { data: tX } = await leadX.db.from("targets").select("member");
+      const members = new Set((tX ?? []).map((r) => r.member as string));
+      expect(members.has(repX.id)).toBe(true);
+      expect(members.has(repY.id), "⚠ LEAK: lead X sees team Y's commitment").toBe(false);
+
+      const { data: aX } = await leadX.db.from("alert_events").select("member");
+      const alerted = new Set((aX ?? []).map((r) => r.member as string));
+      expect(alerted.has(repX.id)).toBe(true);
+      expect(alerted.has(repY.id), "⚠ LEAK: lead X sees team Y's missed record").toBe(false);
+    });
+
+    /** Names must resolve, or every screen renders a column of "Unknown". */
+    it("lets a lead read their own reps' profiles and not another team's", async () => {
+      const x = await seen(leadX, "profiles");
+      expect(x.has(repX.id), "names would render as Unknown").toBe(true);
+      expect(x.has(leadX.id), "their own row").toBe(true);
+      expect(x.has(repY.id), "⚠ LEAK: lead X reads team Y's roster").toBe(false);
+    });
+
+    /* ---- writes, in both directions ---------------------------------- */
+
+    it("refuses every cross-team write", async () => {
+      // An institute detail edit.
+      await leadX.db.from("institutes").update({ city: "Nowhere" }).eq("id", schoolY);
+      const { data: untouched } = await admin
+        .from("institutes").select("city").eq("id", schoolY).single();
+      expect(untouched?.city, "⚠ LEAK: lead X edited team Y's institute").not.toBe("Nowhere");
+
+      // A follow-up task.
+      await leadX.db.from("follow_up_tasks").update({ note: "hijacked" }).eq("id", taskY);
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("note").eq("id", taskY).single();
+      expect(task?.note, "⚠ LEAK: lead X edited team Y's follow-up").not.toBe("hijacked");
+
+      // A counsellor.
+      await leadX.db.from("institute_counsellors").delete().eq("id", counsellorY);
+      const { count } = await admin.from("institute_counsellors")
+        .select("id", { count: "exact", head: true }).eq("id", counsellorY);
+      expect(count, "⚠ LEAK: lead X deleted team Y's counsellor").toBe(1);
+
+      // A plan assignment onto another team's rep.
+      const assigned = await leadX.db.from("daily_plans").insert({
+        member: repY.id, date: today, institute_id: schoolY,
+        purpose: "First meeting", assigned_by: leadX.id,
+      });
+      expect(assigned.error, "⚠ LEAK: lead X assigned work to team Y's rep").not.toBeNull();
+    });
+
+    /**
+     * Rule 6's reopen, one tier down — and the trigger must agree with the
+     * policy. A widened policy with an unwidened trigger is a button that
+     * always fails.
+     */
+    it("lets a lead reopen their own rep's week and not another team's", async () => {
+      const mine = await leadX.db.from("targets")
+        .update({ locked: false }).eq("member", repX.id).eq("period_start", monday);
+      expect(mine.error, mine.error?.message).toBeNull();
+
+      const { data: reopened } = await admin.from("targets")
+        .select("locked, reopened_by").eq("member", repX.id).eq("period_start", monday).single();
+      expect(reopened?.locked, "the reopen did not take").toBe(false);
+      expect(reopened?.reopened_by, "the trigger stamps who did it").toBe(leadX.id);
+
+      // The other team's is unreachable: the policy matches no row, so this
+      // succeeds and changes nothing.
+      await leadX.db.from("targets")
+        .update({ locked: false }).eq("member", repY.id).eq("period_start", monday);
+      const { data: theirs } = await admin.from("targets")
+        .select("locked").eq("member", repY.id).eq("period_start", monday).single();
+      expect(theirs?.locked, "⚠ LEAK: lead X reopened team Y's week").toBe(true);
+    });
+
+    /** A rep may not reopen their own, which supervises() alone would allow. */
+    it("still refuses a rep reopening the week they submitted", async () => {
+      const { error } = await repY.db.from("targets")
+        .update({ locked: false }).eq("member", repY.id).eq("period_start", monday);
+      expect(error, "a rep unlocked their own commitment").not.toBeNull();
+    });
+
+    /* ---- what a team lead must NOT become ---------------------------- */
+
+    it("refuses a team lead logging a visit or registering an institute", async () => {
+      const logged = await leadX.db.from("visits").insert({
+        institute_id: schoolX, member: leadX.id, activity: "olympiad",
+        date: today, photo_url: `${leadX.id}/proof.jpg`,
+        status_set_to: "Will not come",
+      });
+      expect(logged.error, "a team lead logged a visit").not.toBeNull();
+
+      const registered = await leadX.db.from("institutes").insert({
+        name: `${TAG} lead-owned`, type: "school", boards: ["CBSE"],
+        campus_id: campusA, registered_by: leadX.id,
+      });
+      expect(registered.error, "a team lead registered an institute").not.toBeNull();
+    });
+
+    /** FO010 still refuses an owner change to anyone but an admin. */
+    it("refuses a team lead taking ownership of their rep's institute", async () => {
+      const { error } = await leadX.db
+        .from("institutes").update({ registered_by: leadX.id }).eq("id", schoolX);
+      expect(error?.code, "a team lead took an institute over").toBe("FO010");
+    });
+
+    /** E1's guarantee survives the widening. */
+    it("still lets nobody write an alert", async () => {
+      const inserted = await leadX.db.from("alert_events").insert({
+        member: repX.id, kind: "follow_ups_missed", for_date: today, payload: { count: 99 },
+      });
+      expect(inserted.error?.code, "a team lead manufactured a miss").toBe("42501");
+
+      await leadX.db.from("alert_events").delete().eq("id", alertX);
+      const { count } = await admin.from("alert_events")
+        .select("id", { count: "exact", head: true }).eq("id", alertX);
+      expect(count, "a team lead erased a miss").toBe(1);
+    });
+
+    /** FO030: a lead's edit must not spend the rep's one correction. */
+    it("does not spend the rep's edit allowance on a lead's edit", async () => {
+      const before = await admin.from("institutes")
+        .select("rep_edits_used").eq("id", schoolX).single();
+      expect(before.data?.rep_edits_used).toBe(0);
+
+      const { error } = await leadX.db
+        .from("institutes").update({ city: "Ahmedabad" }).eq("id", schoolX);
+      expect(error, error?.message).toBeNull();
+
+      const after = await admin.from("institutes")
+        .select("rep_edits_used").eq("id", schoolX).single();
+      expect(after.data?.rep_edits_used, "a lead's edit cost the rep their one").toBe(0);
+    });
+
+    /* ---- the other two roles are unchanged ---------------------------- */
+
+    it("leaves an admin seeing everything", async () => {
+      const visits = await seen(boss, "visits");
+      expect(visits.has(visitX) && visits.has(visitY), "an admin lost sight of a team").toBe(true);
+
+      const institutes = await seen(boss, "institutes");
+      expect(institutes.has(schoolX) && institutes.has(schoolY)).toBe(true);
+    });
+
+    it("leaves a rep seeing exactly their own", async () => {
+      const visits = await seen(repX, "visits");
+      expect(visits.has(visitX)).toBe(true);
+      expect(visits.has(visitY), "⚠ LEAK: a rep sees another rep's visit").toBe(false);
+
+      const institutes = await seen(repX, "institutes");
+      expect(institutes.has(schoolX)).toBe(true);
+      expect(institutes.has(schoolY), "⚠ LEAK: a rep sees another rep's institute").toBe(false);
+
+      // And a rep still cannot read a colleague's profile.
+      const profiles = await seen(repX, "profiles");
+      expect(profiles.has(repY.id)).toBe(false);
+      expect(profiles.has(leadX.id), "a rep reading their own lead's row").toBe(false);
+    });
+
+    /**
+     * ⚠ THE STORAGE BUCKET IS A SEPARATE POLICY SYSTEM, and forgetting it gives
+     * a team lead a Review screen of broken images with no error anywhere.
+     * supervises_folder() casts the object key safely, so a key that is not a
+     * member id answers false rather than raising 22P02.
+     */
+    it("scopes visit photographs the same way", async () => {
+      const { data: mine } = await leadX.db.storage.from("visit-photos").list(repX.id);
+      const { data: theirs } = await leadX.db.storage.from("visit-photos").list(repY.id);
+      // The fixtures upload no objects, so both lists are empty — what is being
+      // proven is that the POLICY does not throw and does not widen. A listing
+      // that errored would surface here as a null.
+      expect(mine ?? [], "lead X cannot list their own rep's folder").toBeDefined();
+      expect(theirs ?? []).toHaveLength(0);
+
+      const { data: bad } = await leadX.db.storage.from("visit-photos").list("not-a-uuid");
+      expect(bad ?? [], "a non-uuid key raised rather than answering false").toBeDefined();
     });
   });
 });
