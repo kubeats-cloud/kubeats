@@ -48,6 +48,7 @@ import {
   postedEventDate,
 } from "@/lib/validation/visit";
 import { FormNotice } from "@/components/form-notice";
+import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import {
   NextActionFields,
   type NextActionValue,
@@ -573,16 +574,27 @@ export function LogVisitForm({
               before the pick, and a form that fills in as it is answered is
               shorter to read than one that greys out.
             */}
-            <NextActionFields
-              value={nextAction}
-              onChange={(patch) =>
-                patchDraft((current) => ({
-                  nextAction: { ...(current.nextAction ?? EMPTY_DRAFT.nextAction), ...patch },
-                }))
-              }
-              fieldErrors={fieldErrors}
-              defaultDue={defaultFollowUpDue()}
-            />
+            {/*
+              ⚠ Behind PHASE_A_DAILY_PLAN. With it off the form sends no
+              `next_action` key at all, which `visitSchema` already tolerates —
+              that absence-tolerance was built for a rep posting a CACHED page
+              during the Phase A deploy, and taking the field back down is the
+              same shape pointing the other way. `close_visit()`'s parameters
+              are all defaulted, so the visit saves with nulls exactly as a
+              report filed before the field existed did.
+            */}
+            {PHASE_A_DAILY_PLAN && (
+              <NextActionFields
+                value={nextAction}
+                onChange={(patch) =>
+                  patchDraft((current) => ({
+                    nextAction: { ...(current.nextAction ?? EMPTY_DRAFT.nextAction), ...patch },
+                  }))
+                }
+                fieldErrors={fieldErrors}
+                defaultDue={defaultFollowUpDue()}
+              />
+            )}
 
             <FeedbackFields
               asks={{

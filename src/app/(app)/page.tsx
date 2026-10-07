@@ -21,6 +21,7 @@ import {
   listPurposes,
 } from "@/lib/visits";
 import { listUnseenAlerts } from "@/lib/alerts";
+import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
 import { formatDate, todayISO } from "@/lib/dates";
@@ -88,8 +89,14 @@ export default async function DashboardPage() {
      *
      * `todayISO()` and not `new Date()` — the helper takes "on or before this
      * day", so an overdue call is still in front of the rep this morning.
+     *
+     * ⚠ NOT FETCHED WHILE PHASE_A_DAILY_PLAN IS OFF. Gating the QUERY as well
+     * as the section is not tidiness: this is the screen a rep lands on, and a
+     * round trip whose only reader is behind a flag is latency nobody can see
+     * the cause of. The empty answer is the one the admin branch already
+     * returns, so the component below needs no third case.
      */
-    admin
+    admin || !PHASE_A_DAILY_PLAN
       ? Promise.resolve({ ok: true as const, tasks: [] })
       : settled(
           listFollowUpTasks(user.id, todayISO()),

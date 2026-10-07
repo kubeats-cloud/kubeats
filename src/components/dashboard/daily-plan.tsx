@@ -42,6 +42,7 @@ import {
 } from "@/lib/validation/checkin";
 import { FormNotice } from "@/components/form-notice";
 import { FollowUpCalls } from "@/components/dashboard/follow-up-calls";
+import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import { MorningPlan } from "@/components/dashboard/morning-plan";
 
 /**
@@ -262,11 +263,20 @@ export function DailyPlan({
           calls" is what they owe from a desk. Before this they would have been
           one undifferentiated list, and the Check in button would have been
           offered against a phone call.
+
+          ⚠ BEHIND PHASE_A_DAILY_PLAN, and the HEADING goes with the second
+          section rather than staying as a lone label. "Meetings" only names
+          anything while there is something it is not — with the follow-up
+          section gone it would be a heading over the entire card, which is what
+          the card's own title already says. Off, this is the one
+          undifferentiated list it was before Phase A.
         */}
         <section className="space-y-4">
-          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            Meetings
-          </h3>
+          {PHASE_A_DAILY_PLAN && (
+            <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+              Meetings
+            </h3>
+          )}
 
         {canAdd ? (
           <form action={formAction} onSubmit={handleSubmit} className="space-y-3">
@@ -398,7 +408,7 @@ export function DailyPlan({
           It writes ORDINARY plan rows, so everything they land in — this list,
           the meeting gate, Rule 7 — is unchanged.
         */}
-        {canAdd && (
+        {PHASE_A_DAILY_PLAN && canAdd && (
           <MorningPlan
             institutes={institutes}
             purposes={purposes}
@@ -567,13 +577,19 @@ export function DailyPlan({
           A1's second section. Reads the SAME source Pending's today-filter
           reads, which is what makes a follow-up created at the end of a visit
           appear in both with no write-sync between them.
+
+          ⚠ Behind PHASE_A_DAILY_PLAN. The tasks themselves are untouched and
+          are still closable from Pending — see features.ts for why that one
+          surface is deliberately left up.
         */}
-        <section className="space-y-3">
-          <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-            Follow-up calls
-          </h3>
-          <FollowUpCalls tasks={tasks} />
-        </section>
+        {PHASE_A_DAILY_PLAN && (
+          <section className="space-y-3">
+            <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
+              Follow-up calls
+            </h3>
+            <FollowUpCalls tasks={tasks} />
+          </section>
+        )}
       </CardContent>
     </Card>
   );
