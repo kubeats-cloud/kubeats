@@ -5,7 +5,9 @@ import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import {
   PHASE_A_KINDS,
   VISIBLE_FROM_IST_HOUR,
+  VISIBLE_ON_ISO_DOW,
   hrefFor,
+  isoDayOfWeek,
   kindIsEnabled,
   nextMonday,
   visibleNow,
@@ -25,6 +27,12 @@ import {
  */
 
 const ORIGINAL_TZ = process.env.TZ;
+
+/** 0040, read once, for the assertions that check this code against it. */
+const sqlForDow = readFileSync(
+  "supabase/migrations/0040_alert_events.sql",
+  "utf8",
+);
 
 async function datesModuleIn(tz: string) {
   process.env.TZ = tz;
@@ -155,21 +163,46 @@ describe("the thresholds match migration 0040's schedule", () => {
   });
 });
 
+/*
+ * Two reference days, so a day-of-week gate can be tested without the answer
+ * depending on when the suite is run. 0040's weekly job fires on a SUNDAY, and
+ * 2026-10-11 is one; 2026-10-08 is the Thursday before it.
+ */
+const THURSDAY = "2026-10-08";
+const SUNDAY = "2026-10-11";
+
 describe("the clock gates each kind", () => {
-  it("holds the afternoon nudge until 16:00", () => {
-    expect(visibleNow("follow_ups_pending", 15)).toBe(false);
-    expect(visibleNow("follow_ups_pending", 16)).toBe(true);
-    expect(visibleNow("follow_ups_pending", 23)).toBe(true);
+  it("is Thursday and Sunday as the names claim", () => {
+    // The fixtures themselves, asserted — a wrong assumption here would make
+    // every day-gate test below pass for the wrong reason.
+    expect(isoDayOfWeek(THURSDAY)).toBe(4);
+    expect(isoDayOfWeek(SUNDAY)).toBe(7);
   });
 
+  /** ⚠ THE AFTERNOON NUDGE: absent before 16:00 IST, present from 16:00. */
+  it("holds the afternoon nudge until 16:00", () => {
+    expect(visibleNow("follow_ups_pending", 0, THURSDAY)).toBe(false);
+    expect(visibleNow("follow_ups_pending", 9, THURSDAY)).toBe(false);
+    expect(visibleNow("follow_ups_pending", 15, THURSDAY)).toBe(false);
+    // The boundary itself, from both sides.
+    expect(visibleNow("follow_ups_pending", 16, THURSDAY)).toBe(true);
+    expect(visibleNow("follow_ups_pending", 18, THURSDAY)).toBe(true);
+    expect(visibleNow("follow_ups_pending", 23, THURSDAY)).toBe(true);
+  });
+
+  /** ⚠ THE MISSED LINE: absent before 19:00 IST, present from 19:00. */
   it("holds the missed line until 19:00", () => {
-    expect(visibleNow("follow_ups_missed", 18)).toBe(false);
-    expect(visibleNow("follow_ups_missed", 19)).toBe(true);
+    expect(visibleNow("follow_ups_missed", 0, THURSDAY)).toBe(false);
+    expect(visibleNow("follow_ups_missed", 16, THURSDAY)).toBe(false);
+    expect(visibleNow("follow_ups_missed", 18, THURSDAY)).toBe(false);
+    expect(visibleNow("follow_ups_missed", 19, THURSDAY)).toBe(true);
+    expect(visibleNow("follow_ups_missed", 23, THURSDAY)).toBe(true);
   });
 
   it("shows a due follow-up at any hour", () => {
-    expect(visibleNow("follow_ups_due", 0)).toBe(true);
-    expect(visibleNow("follow_ups_due", 8)).toBe(true);
+    expect(visibleNow("follow_ups_due", 0, THURSDAY)).toBe(true);
+    expect(visibleNow("follow_ups_due", 8, THURSDAY)).toBe(true);
+    expect(visibleNow("follow_ups_due", 23, THURSDAY)).toBe(true);
   });
 
   it("never fires a threshold at midnight by reading the hour as 24", () => {
@@ -178,13 +211,55 @@ describe("the clock gates each kind", () => {
     // 00:00 and a rep would get the missed line as the day began.
     for (const kind of ALERT_KINDS) {
       if (VISIBLE_FROM_IST_HOUR[kind] > 0) {
-        expect(visibleNow(kind, 0), `${kind} at midnight`).toBe(false);
+        expect(visibleNow(kind, 0, SUNDAY), `${kind} at midnight`).toBe(false);
       }
     }
   });
 });
 
-describe("Phase A kinds stay dark while the flag is off", () => {
+describe("the weekly nudge is live, and only on a Sunday evening", () => {
+  it("is not a Phase A kind any more", () => {
+    expect(PHASE_A_KINDS.has("weekly_plan_not_set")).toBe(false);
+    // And is therefore enabled whatever the flag says.
+    expect(kindIsEnabled("weekly_plan_not_set")).toBe(true);
+  });
+
+  /*
+   * ⚠ THE GATE THAT REPLACED THE FLAG. The predicate asks about NEXT week, and
+   * 0040 fires it once, on Sunday evening. Without a day gate a rep who has not
+   * set next week's targets would carry a badge every evening from Monday —
+   * a permanent nag about a week six days away, which is how a bell gets
+   * ignored. The hour gate alone is not enough and this is the proof.
+   */
+  it("stays silent all day on a day that is not Sunday", () => {
+    for (let hour = 0; hour < 24; hour++) {
+      expect(
+        visibleNow("weekly_plan_not_set", hour, THURSDAY),
+        `Thursday ${hour}:00`,
+      ).toBe(false);
+    }
+  });
+
+  it("appears on Sunday from 19:00 and not before", () => {
+    expect(visibleNow("weekly_plan_not_set", 18, SUNDAY)).toBe(false);
+    expect(visibleNow("weekly_plan_not_set", 19, SUNDAY)).toBe(true);
+    expect(visibleNow("weekly_plan_not_set", 23, SUNDAY)).toBe(true);
+  });
+
+  it("matches the day 0040 schedules it for", () => {
+    // Read out of the migration rather than restated, so moving the cron line
+    // fails here. dow 0 in cron is Sunday, which is 7 in ISO.
+    const m = sqlForDow.match(
+      /cron\.schedule\(\s*'alerts-weekly-plan-not-set',\s*'\d{1,2} \d{1,2} \* \* (\d)'/,
+    );
+    expect(m, "0040's weekly cron line was not found").not.toBeNull();
+    const cronDow = Number(m![1]);
+    expect(cronDow).toBe(0); // cron Sunday
+    expect(VISIBLE_ON_ISO_DOW.weekly_plan_not_set).toBe(7); // ISO Sunday
+  });
+});
+
+describe("only the daily plan stays dark behind the flag", () => {
   it("matches the flag", () => {
     // Written against the flag rather than against `false`, so this keeps
     // asserting the right thing on the day the redo ships and it flips.
@@ -194,21 +269,17 @@ describe("Phase A kinds stay dark while the flag is off", () => {
     }
   });
 
-  it("gates both plan kinds and neither follow-up kind", () => {
-    expect(PHASE_A_KINDS.has("day_plan_not_set")).toBe(true);
-    expect(PHASE_A_KINDS.has("weekly_plan_not_set")).toBe(true);
-    expect(PHASE_A_KINDS.has("follow_ups_due")).toBe(false);
-    expect(PHASE_A_KINDS.has("follow_ups_pending")).toBe(false);
-    expect(PHASE_A_KINDS.has("follow_ups_missed")).toBe(false);
+  it("gates the daily plan and nothing else", () => {
+    expect([...PHASE_A_KINDS]).toEqual(["day_plan_not_set"]);
   });
 
-  it("shows no plan item at any hour while the flag is off", () => {
+  it("shows no daily-plan item at any hour while the flag is off", () => {
     if (PHASE_A_DAILY_PLAN) return;
     for (let hour = 0; hour < 24; hour++) {
-      expect(visibleNow("day_plan_not_set", hour), `hour ${hour}`).toBe(false);
-      expect(visibleNow("weekly_plan_not_set", hour), `hour ${hour}`).toBe(
-        false,
-      );
+      expect(
+        visibleNow("day_plan_not_set", hour, THURSDAY),
+        `hour ${hour}`,
+      ).toBe(false);
     }
   });
 });

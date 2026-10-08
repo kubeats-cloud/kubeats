@@ -191,7 +191,7 @@ export async function bellFor(
     "follow_ups_missed",
   ];
 
-  if (followUpKinds.some((k) => visibleNow(k, hour))) {
+  if (followUpKinds.some((k) => visibleNow(k, hour, today))) {
     const { data, error } = await supabase
       .from("follow_up_tasks")
       .select("member")
@@ -216,7 +216,7 @@ export async function bellFor(
        */
       const kind = [...followUpKinds]
         .reverse()
-        .find((k) => visibleNow(k, hour));
+        .find((k) => visibleNow(k, hour, today));
       if (kind && counts.size > 0) {
         items.push(...linesFor(kind, counts, roster, isOwn));
       }
@@ -224,7 +224,7 @@ export async function bellFor(
   }
 
   /* ---- Phase A: today's plan is empty -------------------------------- */
-  if (visibleNow("day_plan_not_set", hour)) {
+  if (visibleNow("day_plan_not_set", hour, today)) {
     const { data, error } = await supabase
       .from("daily_plans")
       .select("member")
@@ -250,7 +250,7 @@ export async function bellFor(
   }
 
   /* ---- Phase A: next week is not committed --------------------------- */
-  if (visibleNow("weekly_plan_not_set", hour)) {
+  if (visibleNow("weekly_plan_not_set", hour, today)) {
     const monday = nextMonday(today);
     const { data, error } = await supabase
       .from("targets")
