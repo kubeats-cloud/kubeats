@@ -370,13 +370,13 @@ export function TeamPanel({
               {members.length} {members.length === 1 ? "person" : "people"}
             </span>
           </CardTitle>
-          {/* The second door to the hierarchy, the first being /team. It is not
-              a tab: who created which account is read a few times a year, which
-              is the distance /data and /team/report are kept at. */}
+          {/* The second door to team leads and their reps, the first being
+              /team. Not a tab: teams are restaffed rarely, which is the
+              distance /data and /team/report are kept at. */}
           <Button asChild variant="outline" className="h-9">
             <Link href="/team/hierarchy">
               <NetworkIcon className="size-4" aria-hidden />
-              Who created whom
+              Team Leads Assign
             </Link>
           </Button>
         </div>

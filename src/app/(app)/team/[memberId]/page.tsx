@@ -283,7 +283,7 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
         <Button asChild variant="outline" className="h-11">
           <Link href="/team/hierarchy">
             <NetworkIcon className="size-4" aria-hidden />
-            Hierarchy
+            Team Leads Assign
           </Link>
         </Button>
       </div>

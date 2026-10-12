@@ -14,13 +14,9 @@ import type { TeamMember } from "@/lib/admin";
 /**
  * Who reports to whom — the chart that DOES decide what people see (H3).
  *
- * ⚠ IT SITS BESIDE THE created_by CHART, NOT INSTEAD OF IT, and the contrast is
- * the documentation. That one records how the roster was set up and says in its
- * own description that it "does not decide what anyone can see"; this one is
- * `profiles.team_lead_id`, which every policy rewritten by 0042 turns on. Two
- * charts of the same people meaning opposite kinds of thing is exactly the
- * distinction this codebase has spent three migrations keeping straight, and
- * showing them together is the cheapest way to keep it visible.
+ * `profiles.team_lead_id`, which every policy rewritten by 0042 turns on. Not
+ * `profiles.created_by`: that column records who opened an account and decides
+ * nothing, and its chart has been retired from the screen.
  *
  * THREE TIERS, AND THE THIRD IS THE ONE THAT MATTERS ON DAY ONE. Admins, then
  * each team lead with their reps, then REPS ON NO TEAM — which is every rep
