@@ -9,7 +9,7 @@ import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
 import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
-import { ActivityGridTable } from "@/components/report/activity-grid-table";
+import { OverviewPipeline } from "@/components/admin/overview-pipeline";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { SEED_STATUS_CATALOGUE } from "@/lib/validation/institute";
@@ -24,14 +24,13 @@ import { listUnseenAlerts } from "@/lib/alerts";
 import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
-import { formatDate, todayISO } from "@/lib/dates";
+import { todayISO } from "@/lib/dates";
 import { getOverview } from "@/lib/admin-workspace";
-import { getActivityReportModel } from "@/lib/exports/activity-export";
-import { defaultExportRange } from "@/lib/validation/export";
+import { getOverviewPipeline } from "@/lib/overview-pipeline";
 
 export const metadata = { title: "Dashboard" };
 
-export default async function DashboardPage() {
+export default async function DashboardPage(props: PageProps<"/">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
@@ -40,9 +39,6 @@ export default async function DashboardPage() {
 
   // An admin loads the supervision view; a rep loads their own day. Neither
   // pays for the other's queries.
-  // This month, for the admin's activity card. Stated by the export schema so
-  // the card, the full report and the download cannot default differently.
-  const range = defaultExportRange();
 
   /*
    * EVERY FETCH IS WRAPPED, because this is the screen a rep lands on.
@@ -77,7 +73,7 @@ export default async function DashboardPage() {
     // institute is being re-opened after a closed loop.
     settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "dashboard:statuses"),
     admin
-      ? settled(getActivityReportModel(range, null), null, "dashboard:report")
+      ? settled(props.searchParams.then(getOverviewPipeline), null, "dashboard:pipeline")
       : Promise.resolve(null),
     /*
      * A3/A1 — today's follow-ups, from `follow_up_tasks`.
@@ -179,47 +175,7 @@ export default async function DashboardPage() {
             <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />
           )}
 
-          {/* THE SAME TABLE THE REPORT PAGE SHOWS, compact — and the same
-              columns as it, so the card and the full report cannot say
-              different things.
-
-              The STATUS bands only: `showActivities: false` drops DASHBOARD
-              ACTIVITIES, whose six counts repeated what /team and /report
-              already show and pushed the status columns — the ones an admin
-              opens this card to read — off the right-hand edge. Every status
-              column is still here and still scrolls sideways rather than being
-              dropped, because a status column invisible on the dashboard is one
-              nobody knows to look for.
-
-              The .xlsx is UNAFFECTED: the flag lives at the caller and the
-              export never passes it. See GridInput in activity-grid.ts. */}
-          <SectionTitle className="mt-8">
-            Activity this month
-            <span className="text-muted-foreground ml-2 text-xs font-normal">
-              {formatDate(range.start)} – {formatDate(range.end)}
-            </span>
-          </SectionTitle>
-
-          {report?.ok ? (
-            <>
-              <div className="mt-3">
-                <ActivityGridTable
-                  data={{
-                    reps: report.model.reps,
-                    columns: report.model.columns,
-                    showActivities: false,
-                  }}
-                  compact
-                  caption="Activity by rep this month"
-                />
-              </div>
-              <Button asChild variant="outline" className="mt-3 h-11 w-full">
-                <Link href="/team/report">View full report</Link>
-              </Button>
-            </>
-          ) : (
-            <ErrorState message="We could not load the activity report just now. Please try again in a moment." />
-          )}
+          <OverviewPipeline result={report} />
         </>
       ) : (
         <>

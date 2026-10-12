@@ -504,7 +504,14 @@ describe("the two screen callers opt out", () => {
     );
 
   it("the admin Overview passes showActivities: false", () => {
-    expect(page("(app)/page.tsx")).toContain("showActivities: false");
+    expect(
+      readFileSync(
+        fileURLToPath(
+          new URL("../../src/components/admin/overview-pipeline.tsx", import.meta.url),
+        ),
+        "utf8",
+      ),
+    ).toContain("showActivities={false}");
   });
 
   it("/team/report passes showActivities: false", () => {
