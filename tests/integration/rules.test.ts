@@ -10,6 +10,7 @@ import {
 import { followUpRequired } from "@/lib/validation/visit";
 import { visitMinutes, visitStatusOf } from "@/lib/validation/checkin";
 import { istDayAfter, istDayStart } from "@/lib/dates";
+import { followUpItemsFor, type DueTaskRow } from "@/lib/notifications";
 
 /**
  * The rules that live in Postgres.
@@ -8640,12 +8641,16 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       }
     });
 
-    /** The bell's follow-up query, exactly as notifications.ts issues it. */
+    /**
+     * The bell's follow-up query, exactly as notifications.ts issues it
+     * (Rep 5) — `due_date <= today`, not `= today`: an overdue task is as
+     * outstanding as one due today.
+     */
     const dueTasksAsSeenBy = async (who: Member) => {
       const { data, error } = await who.db
         .from("follow_up_tasks")
         .select("member")
-        .eq("due_date", bellToday)
+        .lte("due_date", bellToday)
         .is("done_at", null);
       if (error) throw new Error(`tasks: ${error.message}`);
       return new Set((data ?? []).map((r) => r.member as string));
@@ -8753,6 +8758,115 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         targetMembers.has(bellRepB.id),
         "⚠ LEAK: lead A can read team B's targets",
       ).toBe(false);
+    });
+
+    /**
+     * Rep 5 — the badge is an honest count, built from REAL rows through the
+     * REAL `followUpItemsFor()`. `bellFor()` itself cannot run here (see this
+     * suite's header); this is as close as a test gets — the exact query,
+     * fed into the exact function that turns rows into what the badge counts.
+     */
+    describe("Rep 5 — one item per task, fed real rows", () => {
+      const fullSelect = (who: Member) =>
+        who.db
+          .from("follow_up_tasks")
+          .select("id, member, kind, due_date, institutes(name)")
+          .lte("due_date", bellToday)
+          .is("done_at", null)
+          .eq("member", bellRepA.id);
+
+      it("counts a due-today AND an overdue task as two items, not merged", async () => {
+        const overdueSchool = await makeInstitute(bellRepA.id, campusA, "bell-overdue");
+        const { error } = await admin.from("follow_up_tasks").insert({
+          member: bellRepA.id, institute_id: overdueSchool,
+          kind: "meeting", due_date: iso(-3),
+        });
+        expect(error, error?.message).toBeNull();
+
+        const { data, error: selectError } = await fullSelect(bellRepA);
+        expect(selectError, selectError?.message).toBeNull();
+
+        const items = followUpItemsFor(
+          (data ?? []) as DueTaskRow[],
+          { ids: [bellRepA.id], names: new Map() },
+          true,
+          bellToday,
+        );
+        expect(items).toHaveLength(2);
+        const overdueItem = items.find((i) => i.dueDate !== bellToday);
+        expect(overdueItem?.overdue).toBe(true);
+        expect(overdueItem?.taskKind).toBe("meeting");
+        expect(overdueItem?.href).toBe("/pending?due=today");
+        expect(items.find((i) => i.dueDate === bellToday)?.overdue).toBe(false);
+
+        await admin.from("follow_up_tasks").delete().eq("institute_id", overdueSchool);
+        await admin.from("institutes").delete().eq("id", overdueSchool);
+      });
+
+      /**
+       * ★ THE EXPECTED RESULT, PROVEN AGAINST REAL ROWS ★ — "Completing one of
+       * two drops the badge 2 -> 1 and keeps the other visible." Two real
+       * open tasks, close one for real, read back: the closed one is gone by
+       * `done_at`, the other's own identity (not just a decremented number)
+       * is still there.
+       */
+      it("completing one of two leaves exactly the other, by its own id", async () => {
+        const secondSchool = await makeInstitute(bellRepA.id, campusA, "bell-second");
+        const { data: created, error } = await admin.from("follow_up_tasks").insert({
+          member: bellRepA.id, institute_id: secondSchool,
+          kind: "call", due_date: bellToday,
+        }).select("id").single();
+        expect(error, error?.message).toBeNull();
+
+        const before = await fullSelect(bellRepA);
+        expect((before.data ?? []).length, "both tasks open").toBe(2);
+
+        // Complete the ORIGINAL task from beforeAll, exactly as the log-call
+        // page's submit would (note/outcome/done_at — never daily_plans).
+        await admin.from("follow_up_tasks")
+          .update({ done_at: new Date().toISOString(), outcome: "done" })
+          .eq("member", bellRepA.id).eq("due_date", bellToday)
+          .neq("id", created!.id);
+
+        const after = await fullSelect(bellRepA);
+        const items = followUpItemsFor(
+          (after.data ?? []) as DueTaskRow[],
+          { ids: [bellRepA.id], names: new Map() },
+          true,
+          bellToday,
+        );
+        expect(items.map((i) => i.id)).toEqual([`follow_up_task:${created!.id}`]);
+
+        // Put both back open, so order between tests in this suite cannot matter.
+        await admin.from("follow_up_tasks")
+          .update({ done_at: null, outcome: null })
+          .eq("member", bellRepA.id).eq("due_date", bellToday);
+        await admin.from("follow_up_tasks").delete().eq("id", created!.id);
+        await admin.from("institutes").delete().eq("id", secondSchool);
+      });
+
+      it("carries the institute's real name through the same embed notifications.ts reads", async () => {
+        const { data, error } = await fullSelect(bellRepA);
+        expect(error, error?.message).toBeNull();
+        const items = followUpItemsFor(
+          (data ?? []) as DueTaskRow[],
+          { ids: [bellRepA.id], names: new Map() },
+          true,
+          bellToday,
+        );
+        expect(items[0]?.instituteName).toContain("bell-a");
+      });
+
+      it("a viewed-but-incomplete task is unaffected by merely reading it twice", async () => {
+        // "Does NOT clear a task on view" — reading the same query again
+        // must answer with the SAME task, not fewer.
+        const first = await fullSelect(bellRepA);
+        const second = await fullSelect(bellRepA);
+        expect((first.data ?? []).length).toBe((second.data ?? []).length);
+        expect((first.data ?? []).map((r) => r.id)).toEqual(
+          (second.data ?? []).map((r) => r.id),
+        );
+      });
     });
   });
 });
