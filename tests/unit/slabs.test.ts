@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { z } from "zod";
 
 import {
   nextSlabStart,
@@ -24,7 +25,8 @@ const read = (path: string) =>
  * that looks fine, and the last section checks each rule is spelled in both.
  */
 
-const set = (over: Partial<SlabSetInput> = {}): SlabSetInput =>
+/** Input shape: `amount` may be omitted. `slabSetSchema.parse` fills it in. */
+const set = (over: Partial<z.input<typeof slabSetSchema>> = {}): SlabSetInput =>
   slabSetSchema.parse({
     institute_id: "8b1a9953-4c22-4d1f-9b1a-99534c224d1f",
     scope: "total",
@@ -129,9 +131,66 @@ describe("the rules, each refused on its own", () => {
     ).toContain('The last slab must be open-ended — leave its end blank for "0 and above".');
   });
 
+  it("accepts a blank amount, zero, and a positive whole number", () => {
+    expect(validateSlabSet(set())).toEqual([]);
+    expect(
+      validateSlabSet(
+        set({
+          slabs: [
+            { start: "0", end: "99", amount: "0" },
+            { start: "100", end: "", amount: "1500" },
+          ],
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      validateSlabSet(set({ slabs: [{ start: "0", end: "", amount: "" }] })),
+    ).toEqual([]);
+  });
+
+  it("refuses a negative amount and a non-integer", () => {
+    expect(messages(set({ slabs: [{ start: "0", end: "", amount: "-5" }] }))).toContain(
+      "Slab 1: an amount cannot be negative.",
+    );
+    expect(messages(set({ slabs: [{ start: "0", end: "", amount: "12.5" }] }))).toContain(
+      "Slab 1: the amount must be a whole number of rupees.",
+    );
+  });
+
   it("refuses a negative start", () => {
     expect(messages(set({ slabs: [{ start: "-5", end: "" }] }))).toContain(
       "Slab 1: a start cannot be negative.",
+    );
+  });
+
+  it("accepts a blank amount, and a whole-rupee amount including zero", () => {
+    expect(validateSlabSet(set({ slabs: [{ start: "0", end: "", amount: "" }] }))).toEqual([]);
+    expect(validateSlabSet(set({ slabs: [{ start: "0", end: "", amount: "0" }] }))).toEqual([]);
+    expect(
+      validateSlabSet(
+        set({
+          slabs: [
+            { start: "0", end: "99", amount: "1500" },
+            { start: "100", end: "", amount: "" },
+          ],
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("treats a missing amount as blank", () => {
+    expect(validateSlabSet(set())).toEqual([]);
+  });
+
+  it("refuses a negative amount", () => {
+    expect(messages(set({ slabs: [{ start: "0", end: "", amount: "-1" }] }))).toContain(
+      "Slab 1: an amount cannot be negative.",
+    );
+  });
+
+  it("refuses an amount that is not a whole number", () => {
+    expect(messages(set({ slabs: [{ start: "0", end: "", amount: "12.5" }] }))).toContain(
+      "Slab 1: the amount must be a whole number of rupees.",
     );
   });
 
@@ -179,14 +238,19 @@ describe("the rules, each refused on its own", () => {
 
 describe("the next start, auto-suggested", () => {
   it("is one past the last closed end", () => {
-    expect(nextSlabStart([{ start: 0, end: 99 }])).toBe(100);
-    expect(nextSlabStart([{ start: 0, end: 99 }, { start: 100, end: 499 }])).toBe(500);
+    expect(nextSlabStart([{ start: 0, end: 99, amount: null }])).toBe(100);
+    expect(
+      nextSlabStart([
+        { start: 0, end: 99, amount: 1500 },
+        { start: 100, end: 499, amount: null },
+      ]),
+    ).toBe(500);
   });
 
   /** Nothing to suggest FROM: a 0 would put a number in a box nobody chose. */
   it("is null when there is nothing to go on", () => {
     expect(nextSlabStart([])).toBeNull();
-    expect(nextSlabStart([{ start: 0, end: null }])).toBeNull();
+    expect(nextSlabStart([{ start: 0, end: null, amount: null }])).toBeNull();
   });
 });
 
@@ -273,6 +337,23 @@ describe("the app's rules and the database's say the same thing", () => {
     expect(code()).not.toMatch(/'revoked'/i);
   });
 
+  /**
+   * Amount lives in 0045, inside the same jsonb row, and the sentence is the
+   * one save_slabs() raises. A form that accepted a negative the database
+   * refused would be the drift this file exists to catch.
+   */
+  it("refuses a negative amount in save_slabs the same way the form does", () => {
+    const sql = read("supabase/migrations/0045_slab_amount.sql")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/--.*$/gm, "");
+    expect(sql).toContain("an amount cannot be negative");
+    expect(sql).toContain("nullif(value ->> 'amount', '')::integer");
+    expect(sql).toContain("check (amount is null or amount >= 0)");
+    expect(sql).toContain(
+      "p_institute uuid, p_scope text, p_college text, p_program text, p_slabs jsonb",
+    );
+  });
+
   /** Empanelled is computed, never a column. */
   it("computes empanelled rather than storing it", () => {
     const body = code();
@@ -290,5 +371,22 @@ describe("the app's rules and the database's say the same thing", () => {
     expect(body).not.toMatch(/current_admissions|admission_count\b|slab_for\(/i);
     const app = read("src/lib/validation/slabs.ts");
     expect(app).not.toMatch(/function (slabFor|currentSlab)/);
+  });
+
+  /**
+   * The rupee amount lives in 0045, inside the same jsonb row, not as a new
+   * parameter. The sentence is the one validateSlabSet() shows.
+   */
+  it("keeps the optional amount inside save_slabs, on the same signature", () => {
+    const sql = read("supabase/migrations/0045_slab_amount.sql")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/--.*$/gm, "");
+    expect(sql).toContain("an amount cannot be negative");
+    expect(sql).toContain("nullif(value ->> 'amount', '')::integer");
+    expect(sql).toContain("slab_amount_non_negative");
+    expect(sql).toContain(
+      "p_institute uuid, p_scope text, p_college text, p_program text, p_slabs jsonb",
+    );
+    expect(sql).not.toContain("drop function");
   });
 });

@@ -56,6 +56,11 @@ export interface SlabRow {
   start: number;
   /** Null is the open-ended LAST slab ("1200 and above"), never a missing value. */
   end: number | null;
+  /**
+   * Whole rupees. Null means the rep left the box blank — not zero, and not
+   * "we do not know". Zero is an amount they typed.
+   */
+  amount: number | null;
 }
 
 /** One row as the form holds it: text, because an empty end is a real answer. */
@@ -63,6 +68,14 @@ const slabInput = z.object({
   start: z.union([z.string(), z.number()]).transform((v) => String(v).trim()),
   end: z
     .union([z.string(), z.number(), z.null(), z.undefined()])
+    .transform((v) => (v === null || v === undefined ? "" : String(v).trim())),
+  /**
+   * Optional. Omitted, null and "" are all "no amount", so a caller that
+   * still posts the pre-0045 shape parses. Present means digits the rep typed.
+   */
+  amount: z
+    .union([z.string(), z.number(), z.null(), z.undefined()])
+    .optional()
     .transform((v) => (v === null || v === undefined ? "" : String(v).trim())),
 });
 
@@ -158,6 +171,23 @@ export function validateSlabSet(input: SlabSetInput): SlabProblem[] {
         index: at,
         message: `Slab ${at} must start at ${previousEnd + 1}, right after the previous slab ends.`,
       });
+    }
+
+    // OPTIONAL WHOLE RUPEES. Blank is null. The same sentence save_slabs() raises.
+    const amountText = row.amount ?? "";
+    if (amountText !== "") {
+      const amount = Number(amountText);
+      if (!Number.isInteger(amount)) {
+        problems.push({
+          index: at,
+          message: `Slab ${at}: the amount must be a whole number of rupees.`,
+        });
+      } else if (amount < 0) {
+        problems.push({
+          index: at,
+          message: `Slab ${at}: an amount cannot be negative.`,
+        });
+      }
     }
 
     previousEnd = end;

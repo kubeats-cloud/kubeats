@@ -44,6 +44,24 @@ import type { SlabSet } from "@/lib/slabs";
  * "you are in slab 3", no current count: these are ranges, and anything else
  * would be invented.
  */
+/**
+ * What the amount box keeps while the rep is typing.
+ *
+ * Start and end drop every non-digit, because a letter there is never a range.
+ * Amount keeps a leading minus and a single decimal point. Those are the two
+ * mistakes validateSlabSet names — a negative, and a figure that is not a whole
+ * number of rupees — and stripping them would turn "-1" into "1" and "12.5"
+ * into "125" before the form could say what was wrong.
+ */
+function amountDraft(raw: string): string {
+  const negative = raw.startsWith("-");
+  const body = raw.replace(/-/g, "").replace(/[^\d.]/g, "");
+  const dot = body.indexOf(".");
+  const digits =
+    dot === -1 ? body : `${body.slice(0, dot + 1)}${body.slice(dot + 1).replace(/\./g, "")}`;
+  return `${negative ? "-" : ""}${digits}`;
+}
+
 export function SlabsPanel({
   instituteId,
   sets,
@@ -150,11 +168,12 @@ function SlabSetForm({
 
   const [college, setCollege] = useState(set?.college ?? "");
   const [program, setProgram] = useState(set?.program ?? "");
-  const [rows, setRows] = useState<{ start: string; end: string }[]>(
+  const [rows, setRows] = useState<{ start: string; end: string; amount: string }[]>(
     set?.slabs.map((s) => ({
       start: String(s.start),
       end: s.end === null ? "" : String(s.end),
-    })) ?? [{ start: "0", end: "" }],
+      amount: s.amount === null ? "" : String(s.amount),
+    })) ?? [{ start: "0", end: "", amount: "" }],
   );
   const [clientError, setClientError] = useState<string | null>(null);
 
@@ -179,9 +198,14 @@ function SlabSetForm({
         next.map((r) => ({
           start: Number(r.start),
           end: r.end === "" ? null : Number(r.end),
+          amount: r.amount === "" ? null : Number(r.amount),
         })),
       );
-      next.push({ start: suggestion === null ? "" : String(suggestion), end: "" });
+      next.push({
+        start: suggestion === null ? "" : String(suggestion),
+        end: "",
+        amount: "",
+      });
       return next;
     });
   }
@@ -192,7 +216,7 @@ function SlabSetForm({
       // The last slab is always open-ended; dropping the old one leaves its
       // predecessor closed, which would be a set with no open end.
       if (next.length > 0) next[next.length - 1] = { ...next[next.length - 1], end: "" };
-      return next.length > 0 ? next : [{ start: "0", end: "" }];
+      return next.length > 0 ? next : [{ start: "0", end: "", amount: "" }];
     });
   }
 
@@ -322,6 +346,26 @@ function SlabSetForm({
                         position and a short list would shift every row. */}
                     {isLast && <input type="hidden" name="end" value="" />}
                   </div>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    {i === 0 && <Label className="text-xs">Amount (₹)</Label>}
+                    <Input
+                      name="amount"
+                      inputMode="numeric"
+                      className="h-11"
+                      aria-label={`Slab ${i + 1} amount in rupees`}
+                      placeholder="Optional"
+                      value={row.amount}
+                      onChange={(e) =>
+                        setRows((c) =>
+                          c.map((r, j) =>
+                            j === i
+                              ? { ...r, amount: amountDraft(e.target.value) }
+                              : r,
+                          ),
+                        )
+                      }
+                    />
+                  </div>
                   <Button
                     type="button"
                     variant="ghost"
@@ -370,10 +414,13 @@ function SlabSetForm({
       ) : (
         <ul className="divide-border divide-y text-sm">
           {set?.slabs.map((slab) => (
-            <li key={slab.id} className="flex justify-between py-1.5">
+            <li key={slab.id} className="flex justify-between gap-3 py-1.5">
               <span className="tabular-nums">
                 {slab.start}
                 {slab.end === null ? " and above" : `–${slab.end}`}
+              </span>
+              <span className="text-muted-foreground tabular-nums">
+                {slab.amount === null ? "No amount" : `₹${slab.amount}`}
               </span>
             </li>
           ))}
