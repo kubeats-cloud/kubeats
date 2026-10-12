@@ -438,3 +438,25 @@ export async function getInstituteStatusHistory(
     })),
   };
 }
+
+/**
+ * How many institutes the calling rep has registered.
+ *
+ * No `.eq("registered_by", ...)` — same reasoning as `listInstitutesForPicker()`
+ * in visits.ts: `institutes_select` already narrows a rep to their own rows, so
+ * a plain `head: true` count on this table IS that rep's count. An admin should
+ * not call this; it would return their own (near-zero) registrations, not the
+ * team's.
+ */
+export async function countMyInstitutes(): Promise<number | null> {
+  const supabase = await createClient();
+  const { count, error } = await supabase
+    .from("institutes")
+    .select("id", { count: "exact", head: true });
+
+  if (error) {
+    logError("institutes:my-count", error);
+    return null;
+  }
+  return count ?? null;
+}

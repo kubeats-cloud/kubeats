@@ -8,19 +8,24 @@ import { cn } from "@/lib/utils";
  * The tiles carry the counts so the plan card below can get on with being a
  * list — the same figures in both places would only invite them to disagree.
  *
- * THERE WERE THREE. "Open loops" counted visits still at "Set" and not closed,
- * and it is gone (decision D7). Pending means something wider now — every
- * institute whose current status is OPEN — so the tile would have sat here
- * counting a different thing under the same word, one tap away from the screen
- * that disagreed with it. Two "open" numbers that do not match is how a team
- * stops trusting both.
+ * A THIRD TILE WAS REMOVED ONCE ALREADY. "Open loops" counted visits still at
+ * "Set" and not closed, and it was dropped (decision D7) because Pending meant
+ * something wider — every institute whose current status is OPEN — so the
+ * tile would have counted a different thing under the same word, one tap away
+ * from a screen that disagreed with it.
+ *
+ * The third slot here now is unrelated: Total Institutes Registered is a
+ * rep's own lifetime count, not a daily figure, so it carries no "open" word
+ * for Pending to collide with.
  */
 export function TodaySnapshot({
   planned,
   held,
+  totalInstitutes,
 }: {
   planned: number;
   held: number;
+  totalInstitutes: number;
 }) {
   const heldTone =
     planned === 0
@@ -32,9 +37,10 @@ export function TodaySnapshot({
           : "text-danger";
 
   return (
-    <div className="mb-5 grid grid-cols-2 gap-3 md:mb-6 md:max-w-md">
+    <div className="mb-5 grid grid-cols-3 gap-3 md:mb-6 md:max-w-md">
       <Tile label="Planned" value={planned} />
       <Tile label="Held" value={held} valueClassName={heldTone} />
+      <Tile label="Total Institutes Registered" value={totalInstitutes} />
     </div>
   );
 }
