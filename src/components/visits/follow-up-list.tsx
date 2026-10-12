@@ -18,6 +18,8 @@ import { EmptyState } from "@/components/states";
 import { FormNotice } from "@/components/form-notice";
 import { cn } from "@/lib/utils";
 import { formatDate, todayISO } from "@/lib/dates";
+import { PreviewToggle } from "@/components/preview-toggle";
+import { previewWindow } from "@/lib/list-preview";
 import { assignVisit, startFollowUp } from "@/lib/visit-actions";
 import { clearDraft, followUpDraftKey, readDraft } from "@/lib/drafts";
 import { useDraft } from "@/lib/use-draft";
@@ -56,6 +58,7 @@ export function FollowUpList({
   purposes,
   catalogue,
   readOnly,
+  preview,
 }: {
   items: FollowUp[];
   /** Offered when starting a follow-up. Empty for an admin, who cannot. */
@@ -63,8 +66,16 @@ export function FollowUpList({
   catalogue: StatusCatalogue;
   /** True for an admin: the whole team's list, and nothing to tap. */
   readOnly: boolean;
+  /**
+   * When set, and only when the list is longer, the first rows show until
+   * "View all". Omitted everywhere except the member hub, so Pending still
+   * renders every row it was given.
+   */
+  preview?: number;
 }) {
   const [open, setOpen] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const listAnchor = useRef<HTMLDivElement>(null);
 
   /*
    * REOPEN THE PANEL THE DRAFT BELONGS TO.
@@ -111,10 +122,31 @@ export function FollowUpList({
   }
 
   const today = todayISO();
+  // An open panel past the preview keeps the full list up, so "Show less"
+  // cannot hide a form the reader is in the middle of.
+  const openPastPreview =
+    preview !== undefined &&
+    open !== null &&
+    items.findIndex((item) => item.instituteId === open) >= preview;
+  const shown = previewWindow(items, preview, expanded || openPastPreview);
+
+  function toggleList() {
+    const showingAll = expanded || openPastPreview;
+    if (showingAll) {
+      if (openPastPreview) setOpen(null);
+      setExpanded(false);
+      requestAnimationFrame(() =>
+        listAnchor.current?.scrollIntoView({ block: "start" }),
+      );
+      return;
+    }
+    setExpanded(true);
+  }
 
   return (
+    <div ref={listAnchor}>
     <ul className="space-y-3">
-      {items.map((item) => {
+      {shown.visible.map((item) => {
         // Compared as plain YYYY-MM-DD strings, which sort correctly and cannot
         // be dragged across a day boundary by whichever timezone the code is
         // running in. dates.ts is the only thing that formats one.
@@ -241,6 +273,15 @@ export function FollowUpList({
         );
       })}
     </ul>
+    {shown.canToggle && (
+      <PreviewToggle
+        expanded={expanded || openPastPreview}
+        total={items.length}
+        onToggle={toggleList}
+        listLabel={items.length === 1 ? "follow-up" : "follow-ups"}
+      />
+    )}
+    </div>
   );
 }
 
