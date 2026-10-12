@@ -92,8 +92,13 @@ export async function listSlabSets(
     return { ok: false };
   }
 
+  return { ok: true, sets: groupSets((data ?? []) as unknown as RawSlab[]) };
+}
+
+/** Rows already ordered by scope, college, program, start — folded into sets. */
+function groupSets(rows: RawSlab[]): SlabSet[] {
   const grouped = new Map<string, SlabSet>();
-  for (const raw of (data ?? []) as unknown as RawSlab[]) {
+  for (const raw of rows) {
     const scope = raw.scope as SlabScope;
     const key = slabSetKey({ scope, college: raw.college, program: raw.program });
 
@@ -126,7 +131,67 @@ export async function listSlabSets(
     });
   }
 
-  return { ok: true, sets: [...grouped.values()] };
+  return [...grouped.values()];
+}
+
+/** One institute's sets in the admin queue. */
+export interface SlabQueueInstitute {
+  instituteId: string;
+  instituteName: string;
+  sets: SlabSet[];
+}
+
+/**
+ * Every pending and approved set across the institutes the caller can read,
+ * grouped by institute — the admin's Slab queue.
+ *
+ * The same table and the same RLS as `listSlabSets()`, minus the institute
+ * filter. Rejected sets are left out: they are back with the rep.
+ */
+export async function listSlabQueue(): Promise<
+  { ok: true; institutes: SlabQueueInstitute[] } | { ok: false }
+> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("institute_slabs")
+    .select(`institute_id, institutes(name), ${SELECT}`)
+    .in("status", ["pending", "approved"])
+    .order("institute_id", { ascending: true })
+    .order("scope", { ascending: true })
+    .order("college", { ascending: true, nullsFirst: true })
+    .order("program", { ascending: true, nullsFirst: true })
+    .order("start_count", { ascending: true });
+
+  if (error) {
+    logError("slabs:queue", error);
+    return { ok: false };
+  }
+
+  type QueueRow = RawSlab & {
+    institute_id: string;
+    institutes: { name: string } | null;
+  };
+
+  const byInstitute = new Map<string, { name: string; rows: RawSlab[] }>();
+  for (const row of (data ?? []) as unknown as QueueRow[]) {
+    const entry = byInstitute.get(row.institute_id);
+    if (entry) entry.rows.push(row);
+    else
+      byInstitute.set(row.institute_id, {
+        name: row.institutes?.name ?? "Unknown institute",
+        rows: [row],
+      });
+  }
+
+  const institutes = [...byInstitute.entries()]
+    .map(([instituteId, { name, rows }]) => ({
+      instituteId,
+      instituteName: name,
+      sets: groupSets(rows),
+    }))
+    .sort((a, b) => a.instituteName.localeCompare(b.instituteName));
+
+  return { ok: true, institutes };
 }
 
 /**

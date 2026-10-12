@@ -35,8 +35,11 @@ describe("navItemsFor", () => {
   it("gives an admin the workspace and none of the fieldwork", () => {
     const hrefs = navItemsFor("admin").map((i) => i.href);
     expect(hrefs).toContain("/review");
-    expect(hrefs).toContain("/assign");
     expect(hrefs).toContain("/team");
+    // Assign left the bar for Slabs (Admin 3); the route stays staff-reachable.
+    expect(hrefs).not.toContain("/assign");
+    expect(hrefs).toContain("/slabs");
+    expect(isStaffOnlyPath("/assign")).toBe(true);
     expect(hrefs).not.toContain("/log");
     // Out of the BAR, not out of reach: an admin gets to Pending from the
     // Overview's "Go to" list, the same way they reach /report and /data.
@@ -54,7 +57,7 @@ describe("navItemsFor", () => {
   it("gives a team lead the workspace without Settings", () => {
     const hrefs = navItemsFor("team_lead").map((i) => i.href);
     expect(hrefs).toContain("/review");
-    expect(hrefs).toContain("/assign");
+    expect(hrefs).not.toContain("/assign");
     expect(hrefs).toContain("/team");
     expect(hrefs).not.toContain("/settings");
     // Not a field role either: no Log Visit, and the proxy refuses it too.
@@ -92,13 +95,14 @@ describe("navItemsFor", () => {
 
   it("keeps every bar small enough to sit in a phone's thumb bar", () => {
     // Seven for a rep: Slabs earned the extra tab. The institute page still
-    // mounts the same panel; this is the direct way in. Admin and team lead
-    // stay at six — the tab is not on their bars.
+    // mounts the same panel; this is the direct way in. An admin's Slabs took
+    // Assign's slot, so their bar stays at six; a team lead does not decide
+    // slabs (FO037) and has no Slabs tab.
     expect(REP_NAV).toHaveLength(7);
     expect(REP_NAV.map((item) => item.href)).toContain("/slabs");
-    expect(navItemsFor("admin").map((item) => item.href)).not.toContain("/slabs");
+    expect(navItemsFor("admin").map((item) => item.href)).toContain("/slabs");
     expect(navItemsFor("team_lead").map((item) => item.href)).not.toContain("/slabs");
-    // An admin who opens the URL can still revoke. Rep-only would bounce them.
+    // Shared by every role. Rep-only would bounce the admin off their queue.
     expect(isRepOnlyPath("/slabs")).toBe(false);
     expect(ADMIN_NAV.length).toBeLessThanOrEqual(6);
     expect(TEAM_LEAD_NAV.length).toBeLessThanOrEqual(6);
