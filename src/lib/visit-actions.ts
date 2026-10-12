@@ -628,6 +628,15 @@ export async function removeFromDailyPlan(planId: string): Promise<FormState> {
 export async function closeFollowUpTask(
   taskId: string,
   outcome: "done" | "no_answer",
+  // Phase A fix: a kind guard. Closing a CALL this way would bypass the
+  // log-call page entirely — no note, no outcome beyond this bare pair, and
+  // "the log-call page is the single way to handle a call" would be false
+  // the moment any caller passed a call's id here. The one caller today
+  // (MeetingPrompts' "Done") only ever has meetings, but the function itself
+  // had nothing stopping a future one from reaching a call — the query now
+  // refuses to match a row of the wrong kind instead of trusting every
+  // caller to never ask for one.
+  kind: "call" | "meeting",
 ): Promise<FormState> {
   const { supabase, user } = await requireUser();
   if (!user) {
@@ -644,6 +653,7 @@ export async function closeFollowUpTask(
     .update({ done_at: new Date().toISOString(), outcome })
     .eq("id", parsed.data)
     .eq("member", user.id)
+    .eq("kind", kind)
     // Already closed stays closed: a second tap must not rewrite the outcome of
     // something somebody has already filed.
     .is("done_at", null);

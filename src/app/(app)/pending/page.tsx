@@ -10,11 +10,13 @@ import { FollowUpList } from "@/components/visits/follow-up-list";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import {
   getOpenFollowUps,
+  getTodayPlan,
   getUnreportedVisits,
   listFollowUpTasks,
   listPurposes,
 } from "@/lib/visits";
 import { FollowUpCalls } from "@/components/dashboard/follow-up-calls";
+import { MeetingPrompts } from "@/components/dashboard/meeting-prompts";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { activityLabelFor } from "@/lib/validation/visit";
 import { formatDate, todayISO } from "@/lib/dates";
@@ -78,7 +80,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
     .filter((row) => row.category === "open")
     .map((row) => row.status);
 
-  const [result, unreported, purposes, tasks] = await Promise.all([
+  const [result, unreported, purposes, tasks, plan] = await Promise.all([
     getOpenFollowUps(openStatuses, user.id),
     // An admin has no half-finished visits of their own: they do not log any.
     admin ? Promise.resolve([]) : getUnreportedVisits(user.id),
@@ -108,9 +110,19 @@ export default async function PendingPage(props: PageProps<"/pending">) {
     admin
       ? Promise.resolve({ ok: true as const, tasks: [] })
       : listFollowUpTasks(user.id, todayISO()),
+    /*
+     * Phase A fix — MeetingPrompts' dedup needs today's real entries to know
+     * which institutes are genuinely already planned (see meetingPromptsFor's
+     * own note on why "Completed" must not count). An admin logs no visits
+     * and has none of their own either.
+     */
+    admin
+      ? Promise.resolve({ ok: true as const, entries: [] })
+      : getTodayPlan(user.id),
   ]);
 
   const dueTasks = tasks.ok ? tasks.tasks : [];
+  const entries = plan.ok ? plan.entries : [];
 
   return (
     <>
@@ -180,8 +192,15 @@ export default async function PendingPage(props: PageProps<"/pending">) {
               {dueTasks.length} follow-up{dueTasks.length === 1 ? "" : "s"} you set
             </span>
           </SectionTitle>
-          <div className="mt-2">
+          <div className="mt-2 space-y-4">
             <FollowUpCalls tasks={dueTasks} />
+            {/*
+              Phase A fix — this block used to show calls only, so a
+              meeting-only day read "No calls owed today" even though the
+              section header correctly counted it. MeetingPrompts is the
+              same component the Dashboard's Meeting section renders.
+            */}
+            <MeetingPrompts tasks={dueTasks} entries={entries} />
           </div>
           <p className="text-muted-foreground mt-2 text-xs">
             The same list your dashboard shows — one row, two places to see it.

@@ -7,6 +7,7 @@ import {
   statusRow,
   type StatusCatalogue,
 } from "@/lib/validation/institute";
+import { visitStatusOf } from "@/lib/validation/checkin";
 import type { FollowUpTask, PlanEntry } from "@/lib/visits";
 
 /**
@@ -990,17 +991,39 @@ export const logCallOutcomeSchema = z.object({
  * half, so a row can never satisfy both (`follow_up_tasks_kind_valid` makes
  * `kind` exactly one of the two in the first place).
  *
- * EXCLUDES AN INSTITUTE ALREADY ON TODAY'S PLAN. A meeting prompt is a task
- * nobody has planned yet; once the rep adds that institute to today's plan —
- * by tapping "Plan it" on this very prompt, or by adding it themselves from
- * the form above — it is a real `daily_plans` row and belongs in the entries
- * list above, not twice over as a prompt as well. The task row itself is
- * untouched either way; only showing it here is what this stops.
+ * EXCLUDES AN INSTITUTE WITH A GENUINELY UPCOMING PLAN ENTRY — not merely
+ * any entry. A meeting prompt is a task nobody has planned yet; once the rep
+ * adds that institute to today's plan, by tapping "Plan it" on this very
+ * prompt or by adding it themselves from the form above, it is a real
+ * `daily_plans` row and belongs in the entries list above, not twice over as
+ * a prompt as well.
+ *
+ * ⚠ "COMPLETED" DOES NOT COUNT, AND THIS WAS THE BUG. The entry that just
+ * CREATED this very meeting — the visit the rep logged minutes ago, picking
+ * Meeting as the next action — is itself a `daily_plans` row for this same
+ * institute, today, and `visitStatusOf()` calls it "Completed". The old
+ * check only asked "is this institute in `entries` at all", which that row
+ * satisfies, so the meeting it had just raised was hidden the instant it was
+ * created — nowhere on the Dashboard, and (see pending/page.tsx) nowhere on
+ * Pending either, since that screen's "Due today" block only ever rendered
+ * calls. Checking `visitStatusOf() !== "Completed"` is the fix: a finished
+ * visit explains why the task exists, it does not plan it again.
  */
 export function meetingPromptsFor(
   tasks: readonly FollowUpTask[],
   entries: readonly PlanEntry[],
 ): FollowUpTask[] {
-  const planned = new Set(entries.map((entry) => entry.institute_id));
-  return tasks.filter((task) => task.kind === "meeting" && !planned.has(task.instituteId));
+  const upcoming = new Set(
+    entries
+      .filter(
+        (entry) =>
+          visitStatusOf({
+            checkinAt: entry.checkinAt,
+            checkoutAt: entry.checkoutAt,
+            checkoutMissing: entry.checkoutMissing,
+          }) !== "Completed",
+      )
+      .map((entry) => entry.institute_id),
+  );
+  return tasks.filter((task) => task.kind === "meeting" && !upcoming.has(task.instituteId));
 }

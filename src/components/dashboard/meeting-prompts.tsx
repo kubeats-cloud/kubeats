@@ -74,7 +74,7 @@ export function MeetingPrompts({
                 disabled={closing}
                 onClick={() =>
                   startClosing(async () => {
-                    await closeFollowUpTask(task.id, "done");
+                    await closeFollowUpTask(task.id, "done", "meeting");
                   })
                 }
               >

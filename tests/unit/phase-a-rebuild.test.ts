@@ -6,6 +6,7 @@ import {
   logCallOutcomeSchema,
   meetingPromptsFor,
 } from "@/lib/validation/visit";
+import { isActive } from "@/lib/nav";
 import type { FollowUpTask, PlanEntry } from "@/lib/visits";
 
 /**
@@ -36,8 +37,16 @@ const task = (overrides: Partial<FollowUpTask> = {}): FollowUpTask => ({
   ...overrides,
 });
 
-const entry = (institute_id: string): PlanEntry =>
-  ({ institute_id }) as PlanEntry;
+const entry = (
+  institute_id: string,
+  state: { checkinAt?: string | null; checkoutAt?: string | null; checkoutMissing?: boolean } = {},
+): PlanEntry =>
+  ({
+    institute_id,
+    checkinAt: state.checkinAt ?? null,
+    checkoutAt: state.checkoutAt ?? null,
+    checkoutMissing: state.checkoutMissing ?? false,
+  }) as PlanEntry;
 
 describe("meetingPromptsFor", () => {
   it("keeps a meeting-kind task not yet on today's plan", () => {
@@ -67,6 +76,37 @@ describe("meetingPromptsFor", () => {
     const due = meetingPromptsFor(
       [task({ instituteId: "i1", kind: "meeting" })],
       [entry("i2")],
+    );
+    expect(due).toHaveLength(1);
+  });
+
+  /**
+   * ★ THE PHASE A BUG, FIXED ★ — a Meeting next-action's own originating
+   * visit IS a `daily_plans` row for this institute, today, and it is
+   * "Completed" the instant it is logged. The old check excluded on "is
+   * this institute in entries at all", which hid the meeting it had just
+   * raised before the rep ever saw it, on the Dashboard or on Pending.
+   */
+  it("does NOT exclude a meeting whose institute's only entry is COMPLETED", () => {
+    const due = meetingPromptsFor(
+      [task({ instituteId: "i1", kind: "meeting" })],
+      [entry("i1", { checkinAt: "2026-10-13T09:00:00Z", checkoutAt: "2026-10-13T09:30:00Z" })],
+    );
+    expect(due).toHaveLength(1);
+  });
+
+  it("still excludes a meeting whose institute has an IN-PROGRESS entry", () => {
+    const due = meetingPromptsFor(
+      [task({ instituteId: "i1", kind: "meeting" })],
+      [entry("i1", { checkinAt: "2026-10-13T09:00:00Z" })],
+    );
+    expect(due).toHaveLength(0);
+  });
+
+  it("excludes a swept (checkout_missing) entry too — still Completed, not upcoming", () => {
+    const due = meetingPromptsFor(
+      [task({ instituteId: "i1", kind: "meeting" })],
+      [entry("i1", { checkinAt: "2026-10-13T09:00:00Z", checkoutMissing: true })],
     );
     expect(due).toHaveLength(1);
   });
@@ -248,7 +288,8 @@ describe("the Meeting / Follow-up calls split stays disjoint by kind", () => {
   it("MeetingPrompts (via meetingPromptsFor) filters to meeting only", () => {
     const helper = read("src/lib/validation/visit.ts");
     const fn = helper.slice(helper.indexOf("export function meetingPromptsFor"));
-    expect(fn.slice(0, 400)).toContain('task.kind === "meeting"');
+    const body = fn.slice(0, fn.indexOf("\nexport ", 1));
+    expect(body).toContain('task.kind === "meeting"');
   });
 
   it("neither Done/No-answer button survives on a call row — Log call replaces them", () => {
@@ -257,5 +298,41 @@ describe("the Meeting / Follow-up calls split stays disjoint by kind", () => {
     expect(file).not.toContain(">Done<");
     expect(file).not.toContain("No answer");
     expect(file).toContain("Log call");
+  });
+});
+
+describe("closeFollowUpTask's kind guard (Phase A fix)", () => {
+  const actions = read("src/lib/visit-actions.ts");
+  const fn = actions.slice(actions.indexOf("export async function closeFollowUpTask"));
+  const body = fn.slice(0, fn.indexOf("\nexport async function"));
+
+  it("filters the update by the caller's own kind, not just id and member", () => {
+    expect(body).toContain('.eq("kind", kind)');
+  });
+
+  it("MeetingPrompts' Done button passes \"meeting\" explicitly", () => {
+    const file = read("src/components/dashboard/meeting-prompts.tsx");
+    expect(file).toContain('closeFollowUpTask(task.id, "done", "meeting")');
+  });
+});
+
+describe("isActive no longer matches /log-call as the Log Visit tab (Phase A fix)", () => {
+  it("does not light 'Log Visit' for the log-call page", () => {
+    expect(isActive("/log-call/8b1a9953-4c22-4d1f-9b1a-99534c224d1f", "/log")).toBe(false);
+  });
+
+  it("still lights 'Log Visit' for /log itself", () => {
+    // usePathname() never carries a query string — /log?plan= is "/log" by
+    // the time it reaches isActive — so there is no query case to cover here.
+    expect(isActive("/log", "/log")).toBe(true);
+  });
+
+  it("still lights Dashboard only on an exact match", () => {
+    expect(isActive("/", "/")).toBe(true);
+    expect(isActive("/institutes", "/")).toBe(false);
+  });
+
+  it("still lights a real subtree, like an institute's own page", () => {
+    expect(isActive("/institutes/abc123", "/institutes")).toBe(true);
   });
 });

@@ -6160,6 +6160,56 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
   });
 
+  /**
+   * ★ THE PHASE A FIX, PROVEN AGAINST A REAL ROW ★ — `closeFollowUpTask()`
+   * now filters its update by the CALLER'S claimed kind, exactly as the log-
+   * call page's own `.eq("kind", "call")` already does. A caller that got
+   * the kind wrong — closing a meeting as if it were a call, or vice versa
+   * — must match zero rows, not silently close the wrong thing.
+   */
+  describe.skipIf(!has0038)("closeFollowUpTask's kind guard (Phase A fix)", () => {
+    it("refuses to close a meeting through the call-shaped update, and the reverse", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "kind-guard");
+      const { data: meeting } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "meeting" })
+        .select("id")
+        .single();
+
+      // The exact shape closeFollowUpTask(id, outcome, "call") would send —
+      // asked of a row that is actually a meeting.
+      const { data: wrongKind, error } = await repA.db
+        .from("follow_up_tasks")
+        .update({ outcome: "done", done_at: new Date().toISOString() })
+        .eq("id", meeting!.id)
+        .eq("member", repA.id)
+        .eq("kind", "call")
+        .is("done_at", null)
+        .select("id");
+      expect(error, error?.message).toBeNull();
+      expect(wrongKind, "a kind mismatch must match no rows").toEqual([]);
+
+      const { data: untouched } = await admin
+        .from("follow_up_tasks").select("done_at, outcome").eq("id", meeting!.id).single();
+      expect(untouched?.done_at, "the meeting must still be open").toBeNull();
+      expect(untouched?.outcome).toBeNull();
+
+      // And the real kind still closes it correctly.
+      const { error: rightKindError } = await repA.db
+        .from("follow_up_tasks")
+        .update({ outcome: "done", done_at: new Date().toISOString() })
+        .eq("id", meeting!.id)
+        .eq("member", repA.id)
+        .eq("kind", "meeting")
+        .is("done_at", null);
+      expect(rightKindError, rightKindError?.message).toBeNull();
+
+      const { data: closed } = await admin
+        .from("follow_up_tasks").select("done_at").eq("id", meeting!.id).single();
+      expect(closed?.done_at).not.toBeNull();
+    });
+  });
+
   /* ---------------------------------------------------------------- */
   /* A3 - close_visit's new parameters, and the overload ceremony       */
   /* ---------------------------------------------------------------- */
