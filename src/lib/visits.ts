@@ -1033,3 +1033,48 @@ export async function listFollowUpTasks(
     }),
   };
 }
+
+/**
+ * One open call, for the log-call page — never a visit, never a plan row.
+ *
+ * SCOPED TO THIS MEMBER, not merely to the institute RLS already narrows to.
+ * `follow_up_tasks_select`/`_update` let an institute's current OWNER read or
+ * close a task raised under a previous owner — correct for reassignment, but
+ * a page that found a task under that wider rule and then had its own update
+ * refused by a narrower one would be confusing. Scoping the read the same way
+ * the write already is (`logFollowUpCallOutcome` below) keeps the two from
+ * disagreeing about whose task this is.
+ *
+ * `kind = 'call'` and `done_at is null`: the wrong kind is a meeting prompt's
+ * business, and an already-closed call has nothing left to log.
+ */
+export async function getFollowUpCallById(
+  taskId: string,
+  memberId: string,
+): Promise<{ id: string; instituteId: string; instituteName: string; note: string | null } | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("follow_up_tasks")
+    .select("id, institute_id, note, institutes(name)")
+    .eq("id", taskId)
+    .eq("member", memberId)
+    .eq("kind", "call")
+    .is("done_at", null)
+    .maybeSingle();
+
+  if (error) {
+    logError("visits:follow-up-call", error);
+    return null;
+  }
+  if (!data) return null;
+
+  const joined = data.institutes as unknown;
+  const inst = (Array.isArray(joined) ? joined[0] : joined) as { name?: string } | null;
+
+  return {
+    id: data.id,
+    instituteId: data.institute_id,
+    instituteName: inst?.name ?? "This institute",
+    note: data.note,
+  };
+}

@@ -20,11 +20,12 @@
  */
 
 /**
- * Phase A's daily-plan surfaces — the dashboard's Meetings / Follow-up calls
+ * Phase A's daily-plan surfaces — the dashboard's Meeting / Follow-up calls
  * split, the "Plan the morning" tick-list, and Log Visit's "Next action" pair.
  *
- * ⚠ OFF BECAUSE THE CLIENT IS HAVING IT REDONE, NOT BECAUSE IT IS BROKEN. The
- * schema, the rows and the rules stay exactly where they are:
+ * ⚠ LIVE AGAIN, after the client confirmed the redone shape (two sections,
+ * one shared follow-up date, the log-call page). The schema, the rows and the
+ * rules were never touched while this was off, and still aren't:
  *
  *   follow_up_tasks      table, policies and FO031 all live (0038). Rows a rep
  *                        already raised are untouched and still closable — see
@@ -54,4 +55,4 @@
  * shipped to anybody yet, and `materialise_daily_alerts()` reading
  * `follow_up_tasks` is a cron job, not a screen.
  */
-export const PHASE_A_DAILY_PLAN = false;
+export const PHASE_A_DAILY_PLAN = true;

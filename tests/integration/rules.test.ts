@@ -6050,6 +6050,117 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   });
 
   /* ---------------------------------------------------------------- */
+  /* Phase A rebuild - the tick-list's Call mode and the log-call page   */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * `addManyFollowUpCalls()` and `logFollowUpCallOutcome()` cannot be called
+   * directly here — both read `createClient()` from `@/lib/supabase/server`,
+   * which calls Next's `cookies()` and throws outside a request scope, the
+   * same reason every other app-layer action in this file is exercised
+   * through its own RLS/table behaviour instead of invoked by name.
+   */
+  describe.skipIf(!has0038)("the tick-list's Call mode (Phase A rebuild)", () => {
+    it("inserts one row per ticked institute, in a single call, with no purpose", async () => {
+      const [a, b] = await Promise.all([
+        makeInstitute(repA.id, campusA, "batch-call-a"),
+        makeInstitute(repA.id, campusA, "batch-call-b"),
+      ]);
+
+      const { data, error } = await repA.db
+        .from("follow_up_tasks")
+        .insert([
+          { member: repA.id, institute_id: a, kind: "call" },
+          { member: repA.id, institute_id: b, kind: "call" },
+        ])
+        .select("institute_id, kind, purpose_id");
+      expect(error, error?.message).toBeNull();
+      expect((data ?? []).map((r) => r.institute_id).sort()).toEqual([a, b].sort());
+      expect((data ?? []).every((r) => r.kind === "call" && r.purpose_id === null)).toBe(true);
+
+      await admin.from("follow_up_tasks").delete().in("institute_id", [a, b]);
+    });
+
+    it("refuses the whole batch if one institute is not this rep's (FO031)", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "batch-call-mine");
+      const theirs = await makeInstitute(repB.id, campusA, "batch-call-theirs");
+
+      const { error } = await repA.db.from("follow_up_tasks").insert([
+        { member: repA.id, institute_id: mine, kind: "call" },
+        { member: repA.id, institute_id: theirs, kind: "call" },
+      ]);
+      expect(error, "FO031 must refuse the statement, not just one row").not.toBeNull();
+
+      const { data: leaked } = await admin
+        .from("follow_up_tasks").select("id").eq("institute_id", mine);
+      expect(leaked, "a refused statement must not have written the valid half either")
+        .toEqual([]);
+
+      await admin.from("institutes").delete().eq("id", theirs);
+    });
+  });
+
+  describe.skipIf(!has0038)("the log-call page's close (Phase A rebuild)", () => {
+    it("updates note, outcome and done_at on the rep's own open call", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "log-call");
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+
+      const { error } = await repA.db
+        .from("follow_up_tasks")
+        .update({ note: `${TAG} spoke to the principal`, outcome: "done", done_at: new Date().toISOString() })
+        .eq("id", created!.id)
+        .eq("member", repA.id)
+        .eq("kind", "call")
+        .is("done_at", null);
+      expect(error, error?.message).toBeNull();
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("note, outcome, done_at").eq("id", created!.id).single();
+      expect(task?.outcome).toBe("done");
+      expect(task?.done_at).not.toBeNull();
+      expect(task?.note).toBe(`${TAG} spoke to the principal`);
+    });
+
+    /**
+     * THE `.is("done_at", null)` GUARD IS WHAT MAKES THIS SAFE TO RE-SUBMIT.
+     * A second save against an already-closed call must not silently
+     * overwrite what the first one recorded.
+     */
+    it("does not reopen or overwrite a call already closed", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "log-call-closed");
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+      await admin
+        .from("follow_up_tasks")
+        .update({ outcome: "done", done_at: new Date().toISOString(), note: "first" })
+        .eq("id", created!.id);
+
+      const { data: updated, error } = await repA.db
+        .from("follow_up_tasks")
+        .update({ note: "second", outcome: "no_answer" })
+        .eq("id", created!.id)
+        .eq("member", repA.id)
+        .eq("kind", "call")
+        .is("done_at", null)
+        .select("id");
+      expect(error, error?.message).toBeNull();
+      expect(updated, "the already-closed-is-null guard must match nothing").toEqual([]);
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("note, outcome").eq("id", created!.id).single();
+      expect(task?.note).toBe("first");
+      expect(task?.outcome).toBe("done");
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
   /* A3 - close_visit's new parameters, and the overload ceremony       */
   /* ---------------------------------------------------------------- */
 

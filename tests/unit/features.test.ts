@@ -9,13 +9,13 @@ const read = (path: string) =>
   readFileSync(fileURLToPath(new URL(`../../${path}`, import.meta.url)), "utf8");
 
 /**
- * Phase A's daily-plan surfaces, taken down for a redo.
+ * Phase A's daily-plan surfaces, LIVE again after the rebuild.
  *
- * ⚠ WHAT THIS FILE IS ACTUALLY GUARDING is not that the flag is off — the
- * client may turn it back on tomorrow and nothing here should fail when they
- * do. It is that the flag only ever hides a SURFACE: the schema, the rows, the
- * rules and the save path are all untouched, and a visit still logs with the
- * field gone.
+ * ⚠ WHAT THIS FILE IS ACTUALLY GUARDING is not that the flag is any
+ * particular value — it may be flipped off again one day, and nothing here
+ * should fail when it is. It is that the flag only ever hides a SURFACE: the
+ * schema, the rows, the rules and the save path are all one constant away
+ * from each other, and a visit logs correctly whichever way it is set.
  *
  * So every assertion below is either independent of the flag's value, or reads
  * the flag and asserts the matching shape.
@@ -118,30 +118,29 @@ describe("a visit still saves with the field gone", () => {
   };
 
   /**
-   * ⚠ THE ASSERTION THE TAKE-DOWN RESTS ON. With the field not rendered, the
-   * form posts no `next_action`, `follow_up_due` or `follow_up_note` key at
-   * all — all three hidden inputs live inside `NextActionFields`.
-   *
-   * That absence-tolerance was built for a rep submitting a CACHED page during
-   * the Phase A deploy; taking the field back down is the same situation
-   * pointing the other way, which is why this needed no schema change. A
-   * required key here would refuse a rep's whole visit at a school gate, with
-   * the photograph already taken.
+   * ⚠ STILL TRUE WITH THE FLAG ON. With the field not rendered — a cached
+   * page, or the admin turning the flag back off again — the form posts no
+   * `next_action` or `follow_up_note` key at all, and `follow_up_date` (Rule
+   * 5's own) is just absent too. A required key here would refuse a rep's
+   * whole visit at a school gate, with the photograph already taken.
    */
   it("accepts a submission with no next-action keys", () => {
     const parsed = visitSchema.safeParse(base);
     expect(parsed.success).toBe(true);
     expect(parsed.data?.next_action).toBeNull();
-    expect(parsed.data?.follow_up_due).toBeNull();
     expect(parsed.data?.follow_up_note).toBeNull();
   });
 
-  /** And still accepts one WITH them, so turning the flag back on needs nothing else. */
+  /**
+   * And still accepts one WITH them — sharing Rule 5's `follow_up_date`
+   * rather than the old, separately-typed `follow_up_due`. See
+   * follow-up-tasks.test.ts for the full shape of that merge.
+   */
   it("still accepts a submission carrying them", () => {
     const parsed = visitSchema.safeParse({
       ...base,
       next_action: "call",
-      follow_up_due: "2026-10-08",
+      follow_up_date: "2026-10-08",
       follow_up_note: "Fees",
     });
     expect(parsed.success).toBe(true);
@@ -149,13 +148,15 @@ describe("a visit still saves with the field gone", () => {
   });
 
   /**
-   * The three hidden inputs are INSIDE the component, which is what makes not
-   * rendering it equivalent to not asking. If one ever moved out to the parent
-   * form, the flag would hide the control and keep posting an empty value.
+   * `next_action` and `follow_up_note` are INSIDE the component, which is
+   * what makes not rendering it equivalent to not asking either. The date is
+   * deliberately NOT one of them any more — `askDate` defaults to false, and
+   * Log Visit borrows the one follow-up date already on its own screen
+   * instead of NextActionFields asking a second time.
    */
-  it("keeps every next-action input inside the component the flag hides", () => {
+  it("keeps next_action and follow_up_note inside the component the flag hides", () => {
     const fields = read("src/components/visits/next-action-fields.tsx");
-    for (const name of ["next_action", "follow_up_due", "follow_up_note"]) {
+    for (const name of ["next_action", "follow_up_note"]) {
       expect(fields).toContain(`name="${name}"`);
     }
     for (const path of [

@@ -383,24 +383,25 @@ export async function logAndFileVisit(
     /*
      * A3 — WHAT HAPPENS NEXT, FROM THE VISIT HALF.
      *
-     * `visit.*` and not `feedback.*`, matching `p_follow_up_date` immediately
-     * above and for the identical reason: the follow-up is `visitSchema`'s,
-     * deliberately, because that is where the rule lives and where it is
-     * stored. CLAUDE.md states it plainly — "The follow-up is NOT part of this
-     * form" — and A3 is the same question one step on.
+     * ONE ANSWER, THREE PARAMETERS, since the Phase A rebuild. `p_next_action`
+     * is recorded on the visit so the report reads as it was filed;
+     * `p_follow_up_kind` is what decides whether a task is created. Both read
+     * `visit.*`, not `feedback.*` — the follow-up is `visitSchema`'s.
      *
-     * ONE ANSWER, TWO PARAMETERS. `p_next_action` is recorded on the visit so
-     * the report reads as it was filed; `p_follow_up_kind` is what decides
-     * whether a task is created. The form asks once; keeping them separate in
-     * the RPC is what would let a later caller record an intention without
-     * creating a task.
+     * `p_follow_up_due` NOW READS `visit.follow_up_date`, THE SAME FIELD
+     * `log_visit()`'s `p_follow_up_date` immediately above reads. It used to
+     * be a second, separately-typed field (`follow_up_due`) — the client
+     * asked for exactly one date box, and removing the second field from
+     * `visitSchema` only works if close_visit()'s task date is fed from the
+     * one that remains. The two RPCs land on different columns of different
+     * tables; the rep only ever typed one date.
      *
      * The task lands in `follow_up_tasks`, NEVER in `daily_plans` — 0038's
      * header is the long version of why, and the whole of Phase A rests on it.
      */
     p_next_action: visit.next_action,
     p_follow_up_kind: visit.next_action,
-    p_follow_up_due: visit.follow_up_due,
+    p_follow_up_due: visit.follow_up_date,
     p_follow_up_note: visit.follow_up_note,
   });
 
