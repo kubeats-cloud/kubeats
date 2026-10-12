@@ -21,6 +21,7 @@ export type NavIconName =
   | "team"
   | "data"
   | "materials"
+  | "slabs"
   | "report";
 
 export interface NavItem {
@@ -44,6 +45,12 @@ export interface NavItem {
 export const REP_NAV: NavItem[] = [
   { href: "/", label: "Dashboard", icon: "dashboard" },
   { href: "/institutes", label: "Institutes", icon: "institutes" },
+  // The institute page still has this panel. The tab exists because a rep
+  // should not have to open an institute and hunt for it: they pick the
+  // school here and submit the set. It is the seventh item, and the thumb-bar
+  // test moved with it. Not a rep-only path — an admin who opens the URL
+  // revokes from the same panel, and the bar is what keeps it off their list.
+  { href: "/slabs", label: "Slabs", icon: "slabs" },
   { href: "/log", label: "Log Visit", icon: "log" },
   { href: "/pending", label: "Pending", icon: "pending" },
   // Label and route agree again. Stage 2 read "This week" here, because the

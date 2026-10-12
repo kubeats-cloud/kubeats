@@ -115,6 +115,7 @@ export async function saveSlabs(
   }
 
   revalidatePath(`/institutes/${parsed.data.institute_id}`);
+  revalidatePath("/slabs");
   return { ok: true, error: null, fieldErrors: {}, message: "Slabs submitted for approval." };
 }
 
@@ -164,6 +165,7 @@ export async function decideSlabs(
   }
 
   revalidatePath(`/institutes/${institute}`);
+  revalidatePath("/slabs");
   return {
     ok: true,
     error: null,
