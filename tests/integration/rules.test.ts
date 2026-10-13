@@ -8040,7 +8040,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     const save = async (
       who: Member,
       institute: string,
-      slabs: { start: number; end: number | null }[],
+      slabs: { start: number; end: number | null; amount?: number | null }[],
       scope: "total" | "program" = "total",
       college: string | null = null,
       program: string | null = null,
@@ -8050,7 +8050,11 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_scope: scope,
         p_college: college,
         p_program: program,
-        p_slabs: slabs.map((s) => ({ start: s.start, end: s.end })),
+        p_slabs: slabs.map((s) => ({
+          start: s.start,
+          end: s.end,
+          amount: s.amount ?? null,
+        })),
       });
 
     const decide = async (
@@ -8087,7 +8091,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       const { data } = await admin
         .from("institute_slabs")
         .select(
-          "id, start_count, end_count, status, note, scope, decided_by, decided_at",
+          "id, start_count, end_count, amount, status, note, scope, decided_by, decided_at",
         )
         .eq("institute_id", institute)
         .order("scope")
@@ -8398,6 +8402,64 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(byRep.error?.code, "a rep approved their own slabs").toBe("FO037");
 
       expect((await rowsOf(schoolA))[0].status).toBe("pending");
+    });
+
+    /* ---- (5) the optional rupee amount -------------------------------- */
+
+    it("stores an optional rupee amount on each slab and reads it back", async () => {
+      await clear(schoolA);
+      const saved = await save(slabRepA, schoolA, [
+        { start: 0, end: 99, amount: 5000 },
+        { start: 100, end: null, amount: null },
+      ]);
+      expect(saved.error, saved.error?.message).toBeNull();
+
+      const rows = await rowsOf(schoolA);
+      expect(rows.map((r) => r.amount)).toEqual([5000, null]);
+      expect(rows[1].end_count, "the open end still has no end").toBeNull();
+    });
+
+    it("refuses a negative amount", async () => {
+      await clear(schoolA);
+      const { error } = await save(slabRepA, schoolA, [
+        { start: 0, end: null, amount: -1 },
+      ]);
+      expect(error?.code, error?.message).toBe("FO036");
+      expect(await rowsOf(schoolA), "a refused amount was stored").toHaveLength(0);
+    });
+
+    /**
+     * Changing only the rupees is still an edit of an approved set. The freeze
+     * is the same FO035, and the snapshot is the whole row — ids and amounts —
+     * so a delete-and-rebuild that put the new figures back would fail here.
+     */
+    it("refuses an amount edit on an approved set and leaves the amounts", async () => {
+      await clear(schoolA);
+      const saved = await save(slabRepA, schoolA, [
+        { start: 0, end: 99, amount: 1500 },
+        { start: 100, end: null, amount: 0 },
+      ]);
+      expect(saved.error, saved.error?.message).toBeNull();
+
+      const approved = await decide(boss, schoolA, "approved");
+      expect(approved.error, approved.error?.message).toBeNull();
+
+      const frozen = await rowsOf(schoolA);
+      expect(frozen.map((r) => r.amount)).toEqual([1500, 0]);
+      expect(frozen.every((r) => r.status === "approved")).toBe(true);
+
+      const edit = await save(slabRepA, schoolA, [
+        { start: 0, end: 99, amount: 9999 },
+        { start: 100, end: null, amount: 1 },
+      ]);
+      expect(edit.error?.code, "a rep changed the amount on an approved set").toBe("FO035");
+      expect(await rowsOf(schoolA)).toEqual(frozen);
+
+      // The next test approves whatever is pending. Put one back, so an
+      // already-approved set here is not what that approval is proving.
+      await clear(schoolA);
+      const restored = await save(slabRepA, schoolA, [{ start: 0, end: null }]);
+      expect(restored.error, restored.error?.message).toBeNull();
     });
 
     it("leaves an admin seeing and deciding everything", async () => {

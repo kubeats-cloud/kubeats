@@ -24,6 +24,8 @@ export interface SlabRecord {
   start: number;
   /** Null is the open-ended last slab, never a missing value. */
   end: number | null;
+  /** Whole rupees. Null means the rep left the amount blank. */
+  amount: number | null;
   status: SlabStatus;
   note: string | null;
   decidedAt: string | null;
@@ -50,7 +52,7 @@ export interface SlabSet {
 }
 
 const SELECT =
-  "id, scope, college, program, start_count, end_count, status, note, decided_at";
+  "id, scope, college, program, start_count, end_count, amount, status, note, decided_at";
 
 interface RawSlab {
   id: string;
@@ -59,6 +61,7 @@ interface RawSlab {
   program: string | null;
   start_count: number;
   end_count: number | null;
+  amount: number | null;
   status: string;
   note: string | null;
   decided_at: string | null;
@@ -101,6 +104,7 @@ export async function listSlabSets(
       program: raw.program,
       start: raw.start_count,
       end: raw.end_count,
+      amount: raw.amount,
       status: raw.status as SlabStatus,
       note: raw.note,
       decidedAt: raw.decided_at,

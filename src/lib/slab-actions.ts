@@ -58,13 +58,18 @@ export async function saveSlabs(
    */
   const starts = formData.getAll("start").map(String);
   const ends = formData.getAll("end").map(String);
+  const amounts = formData.getAll("amount").map(String);
 
   const parsed = slabSetSchema.safeParse({
     institute_id: textOf(formData, "institute_id"),
     scope: textOf(formData, "scope"),
     college: textOf(formData, "college"),
     program: textOf(formData, "program"),
-    slabs: starts.map((start, i) => ({ start, end: ends[i] ?? "" })),
+    slabs: starts.map((start, i) => ({
+      start,
+      end: ends[i] ?? "",
+      amount: amounts[i] ?? "",
+    })),
   });
 
   if (!parsed.success) {
@@ -93,7 +98,11 @@ export async function saveSlabs(
     p_scope: parsed.data.scope,
     p_college: parsed.data.scope === "total" ? null : parsed.data.college,
     p_program: parsed.data.scope === "total" ? null : parsed.data.program,
-    p_slabs: parsed.data.slabs.map((s) => ({ start: s.start, end: s.end })),
+    p_slabs: parsed.data.slabs.map((s) => ({
+      start: s.start,
+      end: s.end,
+      amount: s.amount,
+    })),
   });
 
   if (error) {
