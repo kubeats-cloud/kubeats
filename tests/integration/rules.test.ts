@@ -424,6 +424,18 @@ const has0039 = configured
       .then(({ error }) => error?.code !== "PGRST202")
   : false;
 
+/**
+ * 0046 adds columns too, but log_call() is probed the same way 0039's
+ * close_visit() widening is: calling it with its own argument name. PGRST202
+ * means the function is not there; any other answer (FO004 for a service-role
+ * caller with no session) means it resolved, which is all this needs to know.
+ */
+const has0046 = configured
+  ? await admin
+      .rpc("log_call", { p_task_id: null })
+      .then(({ error }) => error?.code !== "PGRST202")
+  : false;
+
 if (configured && !has0038) {
   console.warn(
     [
@@ -6158,6 +6170,178 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         .from("follow_up_tasks").select("note, outcome").eq("id", created!.id).single();
       expect(task?.note).toBe("first");
       expect(task?.outcome).toBe("done");
+    });
+  });
+
+  /**
+   * ★ log_call() (migration 0046) — a call closed exactly like a visit ★
+   *
+   * Live against the real RPC rather than a hand-built update: this is the
+   * function itself, so these are the only tests that can tell a
+   * status-driven requirement, the ownership guard or the Next Action insert
+   * actually works, rather than merely reading as if it would.
+   */
+  describe.skipIf(!has0046)("log_call() (migration 0046)", () => {
+    const openStatus = "First meeting done";
+
+    it("closes the call, writes the status fields, and updates the institute's status", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "log-call-rpc");
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+
+      const { error } = await repA.db.rpc("log_call", {
+        p_task_id: created!.id,
+        p_status_set_to: openStatus,
+        p_follow_up_date: iso(1),
+        p_notes: `${TAG} spoke to the principal`,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: task } = await admin
+        .from("follow_up_tasks")
+        .select("outcome, done_at, reported_at, status_set_to, follow_up_date, call_notes")
+        .eq("id", created!.id)
+        .single();
+      expect(task?.outcome).toBe("done");
+      expect(task?.done_at).not.toBeNull();
+      expect(task?.reported_at).not.toBeNull();
+      expect(task?.status_set_to).toBe(openStatus);
+      expect(task?.follow_up_date).toBe(iso(1));
+      expect(task?.call_notes).toBe(`${TAG} spoke to the principal`);
+
+      const { data: institute } = await admin
+        .from("institutes").select("status").eq("id", mine).single();
+      expect(institute?.status).toBe(openStatus);
+    });
+
+    it("refuses a call that belongs to another rep", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "log-call-rpc-owner");
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+
+      const { error } = await repB.db.rpc("log_call", {
+        p_task_id: created!.id,
+        p_status_set_to: openStatus,
+        p_follow_up_date: iso(1),
+        p_notes: `${TAG} not my call`,
+      });
+      expect(error?.code).toBe("FO038");
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("done_at").eq("id", created!.id).single();
+      expect(task?.done_at, "a refused call must not be closed").toBeNull();
+    });
+
+    it("refuses a call already logged", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "log-call-rpc-closed");
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+
+      const first = await repA.db.rpc("log_call", {
+        p_task_id: created!.id,
+        p_status_set_to: openStatus,
+        p_follow_up_date: iso(1),
+        p_notes: `${TAG} first`,
+      });
+      expect(first.error, first.error?.message).toBeNull();
+
+      const second = await repA.db.rpc("log_call", {
+        p_task_id: created!.id,
+        p_status_set_to: openStatus,
+        p_follow_up_date: iso(2),
+        p_notes: `${TAG} second`,
+      });
+      expect(second.error?.code).toBe("FO039");
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("call_notes").eq("id", created!.id).single();
+      expect(task?.call_notes, "the already-closed call must not be rewritten").toBe(
+        `${TAG} first`,
+      );
+    });
+
+    it("refuses a call with no status", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "log-call-rpc-status");
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+
+      const { error } = await repA.db.rpc("log_call", {
+        p_task_id: created!.id,
+        p_notes: `${TAG} no status`,
+      });
+      expect(error?.code).toBe("FO024");
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("done_at").eq("id", created!.id).single();
+      expect(task?.done_at).toBeNull();
+    });
+
+    it("refuses an open status with no follow-up date", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "log-call-rpc-followup");
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+
+      const { error } = await repA.db.rpc("log_call", {
+        p_task_id: created!.id,
+        p_status_set_to: openStatus,
+        p_notes: `${TAG} no follow-up date`,
+      });
+      expect(error?.code).toBe("FO016");
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("done_at").eq("id", created!.id).single();
+      expect(task?.done_at).toBeNull();
+    });
+
+    it("inserts the next follow-up task when a next action is chosen", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "log-call-rpc-next");
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+
+      const { error } = await repA.db.rpc("log_call", {
+        p_task_id: created!.id,
+        p_status_set_to: openStatus,
+        p_follow_up_date: iso(1),
+        p_notes: `${TAG} will call again`,
+        p_next_action: "call",
+        p_follow_up_note: `${TAG} next call note`,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: closed } = await admin
+        .from("follow_up_tasks").select("next_action").eq("id", created!.id).single();
+      expect(closed?.next_action).toBe("call");
+
+      const { data: next } = await admin
+        .from("follow_up_tasks")
+        .select("kind, due_date, note, from_visit_id, member, institute_id, done_at")
+        .eq("institute_id", mine)
+        .neq("id", created!.id)
+        .single();
+      expect(next?.kind).toBe("call");
+      expect(next?.due_date).toBe(iso(1));
+      expect(next?.note).toBe(`${TAG} next call note`);
+      expect(next?.from_visit_id).toBeNull();
+      expect(next?.member).toBe(repA.id);
+      expect(next?.done_at).toBeNull();
     });
   });
 
