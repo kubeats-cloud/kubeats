@@ -395,7 +395,7 @@ export async function getOpenFollowUps(
   const { data: visits, error: visitError } = await supabase
     .from("visits")
     .select(
-      "id, institute_id, member, date, status_set_to, follow_up_date, expected_date, notes",
+      "id, institute_id, member, date, status_set_to, follow_up_date, expected_date, notes, created_at",
     )
     .in("institute_id", rows.map((r) => r.id))
     .in("status_set_to", openStatuses)
@@ -407,10 +407,72 @@ export async function getOpenFollowUps(
     return { ok: false };
   }
 
-  // The visit that left each institute where it is. See the helper's own note
-  // for why it is matched on the CURRENT status rather than on recency alone.
+  // Logged calls that left an institute at an open status. Same attribution
+  // rule as visits — matched on the CURRENT status, not recency alone — then
+  // merged so a later call's follow-up date is what Pending shows.
+  const { data: calls, error: callError } = await supabase
+    .from("follow_up_tasks")
+    .select(
+      "id, institute_id, member, status_set_to, follow_up_date, expected_date, call_notes, reported_at",
+    )
+    .in("institute_id", rows.map((r) => r.id))
+    .in("status_set_to", openStatuses)
+    .not("reported_at", "is", null)
+    .eq("kind", "call")
+    .order("reported_at", { ascending: false });
+
+  if (callError) {
+    logError("visits:open-follow-ups-calls", callError);
+    return { ok: false };
+  }
+
+  type AttributionRow = {
+    institute_id: string;
+    status_set_to: string | null;
+    id: string;
+    member: string;
+    date: string;
+    follow_up_date: string | null;
+    expected_date: string | null;
+    notes: string | null;
+    source: "visit" | "call";
+    at: string;
+  };
+
+  const visitRows: AttributionRow[] = (visits ?? []).map((visit) => ({
+    institute_id: visit.institute_id,
+    status_set_to: visit.status_set_to,
+    id: visit.id,
+    member: visit.member,
+    date: visit.date,
+    follow_up_date: visit.follow_up_date,
+    expected_date: visit.expected_date,
+    notes: visit.notes,
+    source: "visit",
+    at: visit.created_at,
+  }));
+  const callRows: AttributionRow[] = (calls ?? []).map((call) => ({
+    institute_id: call.institute_id,
+    status_set_to: call.status_set_to,
+    id: call.id,
+    member: call.member,
+    date: call.reported_at ? todayISO(new Date(call.reported_at)) : "",
+    follow_up_date: call.follow_up_date,
+    expected_date: call.expected_date,
+    notes: call.call_notes,
+    source: "call",
+    at: call.reported_at ?? "",
+  }));
+  const combined = [...visitRows, ...callRows].sort((a, b) =>
+    b.at.localeCompare(a.at),
+  );
+
+  // The visit OR call that left each institute where it is. See the helper's
+  // own note for why it is matched on the CURRENT status rather than on recency
+  // alone; the sort above is what makes a later call win over an earlier visit
+  // at the same status.
   const attribution = attributeToCurrentStatus(
-    visits ?? [],
+    combined,
     new Map(rows.map((row) => [row.id, row.status])),
   );
 
@@ -429,10 +491,10 @@ export async function getOpenFollowUps(
       instituteName: institute.name,
       city: institute.city,
       status: institute.status as string,
-      visitId: visit?.id ?? null,
+      visitId: visit?.source === "visit" ? visit.id : null,
       member: visit?.member ?? null,
       memberName: visit ? (members.get(visit.member) ?? null) : null,
-      setOn: visit?.date ?? null,
+      setOn: visit?.date || null,
       followUpDate: visit?.follow_up_date ?? null,
       expectedDate: visit?.expected_date ?? null,
       notes: visit?.notes ?? null,

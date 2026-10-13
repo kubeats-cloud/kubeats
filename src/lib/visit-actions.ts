@@ -13,14 +13,16 @@ import type { FormState } from "@/lib/visit-form-state";
 import {
   batchCallSchema,
   batchPlanSchema,
+  callFormDataToInput,
   dailyPlanFormDataToInput,
   dailyPlanSchema,
   dailyPlanSummary,
   followUpSchema,
-  logCallOutcomeSchema,
+  makeCallSchema,
   planIdSchema,
   visitFieldErrors,
 } from "@/lib/validation/visit";
+import { listStatusCatalogue } from "@/lib/statuses";
 
 
 async function requireUser() {
@@ -872,17 +874,27 @@ export async function addManyFollowUpCalls(
 }
 
 /**
- * The log-call page's submit — the single way a call is closed now.
+ * The log-call page's submit — one RPC, the same status-driven fields as a
+ * visit, never a visits or daily_plans row.
  *
- * REPLACES THE OLD DONE / NO-ANSWER BUTTONS ENTIRELY, which is why this still
- * writes exactly what they wrote (`outcome`, `done_at`) and nothing it did
- * not: no visit, no check-in, no photo, no `daily_plans` row. `note` is the
- * one thing this page adds over the old binary close — the rep's own account
- * of the call, in the same column every other follow-up note already uses.
- *
- * SCOPED TO `member = user.id`, same as `closeFollowUpTask` — correctness,
- * not security; RLS reaches through the institute either way.
+ * Mapped by CODE, never by message text. log_call() (0046) raises FO004,
+ * FO006, FO016, FO024, FO038-FO044; the sentences live here so a database
+ * wording never reaches a rep.
  */
+const CALL_RPC: Record<string, string> = {
+  FO004: "Your session has expired. Please sign in again.",
+  FO006: "That institute no longer exists.",
+  FO016: "That status leaves the institute open, so a follow-up date is needed.",
+  FO024: "Say where this call leaves the institute before saving it.",
+  FO038: "That call could not be found, or it is not yours to log.",
+  FO039: "That call has already been logged.",
+  FO040: "That status needs an expected date.",
+  FO041: "Add a note before saving this call.",
+  FO042: "Enter the number of students.",
+  FO043: "Enter the topic title.",
+  FO044: "Enter who took it.",
+};
+
 export async function logFollowUpCallOutcome(
   _prev: FormState,
   formData: FormData,
@@ -892,33 +904,32 @@ export async function logFollowUpCallOutcome(
     return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
   }
 
-  const parsed = logCallOutcomeSchema.safeParse({
-    task_id: String(formData.get("task_id") ?? ""),
-    outcome: String(formData.get("outcome") ?? ""),
-    note: String(formData.get("note") ?? ""),
-  });
+  const catalogue = await listStatusCatalogue();
+  const parsed = makeCallSchema(catalogue).safeParse(callFormDataToInput(formData));
   if (!parsed.success) {
-    const fieldErrors = visitFieldErrors(parsed.error);
     return {
-      error: fieldErrors.outcome ?? "Say how the call went.",
-      fieldErrors,
+      error: CHECK_FIELDS,
+      fieldErrors: visitFieldErrors(parsed.error),
     };
   }
 
-  const { error } = await supabase
-    .from("follow_up_tasks")
-    .update({
-      note: parsed.data.note,
-      outcome: parsed.data.outcome,
-      done_at: new Date().toISOString(),
-    })
-    .eq("id", parsed.data.task_id)
-    .eq("member", user.id)
-    .eq("kind", "call")
-    .is("done_at", null);
+  const { error } = await supabase.rpc("log_call", {
+    p_task_id: parsed.data.task_id,
+    p_status_set_to: parsed.data.status_set_to,
+    p_expected_date: parsed.data.expected_date,
+    p_follow_up_date: parsed.data.follow_up_date,
+    p_notes: parsed.data.notes,
+    p_students_attended: parsed.data.students_attended,
+    p_session_topic: parsed.data.session_topic,
+    p_session_taken_by: parsed.data.session_taken_by,
+    p_next_action: parsed.data.next_action,
+    p_follow_up_note: parsed.data.follow_up_note,
+  });
 
   if (error) {
     logError("tasks:log-call", error);
+    const known = CALL_RPC[error.code ?? ""];
+    if (known) return { error: known, fieldErrors: {} };
     return {
       error: toFriendlyMessage(error, "We could not log that call."),
       fieldErrors: {},
@@ -927,5 +938,6 @@ export async function logFollowUpCallOutcome(
 
   revalidatePath("/");
   revalidatePath("/pending");
+  revalidatePath("/institutes", "layout");
   redirect("/");
 }

@@ -43,6 +43,9 @@ const PREFIX = "kubeats:draft:";
  */
 export const logVisitDraftKey = (planId: string) => `${PREFIX}log-visit:${planId}`;
 
+/** The Log Call form, keyed by the follow-up task it belongs to. */
+export const logCallDraftKey = (taskId: string) => `${PREFIX}log-call:${taskId}`;
+
 /**
  * The "Visit again" panel on Pending.
  *

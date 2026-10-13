@@ -308,4 +308,35 @@ describe("which visit left an institute at the status it holds now", () => {
     );
     expect(found.size).toBe(0);
   });
+
+  it("attributes a logged call the same way as a visit — first match at the current status", () => {
+    const call = (
+      institute_id: string,
+      status_set_to: string | null,
+      follow_up_date: string | null,
+    ) => ({ institute_id, status_set_to, follow_up_date, source: "call" as const });
+    const found = attributeToCurrentStatus(
+      [
+        call("i1", "First meeting done", "2026-10-20"),
+        visit("i1", "First meeting done", "2026-04-01"),
+      ],
+      new Map([["i1", "First meeting done"]]),
+    );
+    expect(found.get("i1")?.follow_up_date).toBe("2026-10-20");
+  });
+});
+
+describe("getOpenFollowUps also reads logged calls", () => {
+  const source = readFileSync(
+    fileURLToPath(new URL("../../src/lib/visits.ts", import.meta.url)),
+    "utf8",
+  );
+  const start = source.indexOf("export async function getOpenFollowUps");
+  const body = source.slice(start, source.indexOf("/* Lookups kept separate"));
+
+  it("queries follow_up_tasks for a call that set the current open status", () => {
+    expect(body).toContain('.from("follow_up_tasks")');
+    expect(body).toContain("call_notes");
+    expect(body).toContain("reported_at");
+  });
 });

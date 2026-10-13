@@ -133,6 +133,8 @@ describe("the other forms a Radix revert could corrupt", () => {
     // The two Settings panels, moved here from LEFT — see the note above.
     "src/components/settings/purposes-panel.tsx",
     "src/components/settings/statuses-panel.tsx",
+    // Log Call's status picker is the same Radix Select Log Visit was cured of.
+    "src/components/visits/log-call-form.tsx",
   ];
 
   it.each(FIXED)("%s submits itself rather than handing React the action", (file) => {

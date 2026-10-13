@@ -63,8 +63,10 @@ describe("Log Visit keeps a draft of what was typed", () => {
     // applyFeedbackPatch was made functional after a live bug where two changes
     // in one tick both merged against the render they started from. Building
     // the patch from a closed-over `feedback` would put that straight back.
-    expect(source).toContain("patchDraft((current) => ({");
-    expect(source).toContain("applyFeedbackPatch(current.feedback, patch)");
+    // The patch now lives in StatusOutcomeFields, which both forms share.
+    const shared = read("src/components/visits/status-outcome-fields.tsx");
+    expect(shared).toContain("onChange((current) => ({");
+    expect(shared).toContain("applyFeedbackPatch(current.feedback, patch)");
   });
 
   it("clears the draft when the form is dispatched", () => {

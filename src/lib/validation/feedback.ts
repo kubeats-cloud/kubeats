@@ -197,44 +197,66 @@ export const feedbackFieldsSchema = z.object(shape);
  * Notes is the exception and has its own rule: see `notesRequired()`, which
  * excuses the instant-close statuses rather than naming them.
  */
+/**
+ * Status-driven closing-report rules, shared by Log Visit and Log Call.
+ *
+ * Extracted so `makeCallSchema` can apply the SAME notes / students / topic /
+ * taken-by requirements without pulling in photo, GPS or `closes_visit_id`.
+ * A second copy would be free to drift, and a session-done call would then
+ * save without a head count the visit form still demanded.
+ */
+export function refineReportForStatus(
+  catalogue: StatusCatalogue,
+  status: string | null,
+  value: {
+    notes: string | null;
+    students_attended: number | null;
+    session_topic: string | null;
+    session_taken_by: string | null;
+  },
+  ctx: z.RefinementCtx,
+) {
+  const row = statusRow(catalogue, status);
+  if (!row) return;
+
+  const needsNotes =
+    row.category !== "closed" ||
+    row.asksExpectedDate ||
+    row.asksSessionDetail ||
+    row.asksHeadCount;
+
+  if (needsNotes && !value.notes) {
+    ctx.addIssue({ code: "custom", path: ["notes"], message: "Add a note." });
+  }
+  if (row.asksHeadCount && value.students_attended === null) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["students_attended"],
+      message: "Enter the number of students.",
+    });
+  }
+  if (row.asksSessionDetail && !value.session_topic) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["session_topic"],
+      message: "Enter the topic title.",
+    });
+  }
+  if (row.asksSessionDetail && !value.session_taken_by) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["session_taken_by"],
+      message: "Enter who took it.",
+    });
+  }
+}
+
 export function makeReportSchema(
   catalogue: StatusCatalogue,
   status: string | null,
 ) {
   return z.object(shape).superRefine((value, ctx) => {
-    const row = statusRow(catalogue, status);
-    if (!row) return;
-
-    const needsNotes =
-      row.category !== "closed" ||
-      row.asksExpectedDate ||
-      row.asksSessionDetail ||
-      row.asksHeadCount;
-
-    if (needsNotes && !value.notes) {
-      ctx.addIssue({ code: "custom", path: ["notes"], message: "Add a note." });
-    }
-    if (row.asksHeadCount && value.students_attended === null) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["students_attended"],
-        message: "Enter the number of students.",
-      });
-    }
-    if (row.asksSessionDetail && !value.session_topic) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["session_topic"],
-        message: "Enter the topic title.",
-      });
-    }
-    if (row.asksSessionDetail && !value.session_taken_by) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["session_taken_by"],
-        message: "Enter who took it.",
-      });
-    }
+    refineReportForStatus(catalogue, status, value, ctx);
   });
 }
 

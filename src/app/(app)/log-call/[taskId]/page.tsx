@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/states";
 import { LogCallForm } from "@/components/visits/log-call-form";
 import { getCurrentUser } from "@/lib/auth";
+import { listStatusCatalogue } from "@/lib/statuses";
 import { getFollowUpCallById } from "@/lib/visits";
 
 export const metadata = { title: "Log call" };
@@ -27,7 +28,10 @@ export default async function LogCallPage(props: PageProps<"/log-call/[taskId]">
   if (!user) redirect("/login");
 
   const { taskId } = await props.params;
-  const task = await getFollowUpCallById(taskId, user.id);
+  const [task, catalogue] = await Promise.all([
+    getFollowUpCallById(taskId, user.id),
+    listStatusCatalogue(),
+  ]);
 
   if (!task) {
     return (
@@ -49,7 +53,7 @@ export default async function LogCallPage(props: PageProps<"/log-call/[taskId]">
   return (
     <PageColumn>
       <PageHeader title="Log call" description={task.instituteName} />
-      <LogCallForm taskId={task.id} note={task.note} />
+      <LogCallForm taskId={task.id} note={task.note} catalogue={catalogue} />
     </PageColumn>
   );
 }
