@@ -11,11 +11,13 @@ import { assignVisitSchema } from "@/lib/validation/closing-report";
 import { CHECK_FIELDS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
 import {
+  batchCallSchema,
   batchPlanSchema,
   dailyPlanFormDataToInput,
   dailyPlanSchema,
   dailyPlanSummary,
   followUpSchema,
+  logCallOutcomeSchema,
   planIdSchema,
   visitFieldErrors,
 } from "@/lib/validation/visit";
@@ -626,6 +628,15 @@ export async function removeFromDailyPlan(planId: string): Promise<FormState> {
 export async function closeFollowUpTask(
   taskId: string,
   outcome: "done" | "no_answer",
+  // Phase A fix: a kind guard. Closing a CALL this way would bypass the
+  // log-call page entirely — no note, no outcome beyond this bare pair, and
+  // "the log-call page is the single way to handle a call" would be false
+  // the moment any caller passed a call's id here. The one caller today
+  // (MeetingPrompts' "Done") only ever has meetings, but the function itself
+  // had nothing stopping a future one from reaching a call — the query now
+  // refuses to match a row of the wrong kind instead of trusting every
+  // caller to never ask for one.
+  kind: "call" | "meeting",
 ): Promise<FormState> {
   const { supabase, user } = await requireUser();
   if (!user) {
@@ -642,6 +653,7 @@ export async function closeFollowUpTask(
     .update({ done_at: new Date().toISOString(), outcome })
     .eq("id", parsed.data)
     .eq("member", user.id)
+    .eq("kind", kind)
     // Already closed stays closed: a second tap must not rewrite the outcome of
     // something somebody has already filed.
     .is("done_at", null);
@@ -787,4 +799,133 @@ export async function addManyToDailyPlan(
         ? `Added ${toAdd.length}. ${already.size} already on today's plan.`
         : `Added ${toAdd.length} to today's plan.`,
   };
+}
+
+/**
+ * The morning tick-list's Call mode: several institutes, one insert, no
+ * purpose — the same direct-insert path a single call always used, batched.
+ *
+ * ONE INSERT OF MANY ROWS, not a loop, for the identical reason
+ * `addManyToDailyPlan` above is one: a partial failure must not leave half a
+ * morning's calls raised, and FO031 refusing one institute refuses the batch
+ * rather than silently raising the rest.
+ *
+ * NO "ALREADY HAS ONE" SKIP, unlike the plan's own batch add. That skip exists
+ * there because a second identical plan row blocks the rep's own "add" button
+ * from working twice; nothing here is guarded the same way, and a tampered or
+ * doubled request is not a case this batch needs to absorb.
+ *
+ * `due_date` IS NOT IN THE PAYLOAD, same reason the single-call path omits it:
+ * the column defaults to `app_today()` (0038).
+ */
+export async function addManyFollowUpCalls(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
+  }
+
+  const parsed = batchCallSchema.safeParse({
+    institute_ids: formData.getAll("institute_ids").map(String),
+  });
+  if (!parsed.success) {
+    const fieldErrors = visitFieldErrors(parsed.error);
+    return {
+      error: fieldErrors.institute_ids ?? "Tick at least one institute.",
+      fieldErrors,
+    };
+  }
+
+  const { error } = await supabase.from("follow_up_tasks").insert(
+    parsed.data.institute_ids.map((instituteId) => ({
+      member: user.id,
+      institute_id: instituteId,
+      kind: "call",
+    })),
+  );
+
+  if (error) {
+    logError("tasks:batch-create-call", error);
+    if (error.code === "FO031") {
+      return {
+        error:
+          "One of those institutes is not yours, so none were added. Remove it and try again.",
+        fieldErrors: {},
+      };
+    }
+    return {
+      error: toFriendlyMessage(error, "We could not add those follow-up calls."),
+      fieldErrors: {},
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/pending");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: `Added ${parsed.data.institute_ids.length} follow-up call${parsed.data.institute_ids.length === 1 ? "" : "s"}.`,
+  };
+}
+
+/**
+ * The log-call page's submit — the single way a call is closed now.
+ *
+ * REPLACES THE OLD DONE / NO-ANSWER BUTTONS ENTIRELY, which is why this still
+ * writes exactly what they wrote (`outcome`, `done_at`) and nothing it did
+ * not: no visit, no check-in, no photo, no `daily_plans` row. `note` is the
+ * one thing this page adds over the old binary close — the rep's own account
+ * of the call, in the same column every other follow-up note already uses.
+ *
+ * SCOPED TO `member = user.id`, same as `closeFollowUpTask` — correctness,
+ * not security; RLS reaches through the institute either way.
+ */
+export async function logFollowUpCallOutcome(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
+  }
+
+  const parsed = logCallOutcomeSchema.safeParse({
+    task_id: String(formData.get("task_id") ?? ""),
+    outcome: String(formData.get("outcome") ?? ""),
+    note: String(formData.get("note") ?? ""),
+  });
+  if (!parsed.success) {
+    const fieldErrors = visitFieldErrors(parsed.error);
+    return {
+      error: fieldErrors.outcome ?? "Say how the call went.",
+      fieldErrors,
+    };
+  }
+
+  const { error } = await supabase
+    .from("follow_up_tasks")
+    .update({
+      note: parsed.data.note,
+      outcome: parsed.data.outcome,
+      done_at: new Date().toISOString(),
+    })
+    .eq("id", parsed.data.task_id)
+    .eq("member", user.id)
+    .eq("kind", "call")
+    .is("done_at", null);
+
+  if (error) {
+    logError("tasks:log-call", error);
+    return {
+      error: toFriendlyMessage(error, "We could not log that call."),
+      fieldErrors: {},
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/pending");
+  redirect("/");
 }

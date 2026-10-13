@@ -12,6 +12,8 @@ import {
   nextMonday,
   visibleNow,
 } from "@/lib/notification-kinds";
+import { bellFor, followUpItemsFor, type DueTaskRow, type Roster } from "@/lib/notifications";
+import type { CurrentUser } from "@/lib/auth";
 
 /**
  * The notification bell's pure half.
@@ -343,5 +345,126 @@ describe("the bell reuses the alert vocabulary", () => {
       // once as "1 follow-up were missed".
       expect(title, kind).not.toMatch(/\bwere\b/);
     }
+  });
+});
+
+/**
+ * Rep 5 — one item per outstanding follow-up task.
+ *
+ * What a database is needed to prove — that the real query really is
+ * `due_date <= today`, that a closed task really drops out, that RLS scopes
+ * a rep to their own and a lead to their team's — is the "Notification bell"
+ * block in tests/integration/rules.test.ts. What is here is the pure half:
+ * given rows, what items come out, and only that.
+ */
+describe("followUpItemsFor", () => {
+  const today = "2026-10-13";
+  const roster: Roster = { ids: ["rep1"], names: new Map() };
+
+  const row = (overrides: Partial<DueTaskRow> = {}): DueTaskRow => ({
+    id: "t1",
+    member: "rep1",
+    kind: "call",
+    due_date: today,
+    institutes: { name: "Test School" },
+    ...overrides,
+  });
+
+  it("makes one item per row — this is the whole badge-equals-count fix", () => {
+    const items = followUpItemsFor(
+      [row({ id: "t1" }), row({ id: "t2" })],
+      roster,
+      true,
+      today,
+    );
+    expect(items).toHaveLength(2);
+    // Keyed by the task's own id, which is what makes a refresh produce the
+    // SAME two keys rather than new ones — no duplicates across a reload.
+    expect(items.map((i) => i.id).sort()).toEqual([
+      "follow_up_task:t1",
+      "follow_up_task:t2",
+    ]);
+  });
+
+  it("marks a task due exactly today as not overdue", () => {
+    const [item] = followUpItemsFor([row({ due_date: today })], roster, true, today);
+    expect(item.overdue).toBe(false);
+    expect(item.dueDate).toBe(today);
+  });
+
+  it("marks a task due before today as overdue", () => {
+    const [item] = followUpItemsFor([row({ due_date: "2026-10-01" })], roster, true, today);
+    expect(item.overdue).toBe(true);
+  });
+
+  it("sends a call to the log-call page", () => {
+    const [item] = followUpItemsFor([row({ id: "t9", kind: "call" })], roster, true, today);
+    expect(item.href).toBe("/log-call/t9");
+    expect(item.taskKind).toBe("call");
+  });
+
+  it("sends a meeting to Pending's due-today list — the same place MeetingPrompts' own 'Plan it' goes", () => {
+    const [item] = followUpItemsFor([row({ kind: "meeting" })], roster, true, today);
+    expect(item.href).toBe("/pending?due=today");
+    expect(item.taskKind).toBe("meeting");
+  });
+
+  it("reads the institute name through PostgREST's array-or-object embed", () => {
+    const asObject = followUpItemsFor(
+      [row({ institutes: { name: "Object School" } })], roster, true, today,
+    );
+    expect(asObject[0].instituteName).toBe("Object School");
+
+    const asArray = followUpItemsFor(
+      [row({ institutes: [{ name: "Array School" }] })], roster, true, today,
+    );
+    expect(asArray[0].instituteName).toBe("Array School");
+  });
+
+  it("names the rep on a lead's line and not on the rep's own", () => {
+    const leadRoster: Roster = { ids: ["rep1"], names: new Map([["rep1", "Rep One"]]) };
+    const [ownItem] = followUpItemsFor([row()], leadRoster, true, today);
+    expect(ownItem.memberName).toBeNull();
+
+    const [leadItem] = followUpItemsFor([row()], leadRoster, false, today);
+    expect(leadItem.memberName).toBe("Rep One");
+  });
+
+  it("answers an empty list for no rows, not an error", () => {
+    expect(followUpItemsFor([], roster, true, today)).toEqual([]);
+  });
+});
+
+/**
+ * `bellFor()` ITSELF, called directly — reachable for exactly one role.
+ * Every other role calls `createClient()`, which calls Next's `cookies()`
+ * and throws outside a request; the admin branch returns `EMPTY` before any
+ * of that runs, so it is the one path this file can call for real rather
+ * than through a query mirrored by hand.
+ */
+describe("bellFor — the one role this can call directly", () => {
+  const admin: CurrentUser = {
+    id: "admin1",
+    email: "admin@example.test",
+    profile: { id: "admin1", name: "An Admin", role: "admin", mobile: null },
+    profileStatus: "ready",
+    role: "admin",
+    name: "An Admin",
+  };
+
+  it("returns no items and a zero count for an admin, touching no database", async () => {
+    // If this reached createClient() it would throw (no request scope) —
+    // so a resolved, empty result IS the proof the early return fired.
+    const bell = await bellFor(admin, "admin");
+    expect(bell).toEqual({ items: [], count: 0 });
+  });
+});
+
+describe("the badge is hidden at zero, from items.length alone", () => {
+  const bell = readFileSync("src/components/layout/notification-bell.tsx", "utf8");
+
+  it("gates the badge span on count > 0", () => {
+    expect(bell).toContain("const count = items.length;");
+    expect(bell).toMatch(/\{count > 0 && \(/);
   });
 });

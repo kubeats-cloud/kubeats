@@ -36,12 +36,16 @@ import type { CurrentUser, Role } from "@/lib/auth";
  *      09:00 it did not exist. The bell would be silent about work that is
  *      genuinely owed, which is the one failure a notification must not have.
  *
- * So the bell asks the SAME QUESTIONS - the predicates below are
- * `materialise_daily_alerts()`'s, kept deliberately identical - at the moment
- * the page is rendered. `alert_events` keeps its job (the permanent record
- * behind `/missed` and the dashboard banner) and this keeps its own: what is
- * true now. Neither is derived from the other, and they answer different
- * questions on purpose.
+ * So the bell asks its OWN questions at the moment the page is rendered.
+ * `day_plan_not_set` and `weekly_plan_not_set` below are kept deliberately
+ * identical to `materialise_daily_alerts()`'s predicates. The follow-up
+ * question (Rep 5, the Phase A rebuild) is NOT identical any more: it asks
+ * `due_date <= today`, not `= today` — an overdue task is as outstanding as
+ * one due today, and the live bell's job is now to show every open task, not
+ * to relabel one day's worth of them more urgently as the clock moves.
+ * `alert_events` keeps its own, narrower job (the permanent record behind
+ * `/missed` and the dashboard banner) unchanged. Neither is derived from the
+ * other, and they answer different questions on purpose.
  *
  * =====================================================================
  * SCOPING IS RLS'S, TWICE, AND NEVER THIS FILE'S
@@ -86,11 +90,20 @@ export interface BellState {
 
 const EMPTY: BellState = { items: [], count: 0 };
 
-interface Roster {
+export interface Roster {
   /** Rep ids the reader may see items for. A rep's is just themselves. */
   ids: string[];
   /** id -> display name, for a lead's per-rep lines. Empty for a rep. */
   names: Map<string, string>;
+}
+
+/** One row of the follow-up task query, before it becomes a NotificationItem. */
+export interface DueTaskRow {
+  id: string;
+  member: string;
+  kind: string;
+  due_date: string;
+  institutes: { name: string | null } | { name: string | null }[] | null;
 }
 
 /**
@@ -143,9 +156,52 @@ function linesFor(
       weekStart,
       memberName: isOwn ? null : (roster.names.get(memberId) ?? "A rep"),
       href: hrefFor(kind),
+      // Only a follow-up task item (built separately, below) carries these.
+      instituteName: null,
+      taskKind: null,
+      dueDate: null,
+      overdue: null,
     });
   }
   return out;
+}
+
+/**
+ * One `NotificationItem` per outstanding follow-up task (Rep 5).
+ *
+ * EXPORTED AND PURE, unlike the query around it, so the shape — one row in,
+ * one item out, the href split by call/meeting, `overdue` computed once —
+ * is provable without a database. tests/unit/notifications.test.ts covers
+ * it directly; tests/integration/rules.test.ts proves the REAL rows this is
+ * fed really come back shaped this way, and really exclude a closed task.
+ */
+export function followUpItemsFor(
+  rows: readonly DueTaskRow[],
+  roster: Roster,
+  isOwn: boolean,
+  today: string,
+): NotificationItem[] {
+  return rows.map((row) => {
+    // PostgREST types a one-to-one embed as an array; the same narrowing
+    // visits.ts uses throughout, for the same reason.
+    const joined = row.institutes;
+    const inst = (Array.isArray(joined) ? joined[0] : joined) ?? null;
+    const taskKind = row.kind === "meeting" ? "meeting" : "call";
+    return {
+      id: `follow_up_task:${row.id}`,
+      kind: "follow_ups_due",
+      count: null,
+      weekStart: null,
+      memberName: isOwn ? null : (roster.names.get(row.member) ?? "A rep"),
+      // Call closes on its own page; a meeting prompt is planned from
+      // Pending, exactly where MeetingPrompts' own "Plan it" link goes.
+      href: taskKind === "call" ? `/log-call/${row.id}` : "/pending?due=today",
+      instituteName: inst?.name ?? "An institute",
+      taskKind,
+      dueDate: row.due_date,
+      overdue: row.due_date < today,
+    };
+  });
 }
 
 /**
@@ -173,54 +229,40 @@ export async function bellFor(
   const supabase = await createClient();
   const items: NotificationItem[] = [];
 
-  /* ---- The three follow-up kinds: ONE query, asked three times ------- */
+  /* ---- Outstanding follow-up tasks: one item per task (Rep 5) --------- */
   /*
-   * 0040's own comment: "ONE predicate asked three times." Due today and not
-   * done. The three kinds differ only in the hour they become visible, so
-   * fetching the rows once and gating each kind on the clock is the same
-   * arithmetic with two fewer round trips.
+   * ⚠ REPLACES THE OLD THREE-KIND, ONE-LINE-PER-MEMBER SHAPE. That version
+   * counted `due_date = today` only, picked whichever of `follow_ups_due` /
+   * `_pending` / `_missed` the clock had most recently crossed, and folded
+   * every open task for a member into ONE line carrying a number. The client
+   * asked for the badge to be an honest count and for completing one of two
+   * to drop it to one while the other stays visible — neither survives an
+   * aggregate line, so this is now one `NotificationItem` per task.
    *
-   * An OVERDUE task - due before today, still open - is deliberately NOT
-   * counted, exactly as 0040 is careful not to: it was already recorded as
-   * missed on its own due date, and counting it again daily would turn one miss
-   * into a growing tally against a rep with one outstanding call.
+   * `due_date <= today`, NOT `= today` — an overdue task is exactly as
+   * outstanding as one due today, and the client's own spec says so
+   * ("due today/overdue"). The permanent record (migration 0040,
+   * `alert_events`, `/missed`) is untouched and still answers the narrower
+   * question it always has; this is a live reading, not a record, and derives
+   * its own answer the same way the rest of this file already explains.
+   *
+   * NO HOUR GATE. `follow_ups_due` was already visible from hour 0 — always
+   * — so dropping the two later thresholds does not show anything EARLIER
+   * than an existing gate, only stops relabelling the same open task more
+   * urgently as the day goes on. `AlertKind` and its hour map are untouched;
+   * nothing here reads them any more, and the permanent record still does.
    */
-  const followUpKinds: AlertKind[] = [
-    "follow_ups_due",
-    "follow_ups_pending",
-    "follow_ups_missed",
-  ];
+  const { data: dueTasks, error: dueTasksError } = await supabase
+    .from("follow_up_tasks")
+    .select("id, member, kind, due_date, institutes(name)")
+    .lte("due_date", today)
+    .is("done_at", null)
+    .in("member", roster.ids);
 
-  if (followUpKinds.some((k) => visibleNow(k, hour, today))) {
-    const { data, error } = await supabase
-      .from("follow_up_tasks")
-      .select("member")
-      .eq("due_date", today)
-      .is("done_at", null)
-      .in("member", roster.ids);
-
-    if (error) {
-      logError("notifications:follow-ups", error);
-    } else {
-      const counts = new Map<string, number>();
-      for (const row of (data ?? []) as { member: string }[]) {
-        counts.set(row.member, (counts.get(row.member) ?? 0) + 1);
-      }
-      /*
-       * ⚠ ONE KIND, NOT THREE STACKED. The three share a predicate, so a rep
-       * with two open calls at 19:30 satisfies all three at once and a naive
-       * loop would put three lines on the bell for one piece of work. The
-       * LATEST threshold the clock has passed is the one that describes the
-       * situation - missed after 19:00, still open after 16:00, due before that
-       * - so the kinds are tried newest-first and the first match wins.
-       */
-      const kind = [...followUpKinds]
-        .reverse()
-        .find((k) => visibleNow(k, hour, today));
-      if (kind && counts.size > 0) {
-        items.push(...linesFor(kind, counts, roster, isOwn));
-      }
-    }
+  if (dueTasksError) {
+    logError("notifications:follow-ups", dueTasksError);
+  } else {
+    items.push(...followUpItemsFor((dueTasks ?? []) as DueTaskRow[], roster, isOwn, today));
   }
 
   /* ---- Phase A: today's plan is empty -------------------------------- */

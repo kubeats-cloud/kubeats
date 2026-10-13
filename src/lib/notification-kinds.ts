@@ -118,19 +118,58 @@ export function hrefFor(kind: AlertKind): string {
  * `member` is null for the reader's OWN item and carries a name for a team
  * lead's per-rep line. A lead has no own items — they log no visits and own no
  * institutes — so for them it is always set; the null case is a rep's.
+ *
+ * ⚠ FOLLOW-UPS ARE ONE ITEM PER TASK NOW, not one aggregated line per member.
+ * Rep 5 (the Phase A rebuild's bell) needs a task to be countable, completable
+ * and distinguishable (due vs. overdue) on its own — `count`/`weekStart` stay
+ * for `day_plan_not_set`/`weekly_plan_not_set`, which are genuinely one
+ * condition per member and untouched by this change; the five fields below
+ * are what a follow-up task item carries instead, and are null for every
+ * other kind.
  */
 export interface NotificationItem {
-  /** Stable within a render, for React keys. `${kind}:${memberId ?? "self"}`. */
+  /**
+   * Stable within a render, for React keys. `${kind}:${memberId ?? "self"}`
+   * for the two plan kinds; `follow_up_task:${task.id}` for a follow-up —
+   * the task's own id, so two renders of the same open task never produce
+   * two different keys, and a closed task's id simply stops appearing.
+   */
   id: string;
-  kind: AlertKind;
-  /** How many follow-ups this line counts. Null for the two plan kinds. */
+  /**
+   * `AlertKind` for the two plan kinds. `"modification"` is RESERVED, not a
+   * value anything in this codebase ever constructs today — see the note
+   * below.
+   */
+  kind: AlertKind | "modification";
+  /** How many follow-ups this line counts. Null for everything else. */
   count: number | null;
   /** The Monday `weekly_plan_not_set` warns about. Null for the rest. */
   weekStart: string | null;
   /** Whose item this is, when the reader is a team lead. Null for one's own. */
   memberName: string | null;
   href: string;
+  /** A follow-up task item's institute. Null for every other kind. */
+  instituteName: string | null;
+  /** A follow-up task item's own kind — never derived from `kind` above. */
+  taskKind: "call" | "meeting" | null;
+  /** The task's own due_date (YYYY-MM-DD). Null for every other kind. */
+  dueDate: string | null;
+  /** `dueDate < today`, computed once rather than by every reader. */
+  overdue: boolean | null;
 }
+
+/**
+ * PARKED — "modification alerts". The client has not given the list of which
+ * modification events should raise a bell item, so none do. `"modification"`
+ * exists on `NotificationItem.kind`'s type ONLY so a future item can be typed
+ * without a second interface, and `notification-bell.tsx` has one inert guard
+ * for it so the type-checker proves nothing breaks the day it is used.
+ *
+ * NOT ADDED TO `AlertKind`/`ALERT_KINDS` (alert-kinds.ts) — that union backs
+ * migration 0040's CHECK constraint on `alert_events`, the permanent record,
+ * which this is not part of and must not appear to be. `bellFor()` never
+ * constructs an item with this kind; there is nothing to enable or gate.
+ */
 
 /**
  * The ISO day of the week for a Kolkata `YYYY-MM-DD`. Monday 1 … Sunday 7.

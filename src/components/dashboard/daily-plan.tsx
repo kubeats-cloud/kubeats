@@ -42,6 +42,7 @@ import {
 } from "@/lib/validation/checkin";
 import { FormNotice } from "@/components/form-notice";
 import { FollowUpCalls } from "@/components/dashboard/follow-up-calls";
+import { MeetingPrompts } from "@/components/dashboard/meeting-prompts";
 import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import { MorningPlan } from "@/components/dashboard/morning-plan";
 
@@ -258,14 +259,14 @@ export function DailyPlan({
 
       <CardContent className="space-y-6">
         {/*
-          A1 — TWO SECTIONS, and the headings are not decoration. "Meetings" is
+          A1 — TWO SECTIONS, and the headings are not decoration. "Meeting" is
           what a rep walks into and what the meeting gate reads; "Follow-up
           calls" is what they owe from a desk. Before this they would have been
           one undifferentiated list, and the Check in button would have been
           offered against a phone call.
 
           ⚠ BEHIND PHASE_A_DAILY_PLAN, and the HEADING goes with the second
-          section rather than staying as a lone label. "Meetings" only names
+          section rather than staying as a lone label. "Meeting" only names
           anything while there is something it is not — with the follow-up
           section gone it would be a heading over the entire card, which is what
           the card's own title already says. Off, this is the one
@@ -274,7 +275,7 @@ export function DailyPlan({
         <section className="space-y-4">
           {PHASE_A_DAILY_PLAN && (
             <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-              Meetings
+              Meeting
             </h3>
           )}
 
@@ -570,6 +571,13 @@ export function DailyPlan({
               </li>
             ))}
           </ul>
+        )}
+
+        {/* Meeting-kind prompts, moved here from inside FollowUpCalls — see
+            MeetingPrompts' own note on why it is a sibling, not a subsection,
+            and on the dedup against the entries list just above. */}
+        {PHASE_A_DAILY_PLAN && (
+          <MeetingPrompts tasks={tasks} entries={entries} purposes={purposes} />
         )}
         </section>
 

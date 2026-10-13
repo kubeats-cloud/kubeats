@@ -151,6 +151,10 @@ export function FeedbackOnlyForm({
           value={nextAction}
           onChange={(patch) => setNextAction((prev) => ({ ...prev, ...patch }))}
           fieldErrors={state.fieldErrors}
+          // This is the one caller that still asks its own date — see
+          // NextActionFields' header for why: the visit this is filing for
+          // was already logged, with no follow-up date left on THIS screen.
+          askDate
           defaultDue={defaultFollowUpDue()}
         />
       )}

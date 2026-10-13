@@ -44,23 +44,31 @@ const base = {
   follow_up_time: "",
 };
 
-describe("the next action a visit leaves behind", () => {
+describe("the next action a visit leaves behind, sharing Rule 5's one date", () => {
+  /**
+   * ⚠ REWRITTEN FOR THE PHASE A REBUILD. `follow_up_due` used to be a second,
+   * separately-typed field on `visitSchema` with its own pair rule against
+   * `next_action`. The client asked for exactly one follow-up date box, so
+   * it is gone from this schema entirely — `follow_up_date`, Rule 5's own
+   * field, is what a next action now shares. See `baseVisitSchema`'s merged
+   * check and `NextActionFields`' `askDate` prop.
+   */
   it("accepts a visit that leaves nothing owed", () => {
-    const parsed = visitSchema.safeParse({ ...base, next_action: "", follow_up_due: "" });
+    const parsed = visitSchema.safeParse({ ...base, next_action: "", follow_up_date: "" });
     expect(parsed.success).toBe(true);
     expect(parsed.data?.next_action).toBeNull();
   });
 
-  it("accepts a call and a meeting, each with a date", () => {
+  it("accepts a call and a meeting, each sharing the one follow-up date", () => {
     for (const kind of ["call", "meeting"]) {
       const parsed = visitSchema.safeParse({
         ...base,
         next_action: kind,
-        follow_up_due: "2026-10-08",
+        follow_up_date: "2026-10-08",
       });
       expect(parsed.success, kind).toBe(true);
       expect(parsed.data?.next_action).toBe(kind);
-      expect(parsed.data?.follow_up_due).toBe("2026-10-08");
+      expect(parsed.data?.follow_up_date).toBe("2026-10-08");
     }
   });
 
@@ -68,38 +76,51 @@ describe("the next action a visit leaves behind", () => {
     const parsed = visitSchema.safeParse({
       ...base,
       next_action: "email",
-      follow_up_due: "2026-10-08",
+      follow_up_date: "2026-10-08",
     });
     expect(parsed.success).toBe(false);
   });
 
   /**
-   * THE RULE IS ABOUT THE PAIR, which is why it lives in the superRefine.
-   * `follow_up_tasks.due_date` is NOT NULL (0038), so a task with no day cannot
-   * exist — without this the rep would reach the database and be refused there
-   * with a message about a column.
+   * THE RULE IS ABOUT THE COMBINED CONDITION, which is why it lives in the
+   * superRefine. `follow_up_tasks.due_date` is NOT NULL (0038), so a task
+   * with no day cannot exist — without this the rep would reach the
+   * database and be refused there with a message about a column.
    */
   it("refuses an action with no day", () => {
-    const parsed = visitSchema.safeParse({ ...base, next_action: "call", follow_up_due: "" });
+    const parsed = visitSchema.safeParse({ ...base, next_action: "call", follow_up_date: "" });
     expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues.some((i) => i.path.includes("follow_up_due"))).toBe(true);
+    expect(parsed.error?.issues.some((i) => i.path.includes("follow_up_date"))).toBe(true);
   });
 
-  it("refuses a day with no action", () => {
+  /**
+   * THE OLD REVERSE CHECK IS GONE ON PURPOSE. "A date with no action" used to
+   * be refused outright, because the separate `follow_up_due` field had no
+   * other reason to carry one. Now the SAME field is also Rule 5's own, and
+   * an open status demanding a date with no next action chosen has always
+   * been valid — conflating the two fields must not make this newly refused.
+   */
+  it("accepts a date with no action, when an open status is what asked for it", () => {
     const parsed = visitSchema.safeParse({
       ...base,
+      status_set_to: "First meeting done",
+      follow_up_date: "2026-10-08",
       next_action: "",
-      follow_up_due: "2026-10-08",
     });
-    expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues.some((i) => i.path.includes("next_action"))).toBe(true);
+    expect(parsed.success).toBe(true);
+  });
+
+  it("has no second, separately-typed due date left to parse", () => {
+    const parsed = visitSchema.safeParse(base);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data && "follow_up_due" in parsed.data).toBe(false);
   });
 
   /**
    * ⚠ THE DEPLOY RULE, and the reason it is a test rather than a comment.
    *
    * During a deploy a rep's CACHED Log Visit page posts a form that has never
-   * heard of these three fields. A required key would turn that into "a few
+   * heard of these fields. A required key would turn that into "a few
    * details still need filling in" on a visit that is otherwise perfect — at a
    * school gate, with the photograph already taken. `accuracy` carries the same
    * tolerance for the same reason, and this file had the bug before the
@@ -109,31 +130,31 @@ describe("the next action a visit leaves behind", () => {
     const parsed = visitSchema.safeParse(base);
     expect(parsed.success).toBe(true);
     expect(parsed.data?.next_action).toBeNull();
-    expect(parsed.data?.follow_up_due).toBeNull();
     expect(parsed.data?.follow_up_note).toBeNull();
   });
 
-  it("reads the three fields off the form the component posts", () => {
+  it("reads next_action and follow_up_note off the form, sharing follow_up_date with Rule 5", () => {
     const fd = new FormData();
     for (const [k, v] of Object.entries(base)) fd.set(k, String(v));
     fd.set("next_action", "call");
-    fd.set("follow_up_due", "2026-10-08");
+    fd.set("follow_up_date", "2026-10-08");
     fd.set("follow_up_note", "Fees");
 
     const input = visitFormDataToInput(fd);
     expect(input.next_action).toBe("call");
-    expect(input.follow_up_due).toBe("2026-10-08");
+    expect(input.follow_up_date).toBe("2026-10-08");
     expect(input.follow_up_note).toBe("Fees");
+    expect("follow_up_due" in input).toBe(false);
   });
 
   it("caps the note at 300, like a plan note", () => {
     const ok = visitSchema.safeParse({
-      ...base, next_action: "call", follow_up_due: "2026-10-08",
+      ...base, next_action: "call", follow_up_date: "2026-10-08",
       follow_up_note: "x".repeat(300),
     });
     expect(ok.success).toBe(true);
     const tooLong = visitSchema.safeParse({
-      ...base, next_action: "call", follow_up_due: "2026-10-08",
+      ...base, next_action: "call", follow_up_date: "2026-10-08",
       follow_up_note: "x".repeat(301),
     });
     expect(tooLong.success).toBe(false);

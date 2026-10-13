@@ -7,6 +7,8 @@ import {
   statusRow,
   type StatusCatalogue,
 } from "@/lib/validation/institute";
+import { visitStatusOf } from "@/lib/validation/checkin";
+import type { FollowUpTask, PlanEntry } from "@/lib/visits";
 
 /**
  * The visit workflow's rules, in one place, shared by the browser and the
@@ -480,13 +482,6 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
       .refine((v) => v === null || v === "call" || v === "meeting", {
         message: "Choose a call or a meeting.",
       }),
-    /**
-     * When it is owed by. The form offers TOMORROW; see `defaultFollowUpDue()`.
-     *
-     * Required once a next action is chosen — enforced in the superRefine
-     * below, not here, because the rule is about the PAIR.
-     */
-    follow_up_due: absentableDate,
     /** What it is about, in the rep's own words. 300 chars, like a plan note. */
     follow_up_note: absentableText(300),
   })
@@ -565,51 +560,32 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
       });
     }
 
-    // Rule 5 — an open status needs a DATE to chase on. Not a time.
-    //
-    // Mirrors enforce_follow_up_when_open() as migration 0023 rewrites it,
-    // which asks the same question of the same lookup table. Two halves of the
-    // old rule have now been dropped, in opposite directions and for opposite
-    // reasons: 0018 dropped "a follow-up is FORBIDDEN on the two scheduled
-    // statuses", and 0023 drops "and a time as well as a date".
-    //
-    // `follow_up_time` is still ACCEPTED below — see the field — but nothing
-    // renders it and nothing requires it.
-    if (followUpRequired(catalogue, value.status_set_to) && !value.follow_up_date) {
+    /*
+     * Rule 5 — an open status needs a DATE to chase on — AND, as of the Phase
+     * A rebuild, the SAME requirement for a chosen next action. One box now
+     * answers both questions.
+     *
+     * IT USED TO BE TWO SEPARATE FIELDS AND TWO SEPARATE RULES: `follow_up_date`
+     * (Rule 5's own, mirroring `enforce_follow_up_when_open()`) and
+     * `follow_up_due` (A3's, for `close_visit()`'s task). The client asked for
+     * exactly one date box; `follow_up_due` is gone from this schema entirely,
+     * and this is the one check that covers both of what used to need it:
+     * `logAndFileVisit()` now reads this SAME value for both `log_visit()`'s
+     * `p_follow_up_date` and `close_visit()`'s `p_follow_up_due`.
+     *
+     * `follow_up_time` is still ACCEPTED below — see the field — but nothing
+     * renders it and nothing requires it.
+     */
+    if (
+      (followUpRequired(catalogue, value.status_set_to) || value.next_action !== null) &&
+      !value.follow_up_date
+    ) {
       ctx.addIssue({
         code: "custom",
         path: ["follow_up_date"],
-        message: `"${value.status_set_to}" leaves this open, so a follow-up date is needed.`,
-      });
-    }
-
-    /*
-     * A3 — A NEXT ACTION NEEDS A DAY, and the rule is about the PAIR rather
-     * than about either field, which is why it lives here.
-     *
-     * `follow_up_tasks.due_date` is NOT NULL (0038), so a task with no date
-     * cannot exist; without this the rep would reach the database and be
-     * refused there with a message about a column. The form pre-fills
-     * tomorrow, so meeting this rule costs them nothing unless they clear it.
-     *
-     * NOT THE SAME FIELD as `follow_up_date` above, and the two are deliberately
-     * separate: that one is Rule 5's — the date an OPEN STATUS owes, stored on
-     * the visit — and this one is when the task is due. They are usually the
-     * same day and are answers to different questions, so conflating them would
-     * make one of the two unanswerable.
-     */
-    if (value.next_action && !value.follow_up_due) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["follow_up_due"],
-        message: "Say when this follow-up is due.",
-      });
-    }
-    if (!value.next_action && value.follow_up_due) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["next_action"],
-        message: "Choose a call or a meeting, or clear the date.",
+        message: value.next_action
+          ? "Say when this follow-up is due."
+          : `"${value.status_set_to}" leaves this open, so a follow-up date is needed.`,
       });
     }
   });
@@ -656,7 +632,6 @@ export function visitFormDataToInput(formData: FormData) {
     follow_up_date: text("follow_up_date"),
     follow_up_time: text("follow_up_time"),
     next_action: text("next_action"),
-    follow_up_due: text("follow_up_due"),
     follow_up_note: text("follow_up_note"),
   };
 }
@@ -895,8 +870,13 @@ export function visitFieldErrors(error: z.ZodError): Record<string, string> {
  * filed there with nothing owed is a loop that closes silently.
  *
  * So the three fields are extracted here and reused by both, rather than
- * written out twice with a chance to diverge. The pair rule is the same one
- * `baseVisitSchema` applies: an action needs a day, and a day needs an action.
+ * written out twice with a chance to diverge. THE ONE REMAINING CALLER with
+ * its own date: Log Visit now borrows the status's own follow-up date for a
+ * next action instead of asking twice (see `baseVisitSchema`'s merged check),
+ * but the recovery form has no such date to borrow — the visit it is filing
+ * for was already logged, status and date included, by a `log_visit()` call
+ * that already succeeded. So this keeps its own pair rule: an action needs a
+ * day, and a day needs an action.
  */
 export const nextActionSchema = z
   .object({
@@ -953,3 +933,118 @@ export const batchPlanSchema = z.object({
     .max(60, "That is more institutes than one day can hold.")
     .transform((ids) => [...new Set(ids)]),
 });
+
+/**
+ * The morning tick-list's Call mode: the same institutes, no purpose.
+ *
+ * A call carries no purpose at all — `follow_up_tasks_purpose_for_meetings`
+ * (0038) refuses one on a `kind = 'call'` row, since a call never becomes a
+ * plan row and so has no activity to derive from one. `batchPlanSchema` is
+ * not reused with an optional purpose for this: that would make the one
+ * field whose presence decides which table gets written to look like a
+ * detail rather than the switch it is.
+ */
+export const batchCallSchema = z.object({
+  institute_ids: z
+    .array(z.uuid("Pick registered institutes for these follow-up calls."))
+    .min(1, "Tick at least one institute.")
+    .max(60, "That is more institutes than one day can hold.")
+    .transform((ids) => [...new Set(ids)]),
+});
+
+/**
+ * The log-call page: how the call went, and what was said.
+ *
+ * `outcome` is exactly the two values the old Done / No-answer buttons wrote —
+ * this page replaces them, not extends their vocabulary. `follow_up_tasks`
+ * also permits "rescheduled" (0038), but nothing before this page offered it
+ * and nothing here is adding it.
+ */
+export const logCallOutcomeSchema = z.object({
+  task_id: z.uuid("That call could not be identified."),
+  outcome: z
+    .string()
+    .trim()
+    .refine((v) => v === "done" || v === "no_answer", {
+      message: "Say how the call went.",
+    }),
+  note: z
+    .string()
+    .trim()
+    .max(300, "That is longer than we can store.")
+    .transform((v) => (v === "" ? null : v))
+    .nullable(),
+});
+
+/**
+ * The meeting-kind tasks the Meeting section prompts on, with the one
+ * collision this shape can actually produce taken out.
+ *
+ * LIVES HERE, NOT IN `src/lib/visits.ts`, deliberately — that module starts
+ * `import "server-only"`, and `MeetingPrompts` is a client component. A pure
+ * function with no database call belongs with the other client-importable
+ * logic in this file (`followUpRequired`, `eventDateRequired`, and the rest),
+ * not behind a guard built for the async readers beside it.
+ *
+ * KIND-FILTERED HERE, same as `FollowUpCalls` filters to `kind === "call"`
+ * internally — both read the same `tasks` array and each keeps to its own
+ * half, so a row can never satisfy both (`follow_up_tasks_kind_valid` makes
+ * `kind` exactly one of the two in the first place).
+ *
+ * EXCLUDES AN INSTITUTE WITH A GENUINELY UPCOMING PLAN ENTRY — not merely
+ * any entry. A meeting prompt is a task nobody has planned yet; once the rep
+ * adds that institute to today's plan, by tapping "Plan it" on this very
+ * prompt or by adding it themselves from the form above, it is a real
+ * `daily_plans` row and belongs in the entries list above, not twice over as
+ * a prompt as well.
+ *
+ * ⚠ "COMPLETED" DOES NOT COUNT, AND THIS WAS THE BUG. The entry that just
+ * CREATED this very meeting — the visit the rep logged minutes ago, picking
+ * Meeting as the next action — is itself a `daily_plans` row for this same
+ * institute, today, and `visitStatusOf()` calls it "Completed". The old
+ * check only asked "is this institute in `entries` at all", which that row
+ * satisfies, so the meeting it had just raised was hidden the instant it was
+ * created — nowhere on the Dashboard, and (see pending/page.tsx) nowhere on
+ * Pending either, since that screen's "Due today" block only ever rendered
+ * calls. Checking `visitStatusOf() !== "Completed"` is the fix: a finished
+ * visit explains why the task exists, it does not plan it again.
+ */
+export function meetingPromptsFor(
+  tasks: readonly FollowUpTask[],
+  entries: readonly PlanEntry[],
+): FollowUpTask[] {
+  const upcoming = new Set(
+    entries
+      .filter(
+        (entry) =>
+          visitStatusOf({
+            checkinAt: entry.checkinAt,
+            checkoutAt: entry.checkoutAt,
+            checkoutMissing: entry.checkoutMissing,
+          }) !== "Completed",
+      )
+      .map((entry) => entry.institute_id),
+  );
+  return tasks.filter((task) => task.kind === "meeting" && !upcoming.has(task.instituteId));
+}
+
+/**
+ * How many rows Pending's "Due today" block actually lists — NOT `tasks.length`
+ * (Phase A fix).
+ *
+ * ⚠ THE HEADER BUG, AND WHY IT HAPPENED. The header counted every open task;
+ * the block beneath it rendered calls via `FollowUpCalls` and meetings via
+ * `meetingPromptsFor()` — which excludes one the moment it is genuinely
+ * planned, by design (see that function's own note). A task can therefore
+ * still be open (so the header's naive count keeps it) while no longer being
+ * a PROMPT (so nothing renders it): "1 follow-up you set" over an empty
+ * section. This is the same two reads the block itself uses, summed, so the
+ * number on screen can never disagree with the rows under it again.
+ */
+export function listedFollowUpCount(
+  tasks: readonly FollowUpTask[],
+  entries: readonly PlanEntry[],
+): number {
+  const calls = tasks.filter((task) => task.kind === "call").length;
+  return calls + meetingPromptsFor(tasks, entries).length;
+}

@@ -37,7 +37,6 @@ import {
 } from "@/lib/validation/institute";
 import {
   type ActivityKey,
-  defaultFollowUpDue,
   eventDateLabel,
   eventDateRequired,
   fieldLabel,
@@ -227,7 +226,13 @@ export function LogVisitForm({
    * `institute_statuses` and which was already correct for all four.
    */
   const needsDate = eventDateRequired(catalogue, status);
-  const needsFollowUp = followUpRequired(catalogue, status);
+  /*
+   * ONE BOX, TWO REASONS, since the Phase A rebuild: Rule 5's own open-status
+   * requirement, OR a next action having been chosen. `visitSchema`'s merged
+   * check in baseVisitSchema asks the identical question — this just decides
+   * whether the box is on screen at all.
+   */
+  const needsFollowUp = followUpRequired(catalogue, status) || nextAction.kind !== "";
   const needsNotes = notesRequired(catalogue, status);
   const chosenStatus = statusRow(catalogue, status);
 
@@ -592,7 +597,9 @@ export function LogVisitForm({
                   }))
                 }
                 fieldErrors={fieldErrors}
-                defaultDue={defaultFollowUpDue()}
+                // askDate defaults to false: the Follow-up Date box above
+                // already covers it (see needsFollowUp), so this never asks
+                // a second time.
               />
             )}
 

@@ -354,7 +354,16 @@ export function navItemsFor(role: Role): NavItem[] {
   }
 }
 
-/** Dashboard only matches exactly; every other tab matches its subtree. */
+/**
+ * Dashboard only matches exactly; every other tab matches its subtree.
+ *
+ * ⚠ A SUBTREE NEEDS A `/` BOUNDARY, not a bare prefix — the same fix
+ * `matches()` above already has and this lacked. `/log-call/<id>` starts
+ * with the string `/log` with no separator in between, so a bare
+ * `pathname.startsWith(href)` lit "Log Visit" for a screen that is not it —
+ * the log-call page has no check-in, no photo and is not part of that tab.
+ */
 export function isActive(pathname: string, href: string): boolean {
-  return href === "/" ? pathname === "/" : pathname.startsWith(href);
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
 }

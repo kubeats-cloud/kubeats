@@ -272,10 +272,16 @@ const EMPTY_FOLLOW_UP: FollowUpDraft = { instituteId: "", purpose: "", note: "" 
  * THE PURPOSE, AND NEVER SILENTLY. After stage 3 the purpose decides the visit's
  * activity, and therefore which weekly metric the work lands in — so picking one
  * on the rep's behalf would be picking a number they are measured on. The
- * institute is already decided by the row that was tapped, which is the whole
- * point of starting here rather than on the Dashboard.
+ * institute is already decided by the row that was tapped.
+ *
+ * EXPORTED, as of the Phase A fix, for `MeetingPrompts` to reuse directly.
+ * It reads only `item.instituteId` and `item.instituteName` — `startFollowUp()`
+ * itself checks ownership, not status, so a minimal stand-in `FollowUp` built
+ * from a follow-up task's own institute fields is enough; this component does
+ * not care, and never did, whether its caller got `item` from
+ * `getOpenFollowUps()` or built it some other way.
  */
-function StartFollowUp({
+export function StartFollowUp({
   item,
   purposes,
   onCancel,

@@ -9,7 +9,51 @@ import {
 } from "@/components/ui/popover";
 import { describeAlert } from "@/lib/alert-kinds";
 import type { NotificationItem } from "@/lib/notification-kinds";
+import { formatDate } from "@/lib/dates";
 import { cn } from "@/lib/utils";
+
+/**
+ * One item's title, detail and tone — a follow-up task's own, or
+ * `describeAlert()`'s for the two kinds that still share it with the
+ * dashboard banner.
+ *
+ * A follow-up task item is told apart by `instituteName` rather than by
+ * `kind`, since `kind` is the same `"follow_ups_due"` for every one of them
+ * now — see NotificationItem's own note for why.
+ *
+ * `"modification"` IS INERT HERE TOO. Nothing ever constructs an item with
+ * it (see notification-kinds.ts), so this branch exists only so the
+ * type-checker proves `describeAlert()` — typed for the five `AlertKind`
+ * values alone — is never called with it. Awaiting the client's event list.
+ */
+function describeItem(item: NotificationItem): {
+  title: string;
+  detail: string;
+  tone: "warning" | "danger";
+} {
+  if (item.instituteName !== null) {
+    const overdue = item.overdue === true;
+    return {
+      title: `${item.instituteName} — ${item.taskKind === "meeting" ? "meeting" : "call"}`,
+      detail: overdue
+        ? `Overdue — was due ${formatDate(item.dueDate ?? "")}`
+        : "Due today",
+      tone: overdue ? "danger" : "warning",
+    };
+  }
+  if (item.kind === "modification") {
+    // Reserved, never reached — see notification-kinds.ts.
+    return { title: "", detail: "", tone: "warning" };
+  }
+  return describeAlert({
+    id: item.id,
+    kind: item.kind,
+    forDate: "",
+    count: item.count,
+    weekStart: item.weekStart,
+    seenAt: null,
+  });
+}
 
 /**
  * The notification bell.
@@ -86,14 +130,7 @@ export function NotificationBell({ items }: { items: NotificationItem[] }) {
         ) : (
           <ul className="max-h-80 overflow-y-auto">
             {items.map((item) => {
-              const { title, detail, tone } = describeAlert({
-                id: item.id,
-                kind: item.kind,
-                forDate: "",
-                count: item.count,
-                weekStart: item.weekStart,
-                seenAt: null,
-              });
+              const { title, detail, tone } = describeItem(item);
 
               return (
                 <li key={item.id} className="border-border border-b last:border-0">
