@@ -5,8 +5,9 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState } from "@/components/states";
 import { SlabInstitutePicker } from "@/components/slabs/institute-picker";
 import { SlabsPanel } from "@/components/institutes/slabs-panel";
+import { SlabQueue } from "@/components/slabs/slab-queue";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
-import { listSlabSets } from "@/lib/slabs";
+import { listSlabQueue, listSlabSets } from "@/lib/slabs";
 import { listInstitutesForPicker } from "@/lib/visits";
 
 export const metadata = { title: "Slabs" };
@@ -33,6 +34,30 @@ export default async function SlabsPage(props: PageProps<"/slabs">) {
   if (!user) redirect("/login");
 
   const admin = isAdmin(user);
+
+  /*
+   * An admin's Slabs tab is the approval queue, across every institute. The
+   * institute page keeps its own panel, which decides through the same form
+   * and the same action — one flow, two doors.
+   */
+  if (admin) {
+    const queue = await listSlabQueue();
+    return (
+      <PageColumn>
+        <PageHeader
+          eyebrow="Admin"
+          title="Slabs"
+          description="Slab sets reps have submitted. Approve them here, or revoke one that is already approved."
+        />
+        {queue.ok ? (
+          <SlabQueue institutes={queue.institutes} />
+        ) : (
+          <ErrorState message="We could not load the slabs just now." />
+        )}
+      </PageColumn>
+    );
+  }
+
   const requested = first((await props.searchParams).institute);
   const institutes = await listInstitutesForPicker();
   const chosen = requested

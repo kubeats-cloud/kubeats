@@ -48,8 +48,8 @@ export const REP_NAV: NavItem[] = [
   // The institute page still has this panel. The tab exists because a rep
   // should not have to open an institute and hunt for it: they pick the
   // school here and submit the set. It is the seventh item, and the thumb-bar
-  // test moved with it. Not a rep-only path — an admin who opens the URL
-  // revokes from the same panel, and the bar is what keeps it off their list.
+  // test moved with it. Not a rep-only path — an admin has it too, where the
+  // same route renders the approval queue instead of the picker.
   { href: "/slabs", label: "Slabs", icon: "slabs" },
   { href: "/log", label: "Log Visit", icon: "log" },
   { href: "/pending", label: "Pending", icon: "pending" },
@@ -77,16 +77,20 @@ export const REP_NAV: NavItem[] = [
 export const ADMIN_NAV: NavItem[] = [
   { href: "/", label: "Overview", icon: "dashboard" },
   { href: "/review", label: "Review", icon: "review" },
-  { href: "/assign", label: "Assign", icon: "assign" },
+  // Assign's old slot. /assign itself still works and its records are
+  // untouched; only the tab went. /slabs shows an admin the approval queue.
+  { href: "/slabs", label: "Slab", icon: "slabs" },
   { href: "/team", label: "Team", icon: "team" },
   { href: "/institutes", label: "Institutes", icon: "institutes" },
   { href: "/settings", label: "Settings", icon: "settings" },
 ];
 
 /**
- * A team lead's bar: the admin's, minus Settings.
+ * A team lead's bar: the admin's, minus Settings and Slabs. Slabs is the
+ * admin's approval queue and deciding a set is admin-only (FO037); a team lead
+ * still reaches /slabs by URL and gets the rep's per-institute screen.
  *
- * FIVE, AND THE ONE THAT IS MISSING IS THE WHOLE DECISION. Settings holds the
+ * FOUR, AND THE MISSING SETTINGS IS THE WHOLE DECISION. Settings holds the
  * status vocabulary, the purposes, the location tree and sign-in security —
  * all of which the WHOLE COMPANY shares. A status one team lead retires
  * disappears for every rep on every campus; a purpose they add becomes a metric
@@ -97,7 +101,7 @@ export const ADMIN_NAV: NavItem[] = [
  * team leads share.
  *
  * Everything a team lead DOES get is scoped by RLS rather than by this list:
- * Review, Assign, Team, Institutes and the Overview all return their own reps'
+ * Review, Assign (by URL), Team, Institutes and the Overview all return their own reps'
  * rows once 0042 lands, and return exactly what an admin sees until then,
  * because nobody is a team lead yet.
  *
@@ -108,7 +112,6 @@ export const ADMIN_NAV: NavItem[] = [
 export const TEAM_LEAD_NAV: NavItem[] = [
   { href: "/", label: "Overview", icon: "dashboard" },
   { href: "/review", label: "Review", icon: "review" },
-  { href: "/assign", label: "Assign", icon: "assign" },
   { href: "/team", label: "Team", icon: "team" },
   { href: "/institutes", label: "Institutes", icon: "institutes" },
 ];

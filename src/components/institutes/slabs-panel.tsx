@@ -141,7 +141,7 @@ export function SlabsPanel({
   );
 }
 
-function SlabSetForm({
+export function SlabSetForm({
   instituteId,
   set,
   scope,
