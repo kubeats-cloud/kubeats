@@ -1,4 +1,9 @@
+"use client";
+
+import { useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { PreviewToggle } from "@/components/preview-toggle";
+import { previewWindow } from "@/lib/list-preview";
 import {
   ACCURACY_UNAVAILABLE,
   LOCATION_UNAVAILABLE,
@@ -203,6 +208,37 @@ function PresencePanel({
 }
 
 /** One planned visit, arrival and departure side by side. */
+function PresenceCards({
+  visits,
+  preview,
+  open,
+  onToggle,
+}: {
+  visits: ActivityReport["plannedVisits"];
+  preview: number | undefined;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const shown = previewWindow(visits, preview, open);
+  return (
+    <>
+      <div className="space-y-3">
+        {shown.visible.map((visit) => (
+          <PresenceCard key={visit.id} visit={visit} />
+        ))}
+      </div>
+      {shown.canToggle && (
+        <PreviewToggle
+          expanded={open}
+          total={visits.length}
+          onToggle={onToggle}
+          listLabel={visits.length === 1 ? "visit" : "visits"}
+        />
+      )}
+    </>
+  );
+}
+
 function PresenceCard({ visit }: { visit: ActivityReport["plannedVisits"][number] }) {
   return (
     <Card className="gap-0 overflow-hidden p-0 shadow-xs">
@@ -262,7 +298,30 @@ function PresenceCard({ visit }: { visit: ActivityReport["plannedVisits"][number
   );
 }
 
-export function ActivitySummary({ report }: { report: ActivityReport }) {
+export function ActivitySummary({
+  report,
+  presencePreview,
+}: {
+  report: ActivityReport;
+  /**
+   * When set, Field presence shows this many cards until "View all". Omitted
+   * on /report, which keeps every planned visit on the page.
+   */
+  presencePreview?: number;
+}) {
+  const [presenceOpen, setPresenceOpen] = useState(false);
+  const presenceAnchor = useRef<HTMLDivElement>(null);
+
+  function togglePresence() {
+    setPresenceOpen((open) => {
+      if (open) {
+        requestAnimationFrame(() =>
+          presenceAnchor.current?.scrollIntoView({ block: "start" }),
+        );
+      }
+      return !open;
+    });
+  }
   const {
     totalVisits,
     institutesCovered,
@@ -401,7 +460,7 @@ export function ActivitySummary({ report }: { report: ActivityReport }) {
         )}
       </div>
 
-      <div>
+      <div ref={presenceAnchor}>
         <SectionTitle>Field presence</SectionTitle>
         {plannedVisits.length === 0 ? (
           <EmptyState
@@ -420,12 +479,16 @@ export function ActivitySummary({ report }: { report: ActivityReport }) {
            * past the width of the phone every other screen in this app is built
            * for. Two labelled panels side by side say more in less room, and
            * stack rather than scroll when there is none.
+           *
+           * The member hub passes a preview limit. Expanding shows this same
+           * array, not a second query, so nothing in the period is left out.
            */
-          <div className="space-y-3">
-            {plannedVisits.map((visit) => (
-              <PresenceCard key={visit.id} visit={visit} />
-            ))}
-          </div>
+          <PresenceCards
+            visits={plannedVisits}
+            preview={presencePreview}
+            open={presenceOpen}
+            onToggle={togglePresence}
+          />
         )}
       </div>
 

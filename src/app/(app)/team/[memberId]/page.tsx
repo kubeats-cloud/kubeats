@@ -68,6 +68,12 @@ const first = (value: string | string[] | undefined) =>
 /** How many rows the two "and here is a link to the rest" lists show. */
 const RECENT_VISITS = 10;
 const INSTITUTES_SHOWN = 8;
+/**
+ * Follow-ups owed and Field presence stay on this page. A short preview is
+ * the default; "View all" reveals the same arrays in full.
+ */
+const FOLLOW_UPS_SHOWN = 3;
+const PRESENCE_SHOWN = 3;
 
 /**
  * EVERYTHING ABOUT ONE REP, IN ONE PLACE.
@@ -370,6 +376,7 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
           purposes={[]}
           catalogue={catalogue}
           readOnly
+          preview={FOLLOW_UPS_SHOWN}
         />
       ) : (
         <ErrorState message="We could not load what is still owed. Please try again in a moment." />
@@ -403,7 +410,10 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
         basePath={`/team/${memberId}`}
       />
       {report.ok ? (
-        <ActivitySummary report={{ ...report.report, memberName: member.name }} />
+        <ActivitySummary
+          report={{ ...report.report, memberName: member.name }}
+          presencePreview={PRESENCE_SHOWN}
+        />
       ) : (
         <ErrorState message="We could not load this rep's activity report. Please try again in a moment." />
       )}
