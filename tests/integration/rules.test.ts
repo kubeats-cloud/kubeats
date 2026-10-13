@@ -6211,6 +6211,49 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
   });
 
+  /**
+   * ★ THE EDGE CASE DECISION (a), PROVEN LIVE ★ — "Plan it" must work for a
+   * meeting raised while the institute's CURRENT status is CLOSED, which
+   * `getOpenFollowUps()` would never return. `startFollowUp()` itself is not
+   * an RPC — it is the same plain `daily_plans` insert this reproduces, so
+   * running it directly against a real closed-status institute is the real
+   * proof, not an inference from reading the source.
+   */
+  describe.skipIf(!has0038)("Plan it works for a closed-status institute (Phase A fix)", () => {
+    it("inserts a real daily_plans row even though getOpenFollowUps would not list this institute", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "plan-it-closed");
+      const { error: statusError } = await admin
+        .from("institutes").update({ status: SETUP_STATUS }).eq("id", mine);
+      expect(statusError, statusError?.message).toBeNull();
+
+      // Confirm the precondition: a closed status is excluded from the list
+      // getOpenFollowUps() reads from.
+      const openStatuses = SEED_STATUS_CATALOGUE
+        .filter((row) => row.category === "open")
+        .map((row) => row.status);
+      const { data: openRows } = await admin
+        .from("institutes").select("id").eq("id", mine).in("status", openStatuses);
+      expect(openRows, "this institute must NOT be in the open-status set").toEqual([]);
+
+      const { data: purpose } = await admin
+        .from("purposes").select("id, label").eq("is_active", true).limit(1).single();
+
+      // The exact shape startFollowUp() sends.
+      const { error } = await repA.db.from("daily_plans").insert({
+        member: repA.id,
+        date: iso(),
+        institute_id: mine,
+        purpose: purpose!.label,
+        purpose_id: purpose!.id,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: plan } = await admin
+        .from("daily_plans").select("id").eq("institute_id", mine).eq("member", repA.id).single();
+      expect(plan, "the plan row was not created").not.toBeNull();
+    });
+  });
+
   /* ---------------------------------------------------------------- */
   /* A3 - close_visit's new parameters, and the overload ceremony       */
   /* ---------------------------------------------------------------- */

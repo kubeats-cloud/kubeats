@@ -576,7 +576,9 @@ export function DailyPlan({
         {/* Meeting-kind prompts, moved here from inside FollowUpCalls — see
             MeetingPrompts' own note on why it is a sibling, not a subsection,
             and on the dedup against the entries list just above. */}
-        {PHASE_A_DAILY_PLAN && <MeetingPrompts tasks={tasks} entries={entries} />}
+        {PHASE_A_DAILY_PLAN && (
+          <MeetingPrompts tasks={tasks} entries={entries} purposes={purposes} />
+        )}
         </section>
 
         {/*

@@ -1027,3 +1027,24 @@ export function meetingPromptsFor(
   );
   return tasks.filter((task) => task.kind === "meeting" && !upcoming.has(task.instituteId));
 }
+
+/**
+ * How many rows Pending's "Due today" block actually lists — NOT `tasks.length`
+ * (Phase A fix).
+ *
+ * ⚠ THE HEADER BUG, AND WHY IT HAPPENED. The header counted every open task;
+ * the block beneath it rendered calls via `FollowUpCalls` and meetings via
+ * `meetingPromptsFor()` — which excludes one the moment it is genuinely
+ * planned, by design (see that function's own note). A task can therefore
+ * still be open (so the header's naive count keeps it) while no longer being
+ * a PROMPT (so nothing renders it): "1 follow-up you set" over an empty
+ * section. This is the same two reads the block itself uses, summed, so the
+ * number on screen can never disagree with the rows under it again.
+ */
+export function listedFollowUpCount(
+  tasks: readonly FollowUpTask[],
+  entries: readonly PlanEntry[],
+): number {
+  const calls = tasks.filter((task) => task.kind === "call").length;
+  return calls + meetingPromptsFor(tasks, entries).length;
+}

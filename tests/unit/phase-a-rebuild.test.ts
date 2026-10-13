@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   batchCallSchema,
+  listedFollowUpCount,
   logCallOutcomeSchema,
   meetingPromptsFor,
 } from "@/lib/validation/visit";
@@ -334,5 +335,114 @@ describe("isActive no longer matches /log-call as the Log Visit tab (Phase A fix
 
   it("still lights a real subtree, like an institute's own page", () => {
     expect(isActive("/institutes/abc123", "/institutes")).toBe(true);
+  });
+});
+
+describe("listedFollowUpCount matches what Pending's block actually lists (Phase A fix)", () => {
+  it("counts a call and an untouched meeting prompt — the ordinary case", () => {
+    const tasks = [task({ id: "c1", kind: "call" }), task({ id: "m1", kind: "meeting" })];
+    expect(listedFollowUpCount(tasks, [])).toBe(2);
+  });
+
+  /**
+   * ★ THE HEADER BUG, PINNED ★ — "1 follow-up you set" over nothing listed.
+   * The meeting task is still OPEN (it has no `doneAt`), but the moment its
+   * institute has an upcoming plan entry, `meetingPromptsFor()` stops
+   * showing it as a prompt — correctly, it is now a real plan row. The old
+   * header read `dueTasks.length`, which does not know that; this must.
+   */
+  it("drops a meeting from the count the instant it is genuinely planned", () => {
+    const tasks = [task({ id: "c1", kind: "call" }), task({ id: "m1", kind: "meeting", instituteId: "i1" })];
+    const plannedEntries = [entry("i1", { checkinAt: null })]; // "Scheduled" — upcoming, not Completed
+    expect(listedFollowUpCount(tasks, plannedEntries)).toBe(1);
+  });
+
+  it("is zero when nothing is listed", () => {
+    expect(listedFollowUpCount([], [])).toBe(0);
+  });
+
+  it("counts only calls when every meeting is already planned", () => {
+    const tasks = [
+      task({ id: "m1", kind: "meeting", instituteId: "i1" }),
+      task({ id: "m2", kind: "meeting", instituteId: "i2" }),
+    ];
+    const plannedEntries = [entry("i1"), entry("i2")];
+    expect(listedFollowUpCount(tasks, plannedEntries)).toBe(0);
+  });
+});
+
+describe("MeetingPrompts' 'Plan it' opens StartFollowUp in place (Phase A fix)", () => {
+  const file = read("src/components/dashboard/meeting-prompts.tsx");
+
+  it("reuses StartFollowUp rather than building a new form", () => {
+    expect(file).toContain(
+      'import { StartFollowUp } from "@/components/visits/follow-up-list"',
+    );
+    expect(file).toContain("<StartFollowUp");
+    // "No new UI": no second form-building import that would suggest a
+    // parallel panel was written instead of reusing this one.
+    expect(file).not.toContain("useActionState");
+  });
+
+  it("builds the stub from only the two fields StartFollowUp reads — no status, no city", () => {
+    const stubStart = file.indexOf("const stub: FollowUp");
+    const stub = file.slice(stubStart, file.indexOf("return (", stubStart));
+    expect(stub).toContain("instituteId: task.instituteId");
+    expect(stub).toContain("instituteName: task.instituteName");
+    // The other fields are present only because FollowUp requires the shape —
+    // null/placeholder, never read FROM the task or anywhere else.
+    expect(stub).toContain('status: ""');
+    expect(stub).toContain("city: null");
+  });
+
+  it("no longer links away to /pending — it opens in place instead", () => {
+    expect(file).not.toContain('href={`/pending?due=today`}');
+  });
+
+  /**
+   * ★ THE EDGE CASE THE DECISION WAS ABOUT ★ — a meeting raised while the
+   * status was CLOSED must still get a working panel. `StartFollowUp()` is
+   * exported from `follow-up-list.tsx`; the real proof it works independently
+   * of `getOpenFollowUps()` is in `startFollowUp()` itself (visit-actions.ts)
+   * — read directly, not inferred — which this checks never gained a status
+   * read on this path.
+   */
+  /**
+   * The stub's `status: ""` placeholder is expected — FollowUp requires the
+   * field structurally, see the test above. What must NOT be here is any of
+   * the actual machinery that asks or filters on a REAL status. The doc
+   * comment NAMES `getOpenFollowUps()` to explain why it is not needed, so
+   * this checks for an IMPORT of it, not the bare word.
+   */
+  it("does not filter or gate by the institute's current status anywhere in this file", () => {
+    for (const term of ["isOpenStatus", "statusRow", "catalogue"]) {
+      expect(file, term).not.toContain(term);
+    }
+    expect(file).not.toMatch(/import\s*\{[^}]*getOpenFollowUps/);
+  });
+
+  it("startFollowUp() itself still asks nothing about institute status", () => {
+    const actions = read("src/lib/visit-actions.ts");
+    const fn = actions.slice(actions.indexOf("export async function startFollowUp"));
+    const body = fn.slice(0, fn.indexOf("\nexport async function removeFromDailyPlan"));
+    expect(body.toLowerCase()).not.toContain("institutes.status");
+    expect(body).not.toContain("getOpenFollowUps");
+  });
+
+  it("StartFollowUp is exported, for MeetingPrompts to import directly", () => {
+    const followUpList = read("src/components/visits/follow-up-list.tsx");
+    expect(followUpList).toContain("export function StartFollowUp");
+  });
+
+  /**
+   * "Planning removes the prompt without closing the task" — unchanged by
+   * this fix. Closing still only ever happens through closeFollowUpTask's
+   * own kind-guarded path (Done) or the log-call page; opening the panel
+   * does not touch done_at at all.
+   */
+  it("does not call closeFollowUpTask from the open-panel path", () => {
+    const openBranch = file.slice(file.indexOf('open === task.id ? ('));
+    const panel = openBranch.slice(0, openBranch.indexOf(") : ("));
+    expect(panel).not.toContain("closeFollowUpTask");
   });
 });
