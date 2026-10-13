@@ -11,6 +11,7 @@ import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
 import { ActivityGridTable } from "@/components/report/activity-grid-table";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { countMyInstitutes } from "@/lib/institutes";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { SEED_STATUS_CATALOGUE } from "@/lib/validation/institute";
 import { settled } from "@/lib/errors";
@@ -60,8 +61,18 @@ export default async function DashboardPage() {
    * falls back to. Nothing downstream can tell the two routes apart, which is
    * why this needed no change to how the page reads any of it.
    */
-  const [plan, institutes, purposes, week, overview, catalogue, report, tasks, alerts] =
-    await Promise.all([
+  const [
+    plan,
+    institutes,
+    purposes,
+    week,
+    overview,
+    catalogue,
+    report,
+    tasks,
+    alerts,
+    totalInstitutes,
+  ] = await Promise.all([
     admin
       ? Promise.resolve({ ok: true as const, entries: [] })
       : settled(getTodayPlan(user.id), { ok: false as const }, "dashboard:plan"),
@@ -114,6 +125,12 @@ export default async function DashboardPage() {
      * `member = auth.uid() or is_admin()`, and this asks for its own id.
      */
     settled(listUnseenAlerts(user.id), { ok: false as const }, "dashboard:alerts"),
+    // Rep's own registered-institutes count for the Today snapshot. Not an
+    // admin figure — countMyInstitutes() relies on institutes_select already
+    // narrowing a rep to their own rows, which is not true for an admin.
+    admin
+      ? Promise.resolve(null)
+      : settled(countMyInstitutes(), null, "dashboard:institute-count"),
   ]);
 
   const entries = plan.ok ? plan.entries : [];
@@ -145,6 +162,7 @@ export default async function DashboardPage() {
           <TodaySnapshot
             planned={entries.length}
             held={held}
+            totalInstitutes={totalInstitutes ?? 0}
           />
 
           {plan.ok ? (
