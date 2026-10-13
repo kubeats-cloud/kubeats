@@ -159,27 +159,34 @@ describe("what the form posts is what the schema accepts", () => {
  * log-visit-form.test.ts is: there is no DOM here to render into.
  */
 describe("Log Visit drives the hidden field off the status", () => {
-  const source = readFileSync(
+  const form = readFileSync(
     fileURLToPath(new URL("../../src/components/visits/log-visit-form.tsx", import.meta.url)),
+    "utf8",
+  );
+  const shared = readFileSync(
+    fileURLToPath(
+      new URL("../../src/components/visits/status-outcome-fields.tsx", import.meta.url),
+    ),
     "utf8",
   );
 
   it("posts expected_date through postedEventDate", () => {
-    expect(source).toContain('name="expected_date"');
-    expect(source).toContain("postedEventDate(catalogue, status, expectedDate)");
+    expect(shared).toContain('name="expected_date"');
+    expect(shared).toContain("postedEventDate(catalogue, status, value.expectedDate)");
   });
 
   it("never keys the date off the planned lifecycle again", () => {
     // The exact shape of the bug. `lifecycleStatus` itself stays — it is what
     // the lifecycle_status field carries — so this looks for the TEST, not the
     // variable.
-    expect(source).not.toMatch(/lifecycleStatus\s*===\s*"Set"\s*\?/);
+    expect(form).not.toMatch(/lifecycleStatus\s*===\s*"Set"\s*\?/);
+    expect(shared).not.toMatch(/lifecycleStatus\s*===\s*"Set"\s*\?/);
   });
 
   it("shows the visible field off the same question", () => {
     // Both halves read eventDateRequired, one directly and one through the
     // helper. If the visible field is ever moved back onto the lifecycle, this
     // is the line that says they have to travel together.
-    expect(source).toContain("const needsDate = eventDateRequired(catalogue, status)");
+    expect(shared).toContain("const needsDate = eventDateRequired(catalogue, status)");
   });
 });

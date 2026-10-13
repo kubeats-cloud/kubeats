@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
   batchCallSchema,
   listedFollowUpCount,
-  logCallOutcomeSchema,
   meetingPromptsFor,
 } from "@/lib/validation/visit";
 import { isActive } from "@/lib/nav";
@@ -144,45 +143,25 @@ describe("batchCallSchema", () => {
   });
 });
 
-describe("logCallOutcomeSchema", () => {
-  const taskId = "8b1a9953-4c22-4d1f-9b1a-99534c224d1f";
+describe("Log Call is the visit form minus photo, not Done/No answer", () => {
+  const form = read("src/components/visits/log-call-form.tsx");
 
-  it("accepts done and no_answer — the old buttons' exact two values", () => {
-    expect(
-      logCallOutcomeSchema.safeParse({ task_id: taskId, outcome: "done", note: "" }).success,
-    ).toBe(true);
-    expect(
-      logCallOutcomeSchema.safeParse({ task_id: taskId, outcome: "no_answer", note: "" })
-        .success,
-    ).toBe(true);
+  it("renders StatusOutcomeFields, not an outcome picker", () => {
+    expect(form).toContain("<StatusOutcomeFields");
+    expect(form).not.toContain('value="done"');
+    expect(form).not.toContain("no_answer");
+    expect(form).not.toContain("No answer");
   });
 
-  /**
-   * `follow_up_tasks` permits "rescheduled" too (0038), but nothing before
-   * this page ever offered it and this page is not adding it.
-   */
-  it("refuses rescheduled — not an option this page offers", () => {
-    expect(
-      logCallOutcomeSchema.safeParse({ task_id: taskId, outcome: "rescheduled", note: "" })
-        .success,
-    ).toBe(false);
+  it("never mounts a photo, a check-in or a GPS checkout", () => {
+    expect(form).not.toContain("CaptureFields");
+    expect(form).not.toContain("checkoutFix");
+    expect(form).not.toContain("geolocate");
+    expect(form).toContain("openLoops={[]}");
   });
 
-  it("refuses a missing outcome", () => {
-    expect(logCallOutcomeSchema.safeParse({ task_id: taskId, outcome: "", note: "" }).success).toBe(
-      false,
-    );
-  });
-
-  it("caps the note at 300, like every other follow-up note", () => {
-    const ok = logCallOutcomeSchema.safeParse({
-      task_id: taskId, outcome: "done", note: "x".repeat(300),
-    });
-    expect(ok.success).toBe(true);
-    const tooLong = logCallOutcomeSchema.safeParse({
-      task_id: taskId, outcome: "done", note: "x".repeat(301),
-    });
-    expect(tooLong.success).toBe(false);
+  it("always shows Next Action", () => {
+    expect(form).toContain("showNextAction");
   });
 });
 
@@ -199,14 +178,17 @@ describe("NextActionFields' askDate — one date box, not two", () => {
 
   it("Log Visit never passes askDate — it borrows Rule 5's own date instead", () => {
     const form = read("src/components/visits/log-visit-form.tsx");
-    const usage = form.slice(form.indexOf("<NextActionFields"));
-    const tag = usage
-      .slice(0, usage.indexOf("/>") + 2)
-      // Comments explaining the default are fine; a passed prop is not.
-      .replace(/\/\/[^\n]*/g, "");
-    expect(tag).not.toContain("askDate");
+    expect(form).not.toContain("<NextActionFields");
+    expect(form).toContain("<StatusOutcomeFields");
     // The one shared box: Log Visit's own needsFollowUp now reads next_action.
     expect(form).toContain('nextAction.kind !== ""');
+
+    const shared = read("src/components/visits/status-outcome-fields.tsx");
+    const usage = shared.slice(shared.indexOf("<NextActionFields"));
+    const tag = usage
+      .slice(0, usage.indexOf("/>") + 2)
+      .replace(/\/\/[^\n]*/g, "");
+    expect(tag).not.toContain("askDate");
   });
 
   it("the recovery form passes askDate — it has no visit-date to borrow", () => {
@@ -219,24 +201,40 @@ describe("NextActionFields' askDate — one date box, not two", () => {
 
 describe("logFollowUpCallOutcome never touches a visit, a plan row or a photo", () => {
   const actions = read("src/lib/visit-actions.ts");
-  // The last function in the file — nothing to slice off the end of.
-  const body = actions.slice(actions.indexOf("export async function logFollowUpCallOutcome"));
+  // Includes CALL_RPC immediately above the function — the codes live there.
+  const body = actions.slice(actions.indexOf("const CALL_RPC"));
 
-  it("is a direct update of follow_up_tasks", () => {
-    expect(body).toContain('.from("follow_up_tasks")');
-    expect(body).toContain(".update(");
+  it("calls log_call, not a table update", () => {
+    expect(body).toContain('.rpc("log_call"');
+    expect(body).not.toContain('.from("follow_up_tasks")');
+    expect(body).not.toContain(".update(");
   });
 
-  it("never references visits, daily_plans, check-in or a photo", () => {
-    for (const term of ["daily_plans", "visits", "photo", "checkin", "log_visit", "close_visit"]) {
-      expect(body.toLowerCase()).not.toContain(term);
+  it("never writes daily_plans, visits, a check-in or a photo path", () => {
+    expect(body).not.toContain('.from("daily_plans")');
+    expect(body).not.toContain('.from("visits")');
+    expect(body).not.toContain("photo_path");
+    expect(body).not.toContain("checkin");
+    expect(body).not.toContain("log_visit");
+    expect(body).not.toContain("close_visit");
+  });
+
+  it("maps FO004, FO006, FO016, FO024 and FO038-FO044 by code", () => {
+    for (const code of [
+      "FO004",
+      "FO006",
+      "FO016",
+      "FO024",
+      "FO038",
+      "FO039",
+      "FO040",
+      "FO041",
+      "FO042",
+      "FO043",
+      "FO044",
+    ]) {
+      expect(body, code).toContain(code);
     }
-  });
-
-  it("is scoped to the member and to kind='call', and only an open task", () => {
-    expect(body).toContain('.eq("member", user.id)');
-    expect(body).toContain('.eq("kind", "call")');
-    expect(body).toContain('.is("done_at", null)');
   });
 });
 

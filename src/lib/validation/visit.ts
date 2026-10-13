@@ -8,6 +8,10 @@ import {
   type StatusCatalogue,
 } from "@/lib/validation/institute";
 import { visitStatusOf } from "@/lib/validation/checkin";
+import {
+  feedbackFieldsSchema,
+  refineReportForStatus,
+} from "@/lib/validation/feedback";
 import type { FollowUpTask, PlanEntry } from "@/lib/visits";
 
 /**
@@ -370,6 +374,42 @@ export function makeVisitSchema(catalogue: StatusCatalogue) {
  */
 export const visitSchema = baseVisitSchema(SEED_STATUS_CATALOGUE);
 
+/**
+ * Expected date (status flag) and follow-up date (open status OR a next
+ * action). Shared by Log Visit and Log Call so the two forms cannot disagree
+ * about when a box is owed.
+ */
+function refineStatusDrivenDates(
+  catalogue: StatusCatalogue,
+  value: {
+    status_set_to: string;
+    expected_date: string | null;
+    follow_up_date: string | null;
+    next_action: "call" | "meeting" | null;
+  },
+  ctx: z.RefinementCtx,
+) {
+  if (eventDateRequired(catalogue, value.status_set_to) && !value.expected_date) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["expected_date"],
+      message: `Pick the ${eventDateLabel(catalogue, value.status_set_to)}.`,
+    });
+  }
+  if (
+    (followUpRequired(catalogue, value.status_set_to) || value.next_action !== null) &&
+    !value.follow_up_date
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["follow_up_date"],
+      message: value.next_action
+        ? "Say when this follow-up is due."
+        : `"${value.status_set_to}" leaves this open, so a follow-up date is needed.`,
+    });
+  }
+}
+
 function baseVisitSchema(catalogue: StatusCatalogue) {
   return z
   .object({
@@ -519,31 +559,12 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
      * stored the value for any session or campus visit since 0026 (D3) removed
      * its own `= 'Set'` test for exactly this reason.
      */
-    if (eventDateRequired(catalogue, value.status_set_to) && !value.expected_date) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["expected_date"],
-        /*
-         * "Pick THE", not "pick a", and the article is the reason.
-         *
-         * `eventDateLabel()` returns "Expected Session Date" on an open status
-         * and "Session Date" on a closed one, so a fixed "a" produced "Pick a
-         * Expected Session Date." — wrong for exactly the four statuses that
-         * ask for a date most often. Choosing between "a" and "an" per label
-         * would work, and would put an English article rule in a validation
-         * schema for ever, to be got wrong again the first time a label starts
-         * with a silent h.
-         *
-         * "The" is correct before every label the function can produce, and
-         * correct for what this field IS: there is one date being asked about,
-         * not one of several.
-         *
-         * One name for one box: the control, this message and the error summary
-         * all read the label from the same function.
-         */
-        message: `Pick the ${eventDateLabel(catalogue, value.status_set_to)}.`,
-      });
-    }
+    /*
+     * "Pick THE", not "pick a" — see refineStatusDrivenDates. The article is
+     * load-bearing: eventDateLabel() returns "Expected Session Date" on an
+     * open status, so a fixed "a" produced "Pick a Expected Session Date."
+     */
+    refineStatusDrivenDates(catalogue, value, ctx);
 
     // The presence guarantee, now for EVERY activity (stage 3).
     //
@@ -561,33 +582,11 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
     }
 
     /*
-     * Rule 5 — an open status needs a DATE to chase on — AND, as of the Phase
-     * A rebuild, the SAME requirement for a chosen next action. One box now
-     * answers both questions.
-     *
-     * IT USED TO BE TWO SEPARATE FIELDS AND TWO SEPARATE RULES: `follow_up_date`
-     * (Rule 5's own, mirroring `enforce_follow_up_when_open()`) and
-     * `follow_up_due` (A3's, for `close_visit()`'s task). The client asked for
-     * exactly one date box; `follow_up_due` is gone from this schema entirely,
-     * and this is the one check that covers both of what used to need it:
-     * `logAndFileVisit()` now reads this SAME value for both `log_visit()`'s
-     * `p_follow_up_date` and `close_visit()`'s `p_follow_up_due`.
-     *
-     * `follow_up_time` is still ACCEPTED below — see the field — but nothing
-     * renders it and nothing requires it.
+     * Rule 5's follow-up date (open status OR a next action) is in
+     * refineStatusDrivenDates above, shared with makeCallSchema. `follow_up_time`
+     * is still ACCEPTED on the field — a cached page can still post one — but
+     * nothing renders it and nothing requires it.
      */
-    if (
-      (followUpRequired(catalogue, value.status_set_to) || value.next_action !== null) &&
-      !value.follow_up_date
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["follow_up_date"],
-        message: value.next_action
-          ? "Say when this follow-up is due."
-          : `"${value.status_set_to}" leaves this open, so a follow-up date is needed.`,
-      });
-    }
   });
 }
 
@@ -831,6 +830,8 @@ const FIELD_LABELS: Record<string, string> = {
   follow_up_action: "Follow-up action",
   follow_up_date: "Follow-up date",
   follow_up_time: "Follow-up time",
+  follow_up_note: "Follow-up note",
+  next_action: "Next action",
   employee_remarks: "Your remarks",
 };
 
@@ -953,28 +954,71 @@ export const batchCallSchema = z.object({
 });
 
 /**
- * The log-call page: how the call went, and what was said.
+ * Log Call: the same status-driven rules as Log Visit, without photo, GPS,
+ * activity, or a plan row.
  *
- * `outcome` is exactly the two values the old Done / No-answer buttons wrote —
- * this page replaces them, not extends their vocabulary. `follow_up_tasks`
- * also permits "rescheduled" (0038), but nothing before this page offered it
- * and nothing here is adding it.
+ * A FACTORY for the same reason makeVisitSchema is: the vocabulary lives in
+ * `institute_statuses`, and a schema holding the seeded nine would refuse a
+ * status an admin added this morning. Built from `feedbackFieldsSchema` so
+ * notes / students / topic / taken-by cannot drift from the visit form, then
+ * refined with the same date rules (`refineStatusDrivenDates`) and the same
+ * report rules (`refineReportForStatus`).
+ *
+ * `closes_visit_id` is omitted on purpose — "This completes an earlier plan"
+ * is a visit question, and log_call() has no such parameter.
  */
-export const logCallOutcomeSchema = z.object({
-  task_id: z.uuid("That call could not be identified."),
-  outcome: z
-    .string()
-    .trim()
-    .refine((v) => v === "done" || v === "no_answer", {
-      message: "Say how the call went.",
-    }),
-  note: z
-    .string()
-    .trim()
-    .max(300, "That is longer than we can store.")
-    .transform((v) => (v === "" ? null : v))
-    .nullable(),
-});
+export function makeCallSchema(catalogue: StatusCatalogue) {
+  return feedbackFieldsSchema
+    .omit({ closes_visit_id: true })
+    .extend({
+      task_id: z.uuid("That call could not be identified."),
+      status_set_to: z
+        .string()
+        .trim()
+        .min(1, "Say where this call leaves the institute.")
+        .refine((v) => selectableStatuses(catalogue).includes(v), {
+          message: "Choose one of the listed statuses.",
+        }),
+      expected_date: optionalDate,
+      follow_up_date: optionalDate,
+      next_action: z
+        .string()
+        .trim()
+        .optional()
+        .transform((v) => (v === undefined || v === "" ? null : v))
+        .nullable()
+        .refine((v) => v === null || v === "call" || v === "meeting", {
+          message: "Choose a call or a meeting.",
+        }),
+      follow_up_note: absentableText(300),
+    })
+    .superRefine((value, ctx) => {
+      refineStatusDrivenDates(catalogue, value, ctx);
+      refineReportForStatus(catalogue, value.status_set_to, value, ctx);
+    });
+}
+
+export type CallInput = z.infer<ReturnType<typeof makeCallSchema>>;
+
+/** Shared so the browser and the server action read the form identically. */
+export function callFormDataToInput(formData: FormData) {
+  const text = (key: string) => {
+    const value = formData.get(key);
+    return typeof value === "string" ? value : "";
+  };
+  return {
+    task_id: text("task_id"),
+    status_set_to: text("status_set_to"),
+    expected_date: text("expected_date"),
+    follow_up_date: text("follow_up_date"),
+    next_action: text("next_action"),
+    follow_up_note: text("follow_up_note"),
+    notes: text("notes"),
+    students_attended: text("students_attended"),
+    session_topic: text("session_topic"),
+    session_taken_by: text("session_taken_by"),
+  };
+}
 
 /**
  * The meeting-kind tasks the Meeting section prompts on, with the one
