@@ -6,10 +6,13 @@ import {
   CheckCircle2Icon,
   NetworkIcon,
   PencilIcon,
+  SearchIcon,
   Trash2Icon,
   TriangleAlertIcon,
   UserPlusIcon,
 } from "lucide-react";
+import { PreviewToggle } from "@/components/preview-toggle";
+import { previewNamedList } from "@/lib/list-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -276,6 +279,10 @@ export function TeamPanel({
    * warns again instead of riding through on the first dismissal.
    */
   const [typoAccepted, setTypoAccepted] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState(false);
+
+  const shown = previewNamedList(members, query, expanded);
 
   const suggestion = suggestEmailCorrection(values.email);
   const normalisedEmail = values.email.trim().toLowerCase();
@@ -382,10 +389,35 @@ export function TeamPanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {members.length > 0 && (
+          <div className="relative">
+            <SearchIcon
+              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+              aria-hidden
+            />
+            <Input
+              className="h-11 pl-9"
+              placeholder="Search by name or email"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setExpanded(false);
+              }}
+              aria-label="Search team members"
+            />
+          </div>
+        )}
+
         {/* Phone: cards. Desktop: a table, because an admin reading this is
             comparing a column of people, not scrolling one. */}
+        {shown.matched.length === 0 && query.trim() ? (
+          <p className="text-muted-foreground text-sm">
+            No one matches that name or email.
+          </p>
+        ) : (
+        <>
         <ul className="space-y-2 md:hidden">
-          {members.map((member) => (
+          {shown.visible.map((member) => (
             <li
               key={member.id}
               className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2.5"
@@ -433,7 +465,7 @@ export function TeamPanel({
               </tr>
             </thead>
             <tbody>
-              {members.map((member) => (
+              {shown.visible.map((member) => (
                 <tr
                   key={member.id}
                   className="border-border hover:bg-accent/50 border-b transition-colors last:border-0"
@@ -464,6 +496,17 @@ export function TeamPanel({
             </tbody>
           </table>
         </div>
+
+        {shown.canToggle && (
+          <PreviewToggle
+            expanded={expanded}
+            total={shown.matched.length}
+            onToggle={() => setExpanded((open) => !open)}
+            listLabel={shown.matched.length === 1 ? "person" : "people"}
+          />
+        )}
+        </>
+        )}
 
         {serverState.created && (
           <div
