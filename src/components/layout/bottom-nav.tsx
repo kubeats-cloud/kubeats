@@ -9,6 +9,7 @@ import {
   ChartColumnIcon,
   DatabaseIcon,
   FileTextIcon,
+  LayersIcon,
   LayoutDashboardIcon,
   PlusIcon,
   SendIcon,
@@ -29,6 +30,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   weekly: TargetIcon,
   // The shared library: a document, because that is what every item in it is.
   materials: FileTextIcon,
+  slabs: LayersIcon,
   // The activity report: bars, because that is what it shows.
   report: ChartColumnIcon,
   settings: SettingsIcon,
@@ -70,9 +72,9 @@ export function BottomNav({ items }: { items: NavItem[] }) {
 
           return (
             // min-w-0 so a long label ellipsises instead of setting the
-            // cell's min-content width. Six single-word labels cannot wrap, so
-            // without this the bar is as wide as its longest word x 6 and the
-            // fixed nav pushes the page sideways on a narrow phone.
+            // cell's min-content width. The labels are single words; without
+            // this the bar is as wide as its longest word times the tab count
+            // and the fixed nav pushes the page sideways on a narrow phone.
             <li key={item.href} className="min-w-0 flex-1">
               <Link
                 href={item.href}

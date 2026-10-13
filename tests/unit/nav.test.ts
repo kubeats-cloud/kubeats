@@ -91,7 +91,15 @@ describe("navItemsFor", () => {
   });
 
   it("keeps every bar small enough to sit in a phone's thumb bar", () => {
-    expect(REP_NAV.length).toBeLessThanOrEqual(6);
+    // Seven for a rep: Slabs earned the extra tab. The institute page still
+    // mounts the same panel; this is the direct way in. Admin and team lead
+    // stay at six — the tab is not on their bars.
+    expect(REP_NAV).toHaveLength(7);
+    expect(REP_NAV.map((item) => item.href)).toContain("/slabs");
+    expect(navItemsFor("admin").map((item) => item.href)).not.toContain("/slabs");
+    expect(navItemsFor("team_lead").map((item) => item.href)).not.toContain("/slabs");
+    // An admin who opens the URL can still revoke. Rep-only would bounce them.
+    expect(isRepOnlyPath("/slabs")).toBe(false);
     expect(ADMIN_NAV.length).toBeLessThanOrEqual(6);
     expect(TEAM_LEAD_NAV.length).toBeLessThanOrEqual(6);
   });

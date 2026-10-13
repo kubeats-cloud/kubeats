@@ -9,6 +9,7 @@ import {
   ChartColumnIcon,
   DatabaseIcon,
   FileTextIcon,
+  LayersIcon,
   LayoutDashboardIcon,
   PlusIcon,
   SendIcon,
@@ -29,6 +30,7 @@ const ICONS: Record<NavIconName, LucideIcon> = {
   weekly: TargetIcon,
   // The shared library: a document, because that is what every item in it is.
   materials: FileTextIcon,
+  slabs: LayersIcon,
   // The activity report: bars, because that is what it shows.
   report: ChartColumnIcon,
   settings: SettingsIcon,
