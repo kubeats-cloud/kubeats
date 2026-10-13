@@ -434,7 +434,7 @@ describe("the dialog cannot be opened for the two members it must never delete",
     // A useActionState owned by the row would unmount with it on success and
     // take the receipt with it — the admin would watch the row vanish and never
     // learn what was removed.
-    const list = source.indexOf("{members.map(");
+    const list = source.indexOf("{shown.visible.map(");
     const dialog = source.indexOf("<Dialog");
     expect(list).toBeGreaterThan(-1);
     expect(dialog).toBeGreaterThan(list);
