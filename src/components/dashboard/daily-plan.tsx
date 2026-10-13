@@ -42,7 +42,6 @@ import {
 } from "@/lib/validation/checkin";
 import { FormNotice } from "@/components/form-notice";
 import { FollowUpCalls } from "@/components/dashboard/follow-up-calls";
-import { MeetingPrompts } from "@/components/dashboard/meeting-prompts";
 import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import { MorningPlan } from "@/components/dashboard/morning-plan";
 
@@ -250,6 +249,7 @@ export function DailyPlan({
   const reopening = reopeningInstitute(catalogue, institutes, instituteId);
 
   return (
+    <>
     <Card>
       <CardHeader>
         {/* The held/planned counts live in the snapshot tiles above; repeating
@@ -257,28 +257,13 @@ export function DailyPlan({
         <CardTitle className="text-base">Today&rsquo;s plan</CardTitle>
       </CardHeader>
 
-      <CardContent className="space-y-6">
-        {/*
-          A1 — TWO SECTIONS, and the headings are not decoration. "Meeting" is
-          what a rep walks into and what the meeting gate reads; "Follow-up
-          calls" is what they owe from a desk. Before this they would have been
-          one undifferentiated list, and the Check in button would have been
-          offered against a phone call.
-
-          ⚠ BEHIND PHASE_A_DAILY_PLAN, and the HEADING goes with the second
-          section rather than staying as a lone label. "Meeting" only names
-          anything while there is something it is not — with the follow-up
-          section gone it would be a heading over the entire card, which is what
-          the card's own title already says. Off, this is the one
-          undifferentiated list it was before Phase A.
-        */}
-        <section className="space-y-4">
-          {PHASE_A_DAILY_PLAN && (
-            <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-              Meeting
-            </h3>
-          )}
-
+      {/*
+        Visits only. No meeting surface on the Dashboard beyond the plan itself:
+        "Meetings to arrange" lives on Pending alone, and calls have their own
+        card below, so the Check in button is never offered against a phone
+        call.
+      */}
+      <CardContent className="space-y-4">
         {canAdd ? (
           <form action={formAction} onSubmit={handleSubmit} className="space-y-3">
             <input type="hidden" name="institute_id" value={instituteId} />
@@ -398,29 +383,6 @@ export function DailyPlan({
               ? "Register an institute before planning a visit."
               : "No meeting purposes have been set up yet. Ask an admin to add some."}
           </p>
-        )}
-
-        {/*
-          A2 — the morning tick-list, beneath the one-at-a-time form rather
-          than instead of it. Planning six schools before leaving the house and
-          adding one more at eleven are different moments, and the second is
-          still the quickest path for a single institute.
-
-          It writes ORDINARY plan rows, so everything they land in — this list,
-          the meeting gate, Rule 7 — is unchanged.
-        */}
-        {PHASE_A_DAILY_PLAN && canAdd && (
-          <MorningPlan
-            institutes={institutes}
-            purposes={purposes}
-            catalogue={catalogue}
-            // Already on today's plan and not yet walked into: shown ticked and
-            // disabled, so the rep is not offered a duplicate the action would
-            // only skip.
-            plannedIds={entries
-              .filter((entry) => entry.checkinAt === null)
-              .map((entry) => entry.institute_id)}
-          />
         )}
 
         {entries.length === 0 ? (
@@ -572,34 +534,32 @@ export function DailyPlan({
             ))}
           </ul>
         )}
-
-        {/* Meeting-kind prompts, moved here from inside FollowUpCalls — see
-            MeetingPrompts' own note on why it is a sibling, not a subsection,
-            and on the dedup against the entries list just above. */}
-        {PHASE_A_DAILY_PLAN && (
-          <MeetingPrompts tasks={tasks} entries={entries} purposes={purposes} />
-        )}
-        </section>
-
-        {/*
-          A1's second section. Reads the SAME source Pending's today-filter
-          reads, which is what makes a follow-up created at the end of a visit
-          appear in both with no write-sync between them.
-
-          ⚠ Behind PHASE_A_DAILY_PLAN. The tasks themselves are untouched and
-          are still closable from Pending — see features.ts for why that one
-          surface is deliberately left up.
-        */}
-        {PHASE_A_DAILY_PLAN && (
-          <section className="space-y-3">
-            <h3 className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
-              Follow-up calls
-            </h3>
-            <FollowUpCalls tasks={tasks} />
-          </section>
-        )}
       </CardContent>
     </Card>
+
+    {/*
+      A1's calls, in their own card directly below the plan: the tick-list that
+      raises several at once, then the calls already owed. Reads the SAME
+      source Pending's today-filter reads, which is what makes a follow-up
+      created at the end of a visit appear in both with no write-sync between
+      them.
+
+      ⚠ Behind PHASE_A_DAILY_PLAN. The tasks themselves are untouched and are
+      still closable from Pending — see features.ts for why that one surface
+      is deliberately left up.
+    */}
+    {PHASE_A_DAILY_PLAN && (
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle className="text-base">Follow-up calls</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <MorningPlan institutes={institutes} catalogue={catalogue} />
+          <FollowUpCalls tasks={tasks} />
+        </CardContent>
+      </Card>
+    )}
+    </>
   );
 }
 
