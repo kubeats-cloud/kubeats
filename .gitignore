@@ -67,4 +67,5 @@ dev.log
 supabase/.temp/
 
 # Destructive client-data flush. NEVER COMMIT.
+# Destructive data flush for a client project. Never commit.
 flush-client.sql

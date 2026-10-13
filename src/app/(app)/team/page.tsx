@@ -71,12 +71,12 @@ export default async function TeamPage(props: PageProps<"/team">) {
             Full activity report
           </Link>
         </Button>
-        {/* Off the bar, like the report beside it: who created which account is
-            read when somebody joins or the roster is audited, not weekly. */}
+        {/* Off the bar, like the report beside it: teams are restaffed rarely,
+            not weekly. */}
         <Button asChild variant="outline" className="h-11">
           <Link href="/team/hierarchy">
             <NetworkIcon className="size-4" aria-hidden />
-            Hierarchy
+            Team Leads Assign
           </Link>
         </Button>
         <ExportExcel {...defaultExportRange()} label="Export to Excel" />
