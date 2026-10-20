@@ -7932,6 +7932,73 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     /**
+     * ⚠ BATCH 4 — ADMIN #4 / REP #6's OWNED/MISSED/CLOSED CARDS read exactly
+     * `follow_up_tasks` with no filter of their own (`getFollowUpCardModel()`
+     * in src/lib/follow-up-cards.ts); RLS alone decides whose rows come back.
+     * That function is server-only and reads the signed-in caller's cookies,
+     * so it cannot be called directly here — this proves the RLS half the
+     * same way the suite above proves it for the table itself: a rep sees
+     * only their own follow-up tasks, not even their own team lead's wider
+     * view, and an admin sees every team's.
+     *
+     * Own throwaway rows, one of each bucket, so this does not depend on
+     * run order within the describe block or on taskX/taskY's own shape
+     * (due today, never closed) covering Missed or Closed at all.
+     */
+    it("scopes Owned/Missed/Closed follow-up tasks to one rep's own data", async () => {
+      const makeTask = async (
+        member: string,
+        institute: string,
+        fields: { due_date: string; done_at?: string | null },
+      ) => {
+        const { data, error } = await admin.from("follow_up_tasks").insert({
+          member, institute_id: institute, kind: "call", ...fields,
+        }).select("id").single();
+        if (error) throw new Error(`task: ${error.message}`);
+        return data.id as string;
+      };
+
+      const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000)
+        .toISOString().slice(0, 10);
+
+      // repX: one open-not-yet-due, one missed, one closed.
+      const ownedX = await makeTask(repX.id, schoolX, { due_date: today });
+      const missedX = await makeTask(repX.id, schoolX, { due_date: yesterday });
+      const closedX = await makeTask(repX.id, schoolX, {
+        due_date: yesterday, done_at: new Date().toISOString(),
+      });
+      // repY: the same three, so a leak would show up as extra rows, not
+      // just missing ones.
+      const ownedY = await makeTask(repY.id, schoolY, { due_date: today });
+      const missedY = await makeTask(repY.id, schoolY, { due_date: yesterday });
+      const closedY = await makeTask(repY.id, schoolY, {
+        due_date: yesterday, done_at: new Date().toISOString(),
+      });
+
+      // The exact query getFollowUpCardModel() runs: no filter beyond RLS.
+      const query = (who: Member) =>
+        who.db.from("follow_up_tasks").select("id, due_date, done_at");
+
+      const { data: repXRows, error: repXErr } = await query(repX);
+      expect(repXErr, repXErr?.message).toBeNull();
+      const repXIds = new Set((repXRows ?? []).map((r) => r.id as string));
+      expect(repXIds.has(ownedX)).toBe(true);
+      expect(repXIds.has(missedX)).toBe(true);
+      expect(repXIds.has(closedX)).toBe(true);
+      expect(repXIds.has(ownedY), "⚠ LEAK: repX sees repY's owned task").toBe(false);
+      expect(repXIds.has(missedY), "⚠ LEAK: repX sees repY's missed task").toBe(false);
+      expect(repXIds.has(closedY), "⚠ LEAK: repX sees repY's closed task").toBe(false);
+
+      const { data: adminRows, error: adminErr } = await admin
+        .from("follow_up_tasks").select("id, due_date, done_at");
+      expect(adminErr, adminErr?.message).toBeNull();
+      const adminIds = new Set((adminRows ?? []).map((r) => r.id as string));
+      for (const id of [ownedX, missedX, closedX, ownedY, missedY, closedY]) {
+        expect(adminIds.has(id), "an admin must see every team's follow-up task").toBe(true);
+      }
+    });
+
+    /**
      * ⚠ THE QUIET ONE. 0020b and 0028 both call institute_status_history that,
      * because its policy reaches through `institutes` — scoping only the parent
      * MOVES the leak instead of closing it. Same trap, one tier up.

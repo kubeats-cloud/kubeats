@@ -17,9 +17,11 @@ import {
 } from "@/lib/visits";
 import { FollowUpCalls } from "@/components/dashboard/follow-up-calls";
 import { MeetingPrompts } from "@/components/dashboard/meeting-prompts";
+import { AdminFollowUpCards, RepFollowUpCards } from "@/components/visits/follow-up-cards";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { activityLabelFor, listedFollowUpCount } from "@/lib/validation/visit";
 import { formatDate, todayISO } from "@/lib/dates";
+import { getFollowUpCardModel } from "@/lib/follow-up-cards";
 
 export const metadata = { title: "Pending" };
 
@@ -80,7 +82,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
     .filter((row) => row.category === "open")
     .map((row) => row.status);
 
-  const [result, unreported, purposes, tasks, plan] = await Promise.all([
+  const [result, unreported, purposes, tasks, plan, followUpCards] = await Promise.all([
     getOpenFollowUps(openStatuses, user.id),
     // An admin has no half-finished visits of their own: they do not log any.
     admin ? Promise.resolve([]) : getUnreportedVisits(user.id),
@@ -119,6 +121,8 @@ export default async function PendingPage(props: PageProps<"/pending">) {
     admin
       ? Promise.resolve({ ok: true as const, entries: [] })
       : getTodayPlan(user.id),
+    // Admin #4 / Rep #6 — one model, RLS-scoped, no filter of its own.
+    getFollowUpCardModel(),
   ]);
 
   const dueTasks = tasks.ok ? tasks.tasks : [];
@@ -138,6 +142,20 @@ export default async function PendingPage(props: PageProps<"/pending">) {
             : "Institutes you have left open. Tap one to go back."
         }
       />
+
+      {/* Admin #4 / Rep #6 — at the top of this page, per the client's own
+          placement. */}
+      {followUpCards.ok ? (
+        admin ? (
+          <AdminFollowUpCards counts={followUpCards.model.counts} />
+        ) : (
+          <RepFollowUpCards counts={followUpCards.model.counts} />
+        )
+      ) : (
+        <div className="mb-6">
+          <ErrorState message={followUpCards.error} />
+        </div>
+      )}
 
       {unreported.length > 0 && (
         <div className="mb-6">
