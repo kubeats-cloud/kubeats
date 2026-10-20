@@ -7,6 +7,8 @@ import { PeriodControls } from "@/components/weekly/period-controls";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { ExportExcel } from "@/components/report/export-excel";
 import { getActivityReport } from "@/lib/activity-report";
+import { getInstituteActivityModel } from "@/lib/institute-activity-report";
+import { sumInstituteActivityRows } from "@/lib/institute-activity-counts";
 import {
   REPORT_PERIODS,
   isReportPeriod,
@@ -93,8 +95,15 @@ export default async function ReportPage(props: PageProps<"/report">) {
   if (admin) redirect("/team/report");
 
   const memberId = user.id;
+  const range = periodRange(period, periodStart);
 
-  const result = await getActivityReport(memberId, "", period, periodStart);
+  const [result, instituteActivityResult] = await Promise.all([
+    getActivityReport(memberId, "", period, periodStart),
+    // R7's institute-wise table, same model A1 and R1 read. No member filter
+    // to pass: this page only ever runs as the signed-in rep, and RLS is what
+    // narrows `getInstituteActivityModel()` to their own institutes.
+    getInstituteActivityModel({ range: { from: range.start, to: range.end } }),
+  ]);
   const displayName = user.name;
 
   return (
@@ -131,7 +140,8 @@ export default async function ReportPage(props: PageProps<"/report">) {
       {admin && (
         <div className="my-4">
           <ExportExcel
-            {...periodRange(period, periodStart)}
+            start={range.start}
+            end={range.end}
             member={memberId}
             label={`Export ${displayName}'s activity`}
           />
@@ -142,7 +152,17 @@ export default async function ReportPage(props: PageProps<"/report">) {
       {!result.ok ? (
         <ErrorState message="We could not load this activity report. Please try again in a moment." />
       ) : (
-        <ActivitySummary report={{ ...result.report, memberName: displayName }} />
+        <ActivitySummary
+          report={{ ...result.report, memberName: displayName }}
+          instituteActivity={
+            instituteActivityResult.ok
+              ? {
+                  rows: instituteActivityResult.model.rows,
+                  totals: sumInstituteActivityRows(instituteActivityResult.model.rows),
+                }
+              : null
+          }
+        />
       )}
     </PageColumn>
   );

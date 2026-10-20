@@ -7781,6 +7781,126 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     /**
+     * ⚠ THE INSTITUTE-WISE ACTIVITY REPORT (A1 / batch 3a) READS THESE EXACT
+     * THREE QUERIES from `getInstituteActivityModel()` — visits for the
+     * activity Open/Closed columns, `daily_plans where meetings_actual = 1`
+     * for meetings completed (Rule 7's own plan figure, not a visit row), and
+     * `follow_up_tasks where done_at is null` for owned/pending. That function
+     * is server-only and reads the signed-in caller's cookies, so it cannot be
+     * called directly from this runner — this proves the RLS half of its
+     * "single counted path" claim the same way the suite above proves it for
+     * the tables themselves: by running the model's own filters as each role.
+     */
+    it("scopes the institute-activity report's three source queries to each lead's own team", async () => {
+      // A held meeting each, for the meetings-completed half of the report.
+      const heldPlan = async (member: string, institute: string) => {
+        const { data, error } = await admin.from("daily_plans").insert({
+          member, date: today, institute_id: institute,
+          purpose: "First meeting", meetings_actual: 1,
+        }).select("id").single();
+        if (error) throw new Error(`held plan: ${error.message}`);
+        return data.id as string;
+      };
+      const heldX = await heldPlan(repX.id, schoolX);
+      const heldY = await heldPlan(repY.id, schoolY);
+
+      // 1. visits — the activity Open/Closed source.
+      const { data: visitsX } = await leadX.db
+        .from("visits").select("id, institute_id");
+      const visitInstitutesX = new Set((visitsX ?? []).map((r) => r.institute_id as string));
+      expect(visitInstitutesX.has(schoolX)).toBe(true);
+      expect(visitInstitutesX.has(schoolY), "⚠ LEAK: team Y's visit").toBe(false);
+
+      // 2. daily_plans where meetings_actual = 1 — meetings completed.
+      const { data: heldRowsX } = await leadX.db
+        .from("daily_plans").select("id, institute_id").eq("meetings_actual", 1);
+      const heldIdsX = new Set((heldRowsX ?? []).map((r) => r.id as string));
+      expect(heldIdsX.has(heldX)).toBe(true);
+      expect(heldIdsX.has(heldY), "⚠ LEAK: team Y's held meeting").toBe(false);
+
+      // 3. follow_up_tasks where done_at is null — owned and pending.
+      const { data: tasksX } = await leadX.db
+        .from("follow_up_tasks")
+        .select("id, institute_id, due_date")
+        .is("done_at", null);
+      const taskIdsX = new Set((tasksX ?? []).map((r) => r.id as string));
+      expect(taskIdsX.has(taskX)).toBe(true);
+      expect(taskIdsX.has(taskY), "⚠ LEAK: team Y's follow-up").toBe(false);
+
+      // And the admin, reading the same three with no scoping at all.
+      const { data: adminVisits } = await admin
+        .from("visits").select("institute_id").in("institute_id", [schoolX, schoolY]);
+      const adminInstitutes = new Set((adminVisits ?? []).map((r) => r.institute_id as string));
+      expect(adminInstitutes.has(schoolX), "an admin must see team X's visit").toBe(true);
+      expect(adminInstitutes.has(schoolY), "an admin must see team Y's visit too").toBe(true);
+    });
+
+    /**
+     * ⚠ BATCH 3B — THE REP PATH 3A DEFERRED. Reps never reached this model's
+     * screen in 3a (A1 stayed `requireStaff()`-gated); R1 and R7 now call it
+     * signed in AS a rep, so this is the one that was actually missing: not
+     * "does RLS narrow to a team", which H2 already covers above, but "does it
+     * narrow all the way down to ONE person" — the same four tables, asked as
+     * repX rather than as their lead. No admin assumption anywhere in
+     * `getInstituteActivityModel()` would show up here as repX reading teamY's
+     * — or even leadX's OWN broader — rows.
+     *
+     * Own throwaway held-meeting rows rather than reusing the test above's,
+     * so this does not depend on run order within the describe block.
+     */
+    it("scopes the same four tables to one rep's own data, not their whole team", async () => {
+      const heldPlan = async (member: string, institute: string) => {
+        const { data, error } = await admin.from("daily_plans").insert({
+          member, date: today, institute_id: institute,
+          purpose: "First meeting", meetings_actual: 1,
+        }).select("id").single();
+        if (error) throw new Error(`held plan: ${error.message}`);
+        return data.id as string;
+      };
+      const heldRepX = await heldPlan(repX.id, schoolX);
+      const heldRepY = await heldPlan(repY.id, schoolY);
+
+      // institutes — R1/R7's registry half, untested by the admin-only suite above.
+      const { data: instX } = await repX.db.from("institutes").select("id");
+      const instIdsX = new Set((instX ?? []).map((r) => r.id as string));
+      expect(instIdsX.has(schoolX)).toBe(true);
+      expect(instIdsX.has(schoolY), "⚠ LEAK: repX sees team Y's institute").toBe(false);
+
+      // visits
+      const { data: visitsRepX } = await repX.db.from("visits").select("id, institute_id");
+      const visitInstitutesRepX = new Set(
+        (visitsRepX ?? []).map((r) => r.institute_id as string),
+      );
+      expect(visitInstitutesRepX.has(schoolX)).toBe(true);
+      expect(
+        visitInstitutesRepX.has(schoolY),
+        "⚠ LEAK: repX sees team Y's visit",
+      ).toBe(false);
+
+      // daily_plans where meetings_actual = 1
+      const { data: heldRowsRepX } = await repX.db
+        .from("daily_plans").select("id").eq("meetings_actual", 1);
+      const heldIdsRepX = new Set((heldRowsRepX ?? []).map((r) => r.id as string));
+      expect(heldIdsRepX.has(heldRepX)).toBe(true);
+      expect(heldIdsRepX.has(heldRepY), "⚠ LEAK: repX sees team Y's held meeting").toBe(false);
+
+      // follow_up_tasks where done_at is null
+      const { data: tasksRepX } = await repX.db
+        .from("follow_up_tasks").select("id").is("done_at", null);
+      const taskIdsRepX = new Set((tasksRepX ?? []).map((r) => r.id as string));
+      expect(taskIdsRepX.has(taskX)).toBe(true);
+      expect(taskIdsRepX.has(taskY), "⚠ LEAK: repX sees team Y's follow-up").toBe(false);
+
+      // And the staff path stays exactly what H2 already proved above —
+      // restated here only as the explicit "for staff it is unchanged" half
+      // of batch 3b's ask, not a second mechanism.
+      const { data: instLeadX } = await leadX.db.from("institutes").select("id");
+      const instIdsLeadX = new Set((instLeadX ?? []).map((r) => r.id as string));
+      expect(instIdsLeadX.has(schoolX)).toBe(true);
+      expect(instIdsLeadX.has(schoolY), "⚠ LEAK: leadX sees team Y's institute").toBe(false);
+    });
+
+    /**
      * ⚠ THE QUIET ONE. 0020b and 0028 both call institute_status_history that,
      * because its policy reaches through `institutes` — scoping only the parent
      * MOVES the leak instead of closing it. Same trap, one tier up.

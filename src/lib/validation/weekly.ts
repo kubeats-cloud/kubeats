@@ -105,6 +105,27 @@ export interface TallyableVisit {
 }
 
 /**
+ * The visit-sourced metrics one row feeds.
+ *
+ * The same predicate `tallyVisitMetrics()` counts with, pulled out so the
+ * per-institute reconciliation asks the counting function's own question
+ * rather than a second copy of it. Meetings are absent on purpose: that
+ * metric's source is the plan, and this list is only the visits half.
+ */
+export function visitMetricKeys(visit: TallyableVisit): MetricKey[] {
+  const keys: MetricKey[] = [];
+  for (const metric of METRICS) {
+    if (metric.source !== "visits") continue;
+    if (!("activity" in metric) || metric.activity !== visit.activity) continue;
+    if (metric.lifecycle !== null && metric.lifecycle !== visit.lifecycle_status) {
+      continue;
+    }
+    keys.push(metric.key);
+  }
+  return keys;
+}
+
+/**
  * Rule 7's visits half: tallies rows against the seven visit-sourced metrics.
  *
  * A row matches when the activity agrees and, for the two activities that have
@@ -119,16 +140,80 @@ export interface TallyableVisit {
 export function tallyVisitMetrics(visits: TallyableVisit[]): MetricCounts {
   const counts = { ...ZERO_COUNTS };
   for (const visit of visits) {
-    for (const metric of METRICS) {
-      if (metric.source !== "visits") continue;
-      if (metric.activity !== visit.activity) continue;
-      if (metric.lifecycle !== null && metric.lifecycle !== visit.lifecycle_status) {
-        continue;
-      }
-      counts[metric.key] += 1;
-    }
+    for (const key of visitMetricKeys(visit)) counts[key] += 1;
   }
   return counts;
+}
+
+/**
+ * One institute's activity arithmetic, from the single counted source.
+ *
+ * The six activity types are the eight Rule 7 metrics folded the way the
+ * export folds them: Sessions Set + Sessions Done, Campus Visits Set + Done,
+ * and the three one-shots, all taken from `tallyVisitMetrics()`. Meetings are
+ * the bucket that function refuses to fill. They are counted here as rows
+ * whose `activity` is `meeting`, from the same rows — not from
+ * `daily_plans`, which is a different question (a held plan with no visit
+ * row is a meeting in the weekly total and not a visit in this one).
+ *
+ * The institute holds when those six counts sum to its visit rows and every
+ * row lands in exactly one bucket. A session with no lifecycle, an unknown
+ * activity, or a row that matched two metrics fails it.
+ */
+export interface ReconcilableVisit extends TallyableVisit {
+  institute_id: string;
+}
+
+export interface ActivityReconciliationFailure {
+  instituteId: string;
+  total: number;
+  summed: number;
+  byActivity: Record<string, number>;
+}
+
+export const ACTIVITY_TYPES = [
+  "meeting",
+  "session",
+  "campus_visit",
+  "olympiad",
+  "application",
+  "admission",
+] as const;
+
+export type ActivityType = (typeof ACTIVITY_TYPES)[number];
+
+export function reconcileActivityCounts(
+  visits: readonly ReconcilableVisit[],
+): ActivityReconciliationFailure[] {
+  const groups = new Map<string, ReconcilableVisit[]>();
+  for (const visit of visits) {
+    const list = groups.get(visit.institute_id);
+    if (list) list.push(visit);
+    else groups.set(visit.institute_id, [visit]);
+  }
+
+  const failures: ActivityReconciliationFailure[] = [];
+  for (const [instituteId, rows] of groups) {
+    const tallied = tallyVisitMetrics(rows);
+    const byActivity: Record<string, number> = {
+      meeting: rows.filter((row) => row.activity === "meeting").length,
+      session: tallied.sessions_set + tallied.sessions_done,
+      campus_visit: tallied.campus_visits_set + tallied.campus_visits_done,
+      olympiad: tallied.olympiad,
+      application: tallied.application,
+      admission: tallied.admission,
+    };
+    const summed = ACTIVITY_TYPES.reduce((sum, key) => sum + (byActivity[key] ?? 0), 0);
+    const misbucketed = rows.some((row) => {
+      const keys = visitMetricKeys(row);
+      if (row.activity === "meeting") return keys.length !== 0;
+      return keys.length !== 1;
+    });
+    if (summed !== rows.length || misbucketed) {
+      failures.push({ instituteId, total: rows.length, summed, byActivity });
+    }
+  }
+  return failures;
 }
 
 /* ------------------------------------------------------------------ */

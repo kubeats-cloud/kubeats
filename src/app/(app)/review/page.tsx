@@ -51,6 +51,11 @@ export default async function ReviewPage(props: PageProps<"/review">) {
      */
     visitStatus: first(searchParams.visitStatus),
     lifecycle: first(searchParams.lifecycle),
+    statusCategory:
+      first(searchParams.category) === "open" ||
+      first(searchParams.category) === "closed"
+        ? (first(searchParams.category) as "open" | "closed")
+        : undefined,
   };
 
   /*

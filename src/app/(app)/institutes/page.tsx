@@ -2,14 +2,23 @@ import Link from "next/link";
 import { PlusIcon, TableIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
+import { SectionTitle } from "@/components/section-title";
 import { ErrorState } from "@/components/states";
 import {
   InstitutesBrowser,
   type InstituteFilters,
 } from "@/components/institutes/institutes-browser";
+import { RepInstituteTable } from "@/components/report/rep-institute-table";
+import { RangeControls } from "@/components/report/range-controls";
 import { listInstitutes } from "@/lib/institutes";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
+import {
+  getInstituteActivityModel,
+  DEFAULT_INSTITUTE_ACTIVITY_SORT,
+} from "@/lib/institute-activity-report";
+import { isInstituteActivitySortKey } from "@/lib/institute-activity-counts";
+import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
 
 export const metadata = { title: "Institutes" };
 
@@ -42,6 +51,7 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
   ]);
 
   const admin = isAdmin(user);
+  const isRep = user?.role === "rep";
 
   const initial: InstituteFilters = {
     q: first(searchParams.q),
@@ -52,6 +62,56 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
     area: first(searchParams.area),
     type: first(searchParams.type),
   };
+
+  /*
+   * REP SIDE #1 — "In the Institute tab, show a complete activity summary
+   * for each institute." A SECTION of this existing page, not a route of its
+   * own: `?from=`/`?to=`/`?sort=`/`?dir=` are a second, independent set of
+   * params from the registry's own filters above, so the two cannot collide
+   * or reset each other.
+   *
+   * REP ONLY, per the client's own heading ("Rep Side") — not team_lead, not
+   * admin, who already has the fuller per-activity-type grid at
+   * /institutes/report. The model itself needs no role branch (RLS scopes
+   * every role the same way); this `isRep` check is only about which roles
+   * see this SECTION on THIS shared page, not about security.
+   */
+  const sortParam = first(searchParams.sort);
+  const instituteActivitySort = {
+    key: isInstituteActivitySortKey(sortParam)
+      ? sortParam
+      : DEFAULT_INSTITUTE_ACTIVITY_SORT.key,
+    dir: first(searchParams.dir) === "desc" ? ("desc" as const) : ("asc" as const),
+  };
+  const parsedInstituteActivityRange = isRep
+    ? pipelineRangeSchema.safeParse({
+        from: first(searchParams.from),
+        to: first(searchParams.to),
+      })
+    : null;
+  const instituteActivityRangeError =
+    parsedInstituteActivityRange && !parsedInstituteActivityRange.success
+      ? (parsedInstituteActivityRange.error.issues[0]?.message ??
+        "That date range is not one we can report on.")
+      : null;
+  const instituteActivityRange = parsedInstituteActivityRange?.success
+    ? parsedInstituteActivityRange.data
+    : {};
+  const instituteActivityResult =
+    isRep && !instituteActivityRangeError
+      ? await getInstituteActivityModel({
+          range: instituteActivityRange,
+          sort: instituteActivitySort,
+        })
+      : null;
+  // The registry browser's own filters, as plain strings — shared by the
+  // RangeControls and RepInstituteTable below so neither one's links drop
+  // what the other has set.
+  const browserFilterParams = Object.fromEntries(
+    Object.entries(initial).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
 
   return (
     <>
@@ -68,13 +128,13 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
         }
         action={
           <div className="flex items-center gap-2">
-            {/* Admin only, and off the nav bar: the pipeline is read weekly,
-                not daily. A rep has no team-wide pipeline to read. */}
+            {/* Admin only, and off the nav bar: the activity report is read
+                weekly, not daily. A rep has no team-wide report to read. */}
             {admin && (
               <Button asChild variant="outline" className="h-11">
                 <Link href="/institutes/report">
                   <TableIcon className="size-4" aria-hidden />
-                  Pipeline by rep
+                  Activity report
                 </Link>
               </Button>
             )}
@@ -99,6 +159,60 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
         />
       ) : (
         <ErrorState message="We could not load the registry just now. Please try again in a moment." />
+      )}
+
+      {/*
+        REP SIDE #1 — a section of THIS tab, not a separate screen. See the
+        comment where `instituteActivityResult` is computed above for why
+        it's rep-only and why its own ?from=/?to=/?sort=/?dir= cannot collide
+        with the registry's filters above.
+      */}
+      {isRep && (
+        <div className="mt-8">
+          <SectionTitle>Activity summary</SectionTitle>
+
+          <RangeControls
+            start={instituteActivityRange.from ?? ""}
+            end={instituteActivityRange.to ?? ""}
+            basePath="/institutes"
+            optional
+            // The registry browser above keeps its own filters (?q=, ?status=,
+            // etc.) mirrored into this same URL. Pressing Apply/Clear here
+            // would otherwise drop them — `extraParams` is RangeControls' own
+            // mechanism for "anything else already in the URL that must
+            // survive pressing Apply," built for exactly this.
+            extraParams={{
+              ...(instituteActivitySort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
+              instituteActivitySort.dir !== DEFAULT_INSTITUTE_ACTIVITY_SORT.dir
+                ? { sort: instituteActivitySort.key, dir: instituteActivitySort.dir }
+                : {}),
+              ...browserFilterParams,
+            }}
+            hint="Filters by the date the work was logged. Leave both blank for all time."
+          />
+
+          {instituteActivityRangeError ? (
+            <ErrorState message={instituteActivityRangeError} />
+          ) : !instituteActivityResult?.ok ? (
+            <ErrorState
+              message={
+                instituteActivityResult?.error ??
+                "We could not load your activity just now. Please try again in a moment."
+              }
+            />
+          ) : (
+            <div className="mt-3">
+              <RepInstituteTable
+                rows={instituteActivityResult.model.rows}
+                sort={instituteActivityResult.model.sort}
+                range={instituteActivityRange}
+                caption="Your institutes, Open and Closed activity"
+                basePath="/institutes"
+                extraParams={browserFilterParams}
+              />
+            </div>
+          )}
+        </div>
       )}
     </>
   );

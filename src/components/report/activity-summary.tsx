@@ -14,6 +14,11 @@ import { EmptyState } from "@/components/states";
 import { SectionTitle } from "@/components/section-title";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import type { ActivityReport, PeriodBucket } from "@/lib/activity-report";
+import type {
+  InstituteActivityRow,
+  InstituteActivityTotals,
+} from "@/lib/institute-activity-counts";
+import { InstitutePresenceTable } from "@/components/report/institute-presence-table";
 import {
   VISIT_STATUS_BADGE,
   formatCoords,
@@ -300,14 +305,28 @@ function PresenceCard({ visit }: { visit: ActivityReport["plannedVisits"][number
 
 export function ActivitySummary({
   report,
+  instituteActivity,
   presencePreview,
 }: {
   report: ActivityReport;
-  /**
-   * When set, Field presence shows this many cards until "View all". Omitted
-   * on /report, which keeps every planned visit on the page.
-   */
   presencePreview?: number;
+  /**
+   * R7's institute-wise table (rows + an overall-totals footer), from the
+   * SAME shared model Admin A1 and R1 use (`getInstituteActivityModel()`).
+   *
+   * OPTIONAL, AND ABSENT ON PURPOSE FOR ONE CALLER. `/report` (a rep's own
+   * screen) supplies it and the old per-visit "Field presence" section is
+   * replaced here. `/team/[memberId]` (an admin viewing ONE rep) does not:
+   * that model has no per-member filter yet — it reads whatever the SIGNED-IN
+   * caller's RLS allows, which for an admin is every institute, not the one
+   * rep the hub is about. Wiring it in there regardless would show an admin
+   * the wrong rep's numbers under the right rep's name, so until the model
+   * grows a member filter that screen keeps today's per-visit cards.
+   */
+  instituteActivity?: {
+    rows: InstituteActivityRow[];
+    totals: InstituteActivityTotals;
+  } | null;
 }) {
   const [presenceOpen, setPresenceOpen] = useState(false);
   const presenceAnchor = useRef<HTMLDivElement>(null);
@@ -461,8 +480,18 @@ export function ActivitySummary({
       </div>
 
       <div ref={presenceAnchor}>
-        <SectionTitle>Field presence</SectionTitle>
-        {plannedVisits.length === 0 ? (
+        <SectionTitle>
+          {instituteActivity ? "Institute activity" : "Field presence"}
+        </SectionTitle>
+        {instituteActivity ? (
+          // R7 — institute-wise, with an overall-totals footer. See the
+          // component's own comment for why this replaces the per-visit list
+          // for this caller and not for every caller of this component.
+          <InstitutePresenceTable
+            rows={instituteActivity.rows}
+            totals={instituteActivity.totals}
+          />
+        ) : plannedVisits.length === 0 ? (
           <EmptyState
             icon={FileTextIcon}
             title="No planned visits in this period"

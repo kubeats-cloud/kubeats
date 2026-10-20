@@ -142,6 +142,12 @@ export interface VisitFilters {
    * institute stands today.
    */
   instituteStatus?: string;
+  /**
+   * Open or closed — category of `visits.status_set_to`, not the institute's
+   * current badge. Used by the institute-wise Activity Report drill-down.
+   * Resolved to a status list before the query runs (see `listTeamVisits`).
+   */
+  statusCategory?: "open" | "closed";
 }
 
 /**
@@ -253,6 +259,22 @@ export async function listTeamVisits(
   const supabase = await createClient();
 
   /*
+   * Category → concrete status_set_to values, once, so the count query and the
+   * row query share one list. An empty list means "nothing in that category"
+   * and must return zero rows rather than dropping the filter.
+   */
+  let categoryStatuses: string[] | null = null;
+  if (filters.statusCategory === "open" || filters.statusCategory === "closed") {
+    const { listStatusCatalogue } = await import("@/lib/statuses");
+    const catalogue = await listStatusCatalogue();
+    // Retired statuses stay readable — same as the Open/Closed counts, which
+    // key on category rather than is_active.
+    categoryStatuses = catalogue
+      .filter((entry) => entry.category === filters.statusCategory)
+      .map((entry) => entry.status);
+  }
+
+  /*
    * The inner-join variant ONLY when the status filter is on. See the note on
    * the two constants: an unconditional inner join would change what this
    * function returns for every other caller, and it would do it silently.
@@ -324,6 +346,12 @@ export async function listTeamVisits(
     query = query.is("status_set_to", null);
   } else if (filters.visitStatus) {
     query = query.eq("status_set_to", filters.visitStatus);
+  } else if (categoryStatuses) {
+    // Empty vocabulary ⇒ no visit can match; force an impossible equality.
+    query =
+      categoryStatuses.length > 0
+        ? query.in("status_set_to", categoryStatuses)
+        : query.eq("status_set_to", "__no_such_status__");
   }
 
   // Open loops and closed ones. See the note on the field.
