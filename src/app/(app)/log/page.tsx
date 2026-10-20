@@ -146,6 +146,8 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
           // visit already recorded rather than from a second copy on the form.
           notesRequired={notesRequired(catalogue, existing.status_set_to)}
           openLoops={openLoops}
+          catalogue={catalogue}
+          statusSetTo={existing.status_set_to}
           alreadyClosed={!stillOpen}
         />
       </PageColumn>

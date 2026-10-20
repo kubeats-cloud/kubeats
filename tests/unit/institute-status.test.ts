@@ -34,6 +34,7 @@ const EXPECTED: Record<string, "open" | "closed"> = {
   "Invited principal for event": "open",
   "RSVP received": "closed",
   "Will not come": "closed",
+  "Not Interested": "closed",
 };
 
 /**
@@ -68,6 +69,7 @@ const EXPECTED_FOLLOW_UP: Record<string, "required" | "optional"> = {
   "Invited principal for event": "required",
   "RSVP received": "optional",
   "Will not come": "optional",
+  "Not Interested": "optional",
 };
 
 const baseVisit = {
@@ -91,7 +93,7 @@ const baseVisit = {
 };
 
 describe("the institute status catalogue", () => {
-  it("carries exactly the nine statuses, in display order", () => {
+  it("carries exactly the seeded statuses, in display order", () => {
     expect(SEED_STATUSES).toEqual(Object.keys(EXPECTED));
   });
 
@@ -157,7 +159,7 @@ describe("statusCategory", () => {
 });
 
 describe("Rule 5, with the three new statuses folded in", () => {
-  it("gives every one of the nine the follow-up rule the spec asks for", () => {
+  it("gives every seeded status the follow-up rule the spec asks for", () => {
     for (const status of SEED_STATUSES) {
       expect(followUpRequired(SEED_STATUS_CATALOGUE, status), `${status} required`).toBe(
         EXPECTED_FOLLOW_UP[status] === "required",
@@ -212,7 +214,7 @@ describe("Rule 5, with the three new statuses folded in", () => {
 });
 
 describe("visitSchema accepts the widened vocabulary", () => {
-  it("takes every one of the nine statuses", () => {
+  it("takes every seeded status", () => {
     for (const status of SEED_STATUSES) {
       const result = visitSchema.safeParse({
         ...baseVisit,
@@ -270,7 +272,7 @@ describe("visitSchema accepts the widened vocabulary", () => {
   });
 
   it("lets a closed status save with no follow-up at all", () => {
-    for (const status of ["RSVP received", "Will not come"]) {
+    for (const status of ["RSVP received", "Will not come", "Not Interested"]) {
       const result = visitSchema.safeParse({ ...baseVisit, status_set_to: status });
       expect(result.success, status).toBe(true);
     }

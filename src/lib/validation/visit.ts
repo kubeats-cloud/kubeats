@@ -2,6 +2,7 @@ import { z } from "zod";
 import { todayISO } from "@/lib/dates";
 import {
   SEED_STATUS_CATALOGUE,
+  isClosedStatus,
   isOpenStatus,
   selectableStatuses,
   statusRow,
@@ -73,6 +74,25 @@ export function activityLabelFor(activity: string): string {
  * intake" is a real note to leave, and 0010 kept it permitted on purpose.
  */
 export function followUpRequired(
+  catalogue: StatusCatalogue,
+  status: string | null,
+): boolean {
+  return isOpenStatus(catalogue, status);
+}
+
+/**
+ * Whether Log Visit asks "what happens next".
+ *
+ * A closed status owes nothing further. Not Interested is the built-in case;
+ * every other closed status follows the same rule, because the field is how a
+ * follow-up task gets created. Hiding it is the form half of "a closed status
+ * creates no follow-up". The database refuses the task (FO038, migration 0046)
+ * whether or not this control is on the page.
+ *
+ * Null and an unknown status hide it too. Nothing status-driven is asked
+ * before a status is chosen, and an unknown status is not treated as open.
+ */
+export function nextActionShown(
   catalogue: StatusCatalogue,
   status: string | null,
 ): boolean {
@@ -587,6 +607,22 @@ function baseVisitSchema(catalogue: StatusCatalogue) {
      * is still ACCEPTED on the field — a cached page can still post one — but
      * nothing renders it and nothing requires it.
      */
+    /*
+     * A closed status creates no follow-up. Not Interested is closed, so it
+     * is covered here rather than named: a second list would drift from the
+     * category the moment an admin added another closed status.
+     *
+     * The database is the backstop (0046 nulls `next_action` and refuses the
+     * task). This is what tells the rep before the save, and what stops a
+     * tampered form posting an action the control was not showing.
+     */
+    if (value.next_action && isClosedStatus(catalogue, value.status_set_to)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["next_action"],
+        message: "A closed status does not take a next action.",
+      });
+    }
   });
 }
 

@@ -87,10 +87,18 @@ export type StatusCatalogue = readonly StatusRow[];
  *             statuses beat an empty dropdown on a screen a rep is standing in
  *             front of.
  *
- * It must still agree with the database for these nine — the
+ * It must still agree with the database for these rows — the
  * `institute_status_category` suite in tests/integration/rules.test.ts checks
  * that — but it is no longer the whole list, and nothing may assume it is.
+ *
+ * The tenth, `NOT_INTERESTED_STATUS`, is migration 0046. It is closed, asks
+ * for nothing, and is the one status whose row carries
+ * `cancels_follow_ups`. The spelling is title case on purpose: the retired
+ * closing-report value is "Not interested", a different column and a
+ * different vocabulary, and the two are not the same fact.
  */
+export const NOT_INTERESTED_STATUS = "Not Interested";
+
 export const SEED_STATUS_CATALOGUE: StatusCatalogue = [
   row("First meeting done", "open", "success"),
   row("Session scheduled", "open", "warning", { asksExpectedDate: true }),
@@ -108,6 +116,7 @@ export const SEED_STATUS_CATALOGUE: StatusCatalogue = [
   row("Invited principal for event", "open", "warning"),
   row("RSVP received", "closed", "success"),
   row("Will not come", "closed", "neutral"),
+  row(NOT_INTERESTED_STATUS, "closed", "neutral"),
 ].map((entry, index) => ({ ...entry, sortOrder: index + 1 }));
 
 function row(

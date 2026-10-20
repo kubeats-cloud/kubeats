@@ -94,6 +94,12 @@ const CODE_MESSAGES: Record<string, string> = {
    * fall back to.
    */
   FO029: "That campus could not be changed. Nothing was changed.",
+  /*
+   * FO038 — a follow-up task against an institute whose status is closed
+   * (migration 0046). Not Interested is the built-in case; every closed
+   * status refuses one. The form hides Next Action for the same reason.
+   */
+  FO038: "That institute is closed, so it does not take a follow-up.",
   // PostgREST
   PGRST116: "We could not find that.",
   PGRST204: DATABASE_BEHIND,

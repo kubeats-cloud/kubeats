@@ -8,7 +8,7 @@ import {
   NextActionFields,
   type NextActionValue,
 } from "@/components/visits/next-action-fields";
-import { defaultFollowUpDue } from "@/lib/validation/visit";
+import { defaultFollowUpDue, nextActionShown } from "@/lib/validation/visit";
 import {
   EMPTY_FEEDBACK,
   applyFeedbackPatch,
@@ -20,6 +20,7 @@ import { checkoutFix } from "@/lib/geolocate";
 import { appendCheckoutFix } from "@/lib/validation/checkin";
 import { EMPTY_STATE } from "@/lib/visit-form-state";
 import { fieldLabel } from "@/lib/validation/visit";
+import type { StatusCatalogue } from "@/lib/validation/institute";
 import type { OpenLoop } from "@/lib/visits";
 import { FormNotice } from "@/components/form-notice";
 
@@ -43,6 +44,8 @@ export function FeedbackOnlyForm({
   asks,
   notesRequired,
   openLoops,
+  catalogue,
+  statusSetTo,
   alreadyClosed = false,
 }: {
   visitId: string;
@@ -53,6 +56,10 @@ export function FeedbackOnlyForm({
   /** Decided by the recorded status — see notesRequired() in validation/visit. */
   notesRequired: boolean;
   openLoops: OpenLoop[];
+  /** The same catalogue Log Visit groups its status picker from. */
+  catalogue: StatusCatalogue;
+  /** Where the visit already left the institute. A closed one hides Next Action. */
+  statusSetTo: string | null;
   /** Swept overnight, or cleared by an admin, before the report was filed. */
   alreadyClosed?: boolean;
 }) {
@@ -146,7 +153,7 @@ export function FeedbackOnlyForm({
         `submitFeedback()` passes null for the pair when it is absent, exactly
         as it already did for every question the closing report has retired.
       */}
-      {PHASE_A_DAILY_PLAN && (
+      {PHASE_A_DAILY_PLAN && nextActionShown(catalogue, statusSetTo) && (
         <NextActionFields
           value={nextAction}
           onChange={(patch) => setNextAction((prev) => ({ ...prev, ...patch }))}

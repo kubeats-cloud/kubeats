@@ -48,8 +48,8 @@ export async function listStatusCatalogue(): Promise<StatusCatalogue> {
      * An empty catalogue is not a neutral failure: the status picker would be
      * blank, `isOpenStatus()` would answer false for everything, and a rep
      * standing in a school would be told their perfectly good visit has an
-     * unknown status. The nine seeded values are correct for every database
-     * this app has ever had, so they are a far better wrong answer than none.
+     * unknown status. The seeded values are correct for a database that has
+     * had every migration, so they are a far better wrong answer than none.
      *
      * A status an admin added would be missing from the fallback, and a visit
      * carrying one would render its badge as "no status yet" until the read

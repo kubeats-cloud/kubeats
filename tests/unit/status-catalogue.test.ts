@@ -53,9 +53,9 @@ const WITH_ADMIN_ADDED: StatusCatalogue = [
   },
 ];
 
-describe("the seed still describes the nine correctly", () => {
-  it("has nine statuses, each with a valid category and tone", () => {
-    expect(SEED_STATUS_CATALOGUE).toHaveLength(9);
+describe("the seed still describes the built-in statuses correctly", () => {
+  it("has the built-in statuses, each with a valid category and tone", () => {
+    expect(SEED_STATUS_CATALOGUE).toHaveLength(10);
     for (const row of SEED_STATUS_CATALOGUE) {
       expect(STATUS_CATEGORIES, row.status).toContain(row.category);
       expect(STATUS_TONES, row.status).toContain(row.tone);
@@ -153,8 +153,8 @@ describe("the helpers work on a catalogue they have never seen", () => {
 });
 
 describe("SEED_STATUSES is a seed, not the vocabulary", () => {
-  it("lists the seeded nine and nothing else", () => {
-    expect(SEED_STATUSES).toHaveLength(9);
+  it("lists the seeded statuses and nothing else", () => {
+    expect(SEED_STATUSES).toHaveLength(10);
     expect(SEED_STATUSES).toEqual(SEED_STATUS_CATALOGUE.map((r) => r.status));
   });
 

@@ -34,7 +34,7 @@ describe("only OPEN statuses are owed", () => {
     ]);
   });
 
-  it("keeps the four closed ones off it", () => {
+  it("keeps the closed ones off it", () => {
     // A finished loop is not owed. "Will not come" in particular: a firm no is
     // an answer, and a screen that kept asking about it would be a to-do list
     // nobody could ever empty.
@@ -43,6 +43,7 @@ describe("only OPEN statuses are owed", () => {
       "Campus visit done",
       "RSVP received",
       "Will not come",
+      "Not Interested",
     ]) {
       expect(isOpenStatus(SEED_STATUS_CATALOGUE, status), status).toBe(false);
     }

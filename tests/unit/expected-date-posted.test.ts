@@ -58,6 +58,7 @@ const ASKS_NO_DATE = [
   "Invited principal for event",
   "RSVP received",
   "Will not come",
+  "Not Interested",
 ] as const;
 
 describe("the hidden expected_date carries what the rep typed", () => {

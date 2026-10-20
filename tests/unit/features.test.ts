@@ -139,8 +139,9 @@ describe("a visit still saves with the field gone", () => {
   it("still accepts a submission carrying them", () => {
     const parsed = visitSchema.safeParse({
       ...base,
-      next_action: "call",
+      status_set_to: "First meeting done",
       follow_up_date: "2026-10-08",
+      next_action: "call",
       follow_up_note: "Fees",
     });
     expect(parsed.success).toBe(true);

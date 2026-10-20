@@ -59,10 +59,18 @@ describe("the next action a visit leaves behind, sharing Rule 5's one date", () 
     expect(parsed.data?.next_action).toBeNull();
   });
 
-  it("accepts a call and a meeting, each sharing the one follow-up date", () => {
+  it("accepts a call and a meeting, each with a date", () => {
+    // An OPEN status. A closed one, Not Interested included, does not take a
+    // next action at all (0046) — that refusal has its own test. This one is
+    // about the pair, so the status has to be one that still asks.
+    const open = {
+      ...base,
+      status_set_to: "First meeting done",
+      follow_up_date: "2026-10-08",
+    };
     for (const kind of ["call", "meeting"]) {
       const parsed = visitSchema.safeParse({
-        ...base,
+        ...open,
         next_action: kind,
         follow_up_date: "2026-10-08",
       });
@@ -148,13 +156,18 @@ describe("the next action a visit leaves behind, sharing Rule 5's one date", () 
   });
 
   it("caps the note at 300, like a plan note", () => {
+    const open = {
+      ...base,
+      status_set_to: "First meeting done",
+      follow_up_date: "2026-10-08",
+    };
     const ok = visitSchema.safeParse({
-      ...base, next_action: "call", follow_up_date: "2026-10-08",
+      ...open, next_action: "call", follow_up_date: "2026-10-08",
       follow_up_note: "x".repeat(300),
     });
     expect(ok.success).toBe(true);
     const tooLong = visitSchema.safeParse({
-      ...base, next_action: "call", follow_up_date: "2026-10-08",
+      ...open, next_action: "call", follow_up_date: "2026-10-08",
       follow_up_note: "x".repeat(301),
     });
     expect(tooLong.success).toBe(false);

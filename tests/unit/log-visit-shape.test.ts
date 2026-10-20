@@ -94,6 +94,13 @@ const SPEC: Record<string, Expected> = {
     sessionDetail: false,
     notes: false,
   },
+  "Not Interested": {
+    followUp: false,
+    eventDate: false,
+    students: false,
+    sessionDetail: false,
+    notes: false,
+  },
 };
 
 describe("the per-status field set", () => {
@@ -133,6 +140,7 @@ describe("the per-status field set", () => {
       "Campus visit done",
       "RSVP received",
       "Will not come",
+      "Not Interested",
     ]) {
       expect(followUpRequired(SEED_STATUS_CATALOGUE, status), status).toBe(
         false,
@@ -205,7 +213,7 @@ describe("what the report refuses, per status", () => {
    * status is the whole answer, so nothing at all is compulsory.
    */
   it("lets the instant closes through with nothing filled in", () => {
-    for (const status of ["RSVP received", "Will not come"]) {
+    for (const status of ["RSVP received", "Will not come", "Not Interested"]) {
       const result = makeReportSchema(SEED_STATUS_CATALOGUE, status).safeParse(
         filled(),
       );

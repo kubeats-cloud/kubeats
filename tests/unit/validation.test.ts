@@ -483,7 +483,7 @@ describe("the tentative date a \"Set\" visit promises", () => {
     ]) {
       expect(notesRequired(SEED_STATUS_CATALOGUE, status), status).toBe(true);
     }
-    for (const status of ["RSVP received", "Will not come"]) {
+    for (const status of ["RSVP received", "Will not come", "Not Interested"]) {
       expect(notesRequired(SEED_STATUS_CATALOGUE, status), status).toBe(false);
     }
   });

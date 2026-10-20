@@ -18,6 +18,7 @@ import {
   visitFormDataToInput,
 } from "@/lib/validation/visit";
 import { checkoutFixFromFormData } from "@/lib/validation/checkin";
+import { isClosedStatus } from "@/lib/validation/institute";
 import { listStatusCatalogue } from "@/lib/statuses";
 
 /**
@@ -94,6 +95,7 @@ const RPC_MESSAGES: Record<string, string> = {
   // rep the institutes a colleague left open.
   FO031:
     "That institute is not yours, so a follow-up there could not be acted on. Ask an admin to reassign it.",
+  FO038: "That institute is closed, so it does not take a follow-up.",
 };
 
 export async function submitFeedback(
@@ -186,6 +188,24 @@ export async function submitFeedback(
     return {
       error: CHECK_FIELDS,
       fieldErrors: visitFieldErrors(nextAction.error),
+    };
+  }
+
+  /*
+   * A closed status creates no follow-up. The form hides Next Action for the
+   * same reason; this is the recovery path's own check, because that form
+   * parses `nextActionSchema` rather than `visitSchema` and so would not
+   * otherwise see the status. 0046 refuses the task in the database either way.
+   */
+  if (
+    nextAction.data.next_action &&
+    isClosedStatus(catalogue, visitRow?.status_set_to ?? null)
+  ) {
+    return {
+      error: CHECK_FIELDS,
+      fieldErrors: {
+        next_action: "A closed status does not take a next action.",
+      },
     };
   }
 

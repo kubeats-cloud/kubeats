@@ -127,9 +127,10 @@ const makeInstitute = async (
  *
  * CLOSED, so it settles nothing else. `enforce_follow_up_when_open` (FO016)
  * demands a `follow_up_date` on an OPEN status, so an open default would trade
- * one refusal for another. Of the four closed-and-active statuses — Session
- * done, Campus visit done, RSVP received, Will not come — this one is already
- * idiomatic in this file.
+ * one refusal for another. Of the closed-and-active statuses — Session
+ * done, Campus visit done, RSVP received, Will not come, Not Interested —
+ * this one is already idiomatic in this file. Not Interested is avoided as a
+ * default because setting it cancels upcoming follow-ups (0046).
  *
  * FOR SETUP ONLY. Any test that asserts on a status, or counts anything by one,
  * passes its own: a default that quietly decided what a test counted would be
@@ -880,6 +881,26 @@ async function makeMember(
   createdMembers.push(member);
   return member;
 }
+
+/**
+ * 0046 adds Not Interested. Until that file is applied, the database has not
+ * heard of it, and a loop over the seed would be asking a question the
+ * database cannot answer yet. Same bargain as the other migration gates.
+ */
+const hasNotInterested = configured
+  ? await admin
+      .from("institute_statuses")
+      .select("status")
+      .eq("status", "Not Interested")
+      .maybeSingle()
+      .then(({ data, error }) => !error && Boolean(data))
+  : false;
+
+/** The seed, minus a status this database has not been given yet. */
+const seededHere = () =>
+  hasNotInterested
+    ? SEED_STATUSES
+    : SEED_STATUSES.filter((status) => status !== "Not Interested");
 
 describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   let repA: Member;
@@ -1963,14 +1984,21 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
        * are closed, so the two have to answer identically. Only a real
        * database can say whether they still do.
        */
-      it("holds exactly the app's nine statuses, in the app's order", async () => {
+      it("holds exactly the app's seeded statuses, in the app's order", async () => {
         const { data, error } = await admin
           .from("institute_statuses")
           .select("status, category, sort_order")
           .order("sort_order");
 
         expect(error).toBeNull();
-        expect(data?.map((row) => row.status)).toEqual([...SEED_STATUSES]);
+        const names = data?.map((row) => row.status) ?? [];
+        // 0046 adds Not Interested. Until that file is applied the database
+        // still holds the previous seed, and this suite has to be honest on
+        // both sides rather than red on the one that has not moved yet.
+        const expected = names.includes("Not Interested")
+          ? [...SEED_STATUSES]
+          : SEED_STATUSES.filter((status) => status !== "Not Interested");
+        expect(names).toEqual(expected);
       });
 
       it("gives every status the same category the app does", async () => {
@@ -1984,7 +2012,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       });
 
       it("answers institute_status_category() the way the app does", async () => {
-        for (const status of SEED_STATUSES) {
+        for (const status of seededHere()) {
           const { data, error } = await admin.rpc("institute_status_category", {
             p_status: status,
           });
@@ -1994,7 +2022,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       });
 
       it("answers institute_status_is_open() the way the app does", async () => {
-        for (const status of SEED_STATUSES) {
+        for (const status of seededHere()) {
           const { data } = await admin.rpc("institute_status_is_open", {
             p_status: status,
           });
@@ -2143,7 +2171,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           // It asks institute_status_is_open() rather than keeping its own
           // list, and followUpRequired(SEED_STATUS_CATALOGUE, ) asks isOpenStatus(SEED_STATUS_CATALOGUE, ), so this compares
           // two answers to one question rather than two copies of a list.
-          for (const status of SEED_STATUSES) {
+          for (const status of seededHere()) {
             const { error } = await admin
               .from("visits")
               .insert(visitWith(status, null));
@@ -6463,8 +6491,11 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_institute_id: school, p_activity: "meeting", p_lifecycle_status: null,
         p_expected_date: null, p_latitude: null, p_longitude: null,
         p_photo_url: photoFor(repA.id), p_notes: null,
-        p_status_set_to: "Session done", p_accuracy: null,
-        p_follow_up_date: null, p_follow_up_time: null, p_daily_plan_id: plan!.id,
+        // OPEN, so a next action is still legal. Session done is closed, and
+        // 0046 refuses a follow-up on a closed status — that refusal has its
+        // own suite. This block is about the task being created at all.
+        p_status_set_to: "First meeting done", p_accuracy: null,
+        p_follow_up_date: iso(2), p_follow_up_time: null, p_daily_plan_id: plan!.id,
       });
       if (error) throw new Error("log_visit: " + error.message);
       return { visitId: visitId as string, planId: plan!.id as string };
