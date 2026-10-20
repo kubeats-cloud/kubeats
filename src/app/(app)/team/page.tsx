@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { ErrorState } from "@/components/states";
+import { AdminTeamWeek } from "@/components/dashboard/team-rep-search";
 import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { ExportExcel } from "@/components/report/export-excel";
@@ -49,13 +50,8 @@ export default async function TeamPage(props: PageProps<"/team">) {
     getTeamWeek(weekStart),
   ]);
 
-  return (
+  const controls = (
     <>
-      <PageHeader
-        title="Team"
-        description="Each rep's commitment for the week and what they have achieved against it."
-      />
-
       <WeekNavigator weekStart={weekStart} basePath="/team" />
 
       {/* The export is a MONTH by default, not this week. It answers a
@@ -88,14 +84,31 @@ export default async function TeamPage(props: PageProps<"/team">) {
           {formatWeekRange(weekStart)}
         </span>
       </SectionTitle>
+    </>
+  );
 
-      {team.ok ? (
-        <TeamSnapshot
-          members={team.members}
-          weekStart={weekStart}
-        />
+  return (
+    <>
+      <PageHeader
+        title="Team"
+        description="Each rep's commitment for the week and what they have achieved against it."
+      />
+
+      {/* Admin #5. The flag is the one requireStaff already returns. A team
+          lead keeps the list exactly as it was, with no search bar. */}
+      {gate.isAdmin && team.ok ? (
+        <AdminTeamWeek members={team.members} weekStart={weekStart}>
+          {controls}
+        </AdminTeamWeek>
       ) : (
-        <ErrorState message="We could not load the team's week. Please try again in a moment." />
+        <>
+          {controls}
+          {team.ok ? (
+            <TeamSnapshot members={team.members} weekStart={weekStart} />
+          ) : (
+            <ErrorState message="We could not load the team's week. Please try again in a moment." />
+          )}
+        </>
       )}
     </>
   );
