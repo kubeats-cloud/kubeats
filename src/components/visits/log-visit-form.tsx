@@ -3,12 +3,25 @@
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FormSection } from "@/components/form-section";
-import { CaptureFields } from "@/components/visits/capture-fields";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  StatusOutcomeFields,
-  type StatusOutcomeValue,
-} from "@/components/visits/status-outcome-fields";
-import { EMPTY_FEEDBACK } from "@/lib/validation/feedback";
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { CaptureFields } from "@/components/visits/capture-fields";
+import { FeedbackFields } from "@/components/visits/feedback-fields";
+import { InstituteStatusBadge } from "@/components/institutes/status-badge";
+import {
+  EMPTY_FEEDBACK,
+  applyFeedbackPatch,
+  type FeedbackState,
+} from "@/lib/validation/feedback";
 import { logAndFileVisit } from "@/lib/feedback-actions";
 import { checkoutFix } from "@/lib/geolocate";
 import { appendCheckoutFix } from "@/lib/validation/checkin";
@@ -16,18 +29,33 @@ import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import { clearDraft, logVisitDraftKey } from "@/lib/drafts";
 import { useDraft } from "@/lib/use-draft";
 import type { OpenLoop, PlanEntry } from "@/lib/visits";
-import { type StatusCatalogue } from "@/lib/validation/institute";
+import {
+  CATEGORY_LABELS,
+  STATUS_CATEGORIES,
+  statusRow,
+  statusesInCategory,
+  type StatusCatalogue,
+} from "@/lib/validation/institute";
 import {
   type ActivityKey,
+  defaultFollowUpDue,
   eventDateLabel,
   eventDateRequired,
   fieldLabel,
   followUpRequired,
+  nextActionShown,
+  notesRequired,
   plannedActivityIsValid,
   plannedActivityLabel,
+  postedEventDate,
 } from "@/lib/validation/visit";
 import { FormNotice } from "@/components/form-notice";
 import { PHASE_A_DAILY_PLAN } from "@/lib/features";
+import {
+  NextActionFields,
+  type NextActionValue,
+} from "@/components/visits/next-action-fields";
+import { RequiredMark } from "@/components/required-mark";
 
 /*
  * NO_CHANGE stood here — the sentinel behind a "No change" option at the top of
@@ -64,7 +92,14 @@ import { PHASE_A_DAILY_PLAN } from "@/lib/features";
  * A rep who navigates away mid-capture retakes the picture, which is a few
  * seconds; a visit filed against a photo nobody looked at is not recoverable.
  */
-type LogVisitDraft = StatusOutcomeValue;
+interface LogVisitDraft {
+  statusSetTo: string;
+  expectedDate: string;
+  followUpDate: string;
+  /** A3 — what the rep will do next, and when. Drafted like every other field. */
+  nextAction: NextActionValue;
+  feedback: FeedbackState;
+}
 
 const EMPTY_DRAFT: LogVisitDraft = {
   statusSetTo: "",
@@ -194,14 +229,9 @@ export function LogVisitForm({
    * `institute_statuses` and which was already correct for all four.
    */
   const needsDate = eventDateRequired(catalogue, status);
-  /*
-   * ONE BOX, TWO REASONS, since the Phase A rebuild: Rule 5's own open-status
-   * requirement, OR a next action having been chosen. `visitSchema`'s merged
-   * check in baseVisitSchema asks the identical question — this just decides
-   * whether the box is on screen at all. StatusOutcomeFields asks the same
-   * pair so the field and this filter cannot disagree.
-   */
-  const needsFollowUp = followUpRequired(catalogue, status) || nextAction.kind !== "";
+  const needsFollowUp = followUpRequired(catalogue, status);
+  const needsNotes = notesRequired(catalogue, status);
+  const chosenStatus = statusRow(catalogue, status);
 
   /*
    * handleFollowUpDate() stood here — it pre-filled the time to 11:00 the
@@ -372,6 +402,23 @@ export function LogVisitForm({
       <input type="hidden" name="daily_plan_id" value={plan.id} />
       <input type="hidden" name="activity" value={activity} />
       <input type="hidden" name="lifecycle_status" value={lifecycleStatus} />
+      {/*
+        THE HIDDEN FIELD ASKS THE SAME QUESTION AS THE VISIBLE ONE.
+
+        It read `lifecycleStatus === "Set"` — the PURPOSE's question — while the
+        box above it is shown by `needsDate`, the STATUS's. A rep completing a
+        session (planned "Done", status "Session done") saw the date field,
+        filled it in, and posted an empty string. `visitSchema` then refused the
+        visit for a date that was on their screen, and no amount of retrying
+        helped. postedEventDate() is what keeps the two in step; see its comment
+        in validation/visit.ts for why the empty branch matters too.
+      */}
+      <input
+        type="hidden"
+        name="expected_date"
+        value={postedEventDate(catalogue, status, expectedDate)}
+      />
+      <input type="hidden" name="status_set_to" value={statusSetTo} />
 
       {/*
         NOTHING IS ASKED HERE ANY MORE — it is shown.
@@ -415,20 +462,172 @@ export function LogVisitForm({
 
       {/*
         STATUS FIRST, AND EVERYTHING ELSE BEHIND IT.
-        Shared with Log Call via StatusOutcomeFields so an admin-added status
-        cannot light up on one screen and stay dark on the other. Photo and
-        check-out GPS stay on THIS form; Next Action is still behind
-        PHASE_A_DAILY_PLAN — with it off the form sends no `next_action` key,
-        which `visitSchema` already tolerates.
+        The spec's order for all nine statuses is one straight line — Status,
+        follow-up, the event date, the session detail, then Notes — so the
+        fields live in that order in one section rather than in titled cards
+        that each explain themselves. Nothing status-driven renders until a
+        status is chosen: before the pick there is nothing true to show, and a
+        form that fills in as it is answered is shorter to read than one that
+        greys out.
       */}
-      <StatusOutcomeFields
-        catalogue={catalogue}
-        value={{ statusSetTo, expectedDate, followUpDate, nextAction, feedback }}
-        onChange={patchDraft}
-        fieldErrors={fieldErrors}
-        openLoops={openLoops}
-        showNextAction={PHASE_A_DAILY_PLAN}
-      />
+      <FormSection>
+        <div className="space-y-2">
+          <Label>
+            Status <RequiredMark />
+          </Label>
+          {/* R4 — the institute's status as it stands right now, before the
+              rep picks what it becomes. Plain text, not a form control: this
+              is a fact about `plan.institute_id`, not an answer being asked. */}
+          <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+            Currently:
+            <InstituteStatusBadge status={plan.instituteStatus} catalogue={catalogue} />
+          </p>
+          <Select
+            value={statusSetTo}
+            onValueChange={(value) => patchDraft({ statusSetTo: value })}
+          >
+            <SelectTrigger
+              className="h-11 w-full"
+              aria-label="Institute status"
+              aria-invalid={fieldErrors.status_set_to ? true : undefined}
+            >
+              {/* A placeholder, because there is no longer a default to show.
+                  "No change" used to sit here and be pre-selected, which meant
+                  a rep could file a visit that moved nothing without ever
+                  touching this control. */}
+              <SelectValue placeholder="Select" />
+            </SelectTrigger>
+            {/* Grouped so it is obvious which choices leave the institute in
+                play — and an open one is what makes the follow-up mandatory
+                below. */}
+            <SelectContent>
+              {STATUS_CATEGORIES.map((category) => (
+                <SelectGroup key={category}>
+                  <SelectLabel>{CATEGORY_LABELS[category]}</SelectLabel>
+                  {statusesInCategory(catalogue, category).map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+          {fieldError("status_set_to")}
+        </div>
+
+        {/*
+          THE FOLLOW-UP IS GATED ON THE STATUS, not merely labelled by it.
+
+          It used to render for all nine and only CHANGE ITS DESCRIPTION when
+          the status was closed, which is the client's first complaint: a rep
+          closing a visit with "RSVP received" was still shown a box asking when
+          they were going back. Now `followUpRequired()` — which is
+          `isOpenStatus()` — decides whether it exists at all.
+
+          WHAT THIS GIVES UP, DELIBERATELY. 0010 permits a follow-up on a CLOSED
+          status, and "they said no, ask again next intake" was a real use of
+          it. The client asked for the simpler rule and this takes it. Nothing
+          in the database changes: `follow_up_date` stays nullable and every
+          value already recorded is still there, so restoring the case is this
+          condition and nothing else.
+        */}
+        {status && (
+          <>
+            {needsFollowUp && (
+              <div className="space-y-2 sm:max-w-xs">
+                <Label htmlFor="follow-up-date">
+                  Follow-up Date <RequiredMark />
+                </Label>
+                <Input
+                  id="follow-up-date"
+                  name="follow_up_date"
+                  type="date"
+                  className="h-11"
+                  value={followUpDate}
+                  onChange={(event) =>
+                    patchDraft({ followUpDate: event.target.value })
+                  }
+                  aria-required
+                />
+                {fieldError("follow_up_date")}
+              </div>
+            )}
+
+            {needsDate && (
+              <div className="space-y-2 sm:max-w-xs">
+                <Label htmlFor="expected-date">
+                  {eventDateLabel(catalogue, status)} <RequiredMark />
+                </Label>
+                <Input
+                  id="expected-date"
+                  type="date"
+                  className="h-11"
+                  value={expectedDate}
+                  onChange={(event) =>
+                    patchDraft({ expectedDate: event.target.value })
+                  }
+                  aria-required
+                />
+                {fieldError("expected_date")}
+              </div>
+            )}
+
+            {/*
+              A3 — WHAT HAPPENS NEXT, asked after the status and its dates.
+
+              Here rather than beside them because it is the same question one
+              step on: the status says where this visit left the institute, and
+              this says what the rep will do about it. Inside `status && …` for
+              the reason the whole section is — nothing status-driven renders
+              before the pick, and a form that fills in as it is answered is
+              shorter to read than one that greys out.
+            */}
+            {/*
+              ⚠ Behind PHASE_A_DAILY_PLAN. With it off the form sends no
+              `next_action` key at all, which `visitSchema` already tolerates —
+              that absence-tolerance was built for a rep posting a CACHED page
+              during the Phase A deploy, and taking the field back down is the
+              same shape pointing the other way. `close_visit()`'s parameters
+              are all defaulted, so the visit saves with nulls exactly as a
+              report filed before the field existed did.
+            */}
+            {PHASE_A_DAILY_PLAN && nextActionShown(catalogue, status) && (
+              <NextActionFields
+                value={nextAction}
+                onChange={(patch) =>
+                  patchDraft((current) => ({
+                    nextAction: { ...(current.nextAction ?? EMPTY_DRAFT.nextAction), ...patch },
+                  }))
+                }
+                fieldErrors={fieldErrors}
+                defaultDue={defaultFollowUpDue()}
+              />
+            )}
+
+            <FeedbackFields
+              asks={{
+                sessionDetail: chosenStatus?.asksSessionDetail ?? false,
+                headCount: chosenStatus?.asksHeadCount ?? false,
+              }}
+              notesRequired={needsNotes}
+              value={feedback}
+              // Functional all the way down, so two changes in one tick both
+              // survive: the second merges against the first's result rather
+              // than against the render it started from. Reading `feedback`
+              // from the closure here instead would put back the bug
+              // applyFeedbackPatch was made functional to fix.
+              onChange={(patch) =>
+                patchDraft((current) => ({
+                  feedback: applyFeedbackPatch(current.feedback, patch),
+                }))
+              }
+              fieldErrors={fieldErrors}
+              openLoops={openLoops}
+            />
+          </>
+        )}
+      </FormSection>
 
       {error && (
         <FormNotice

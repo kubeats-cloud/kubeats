@@ -116,6 +116,14 @@ function purposeOf(
   return Array.isArray(embedded) ? (embedded[0] ?? null) : embedded;
 }
 
+function instituteStatusOf(
+  embedded: { status: string | null } | { status: string | null }[] | null | undefined,
+): string | null {
+  if (!embedded) return null;
+  const row = Array.isArray(embedded) ? (embedded[0] ?? null) : embedded;
+  return row?.status ?? null;
+}
+
 export interface PlanEntry {
   id: string;
   institute_id: string;
@@ -137,6 +145,14 @@ export interface PlanEntry {
   lifecycle: string | null;
   /** "Other" — the rep's own words about what this visit is for. */
   purposeNote: string | null;
+  /**
+   * R4 — the institute's status as it stands right now, not what this plan
+   * entry is about to set. Null is "no status yet", same as everywhere else.
+   * Also null if the institute was reassigned away from this rep since the
+   * plan was made (RLS then hides the join row); Log Visit falls back to
+   * showing nothing rather than a stale value.
+   */
+  instituteStatus: string | null;
   meetings_actual: number | null;
   follow_up_date: string | null;
   /** Set when an admin put this on the rep's plan rather than the rep. */
@@ -179,8 +195,11 @@ export async function getTodayPlan(
     // activity now. A literal select string, and the join is inferred from
     // daily_plans.purpose_id (migration 0025) — which is also why that FK
     // exists rather than the label being matched a second time here.
+    // `institutes(status)` rides the same way, off institute_id — R4: Log
+    // Visit shows the institute's CURRENT status, not only a picker of what
+    // it could become.
     .select(
-      "id, institute_id, purpose, purpose_note, meetings_actual, follow_up_date, assigned_by, checkin_at, checkin_lat, checkin_lng, checkout_at, checkout_lat, checkout_lng, checkout_missing, checkin_location_manual, checkin_manual_reason, purposes(activity, lifecycle)",
+      "id, institute_id, purpose, purpose_note, meetings_actual, follow_up_date, assigned_by, checkin_at, checkin_lat, checkin_lng, checkout_at, checkout_lat, checkout_lng, checkout_missing, checkin_location_manual, checkin_manual_reason, purposes(activity, lifecycle), institutes(status)",
     )
     .eq("member", memberId)
     .eq("date", todayISO())
@@ -213,6 +232,7 @@ export async function getTodayPlan(
         checkin_manual_reason,
         purpose_note,
         purposes,
+        institutes,
         ...r
       }) => ({
         ...r,
@@ -224,6 +244,7 @@ export async function getTodayPlan(
         activity: purposeOf(purposes)?.activity ?? null,
         lifecycle: purposeOf(purposes)?.lifecycle ?? null,
         purposeNote: purpose_note ?? null,
+        instituteStatus: instituteStatusOf(institutes),
         instituteName: instituteNameFrom(names, r.institute_id, "visits"),
         assignedBy: assigned_by,
         assignedByName: assigned_by ? (assigners.get(assigned_by) ?? null) : null,

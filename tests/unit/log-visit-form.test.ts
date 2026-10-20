@@ -197,3 +197,21 @@ describe.skipIf(!existsSync(radixPath))("why the fix is needed", () => {
     expect(radix).toContain("initialValueRef");
   });
 });
+
+/**
+ * R4 — Log Visit shows the selected institute's current status as a fact,
+ * not only a picker of what it is about to become.
+ */
+describe("R4: the institute's current status is displayed", () => {
+  it("log-visit-form.tsx renders plan.instituteStatus next to the Status picker", () => {
+    const source = read("src/components/visits/log-visit-form.tsx");
+    expect(source).toContain("InstituteStatusBadge");
+    expect(source).toContain("plan.instituteStatus");
+  });
+
+  it("getTodayPlan selects the institute's status and PlanEntry carries it", () => {
+    const source = read("src/lib/visits.ts");
+    expect(source).toContain("institutes(status)");
+    expect(source).toContain("instituteStatus: instituteStatusOf(institutes)");
+  });
+});
