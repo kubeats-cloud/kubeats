@@ -42,6 +42,7 @@ const CHECK_VIOLATION = "23514";
  */
 const FOREIGN_KEY_VIOLATION = "23503";
 const INSUFFICIENT_PRIVILEGE = "42501";
+const UNIQUE_VIOLATION = "23505";
 
 /** Every row these tests create carries this, so cleanup can find them. */
 const TAG = `test:${Date.now().toString(36)}`;
@@ -9156,6 +9157,112 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           (second.data ?? []).map((r) => r.id),
         );
       });
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Batch 5 — target_statuses (Admin #8 / Rep #2)                     */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * ⚠ ITS OWN TABLE, NOT institute_statuses AND NOT A public.targets COLUMN —
+   * the locked decision migration 0045's own header states. SELECT is open to
+   * every signed-in role ("available to the appropriate Reps"); INSERT is
+   * admin-only ("only Admin can add"); there is no UPDATE or DELETE grant at
+   * all, so neither is reachable even by an admin going around the app.
+   */
+  describe("target_statuses - Admin #8 / Rep #2", () => {
+    const names: string[] = [];
+    const named = (label: string) => {
+      const n = `${TAG} ${label}`;
+      names.push(n);
+      return n;
+    };
+
+    afterAll(async () => {
+      if (names.length > 0) {
+        await admin.from("target_statuses").delete().in("name", names);
+      }
+    });
+
+    it("lets an admin add one through RLS, and a rep then reads it back", async () => {
+      // THROUGH boss.db, not the service-role `admin` client — this is the
+      // is_admin() branch of target_statuses_insert actually firing, not a
+      // bypass of it.
+      const name = named("admin-added");
+      const { error: insertError } = await boss.db
+        .from("target_statuses").insert({ name });
+      expect(insertError, insertError?.message).toBeNull();
+
+      // "available to the appropriate Reps" / "displayed ... wherever target
+      // statuses are used" — a plain rep, not just the admin who added it.
+      const { data, error } = await repA.db
+        .from("target_statuses").select("name").eq("name", name);
+      expect(error, error?.message).toBeNull();
+      expect(data).toHaveLength(1);
+    });
+
+    it("refuses a rep adding one", async () => {
+      const name = named("rep-attempt");
+      const { error } = await repA.db.from("target_statuses").insert({ name });
+      expect(error, "a rep must not be able to add a target status").not.toBeNull();
+
+      const { data } = await admin
+        .from("target_statuses").select("name").eq("name", name);
+      expect(data ?? [], "the refused row must not exist").toHaveLength(0);
+    });
+
+    it("prevents a duplicate name", async () => {
+      const name = named("duplicate");
+      const first = await admin.from("target_statuses").insert({ name });
+      expect(first.error, first.error?.message).toBeNull();
+
+      const second = await admin.from("target_statuses").insert({ name });
+      expect(second.error?.code, "the primary key must refuse the duplicate").toBe(
+        UNIQUE_VIOLATION,
+      );
+    });
+
+    it("prevents an empty name, even bypassing the app's own validation", async () => {
+      // The zod schema already refuses this in the browser and the server
+      // action; this proves the SAME rule holds at the data layer, so a raw
+      // insert — not just the form — cannot create a blank status.
+      const { error } = await admin.from("target_statuses").insert({ name: "" });
+      expect(error?.code, "the CHECK constraint must refuse a blank name").toBe(
+        CHECK_VIOLATION,
+      );
+
+      const { error: blankError } = await admin
+        .from("target_statuses").insert({ name: "   " });
+      expect(
+        blankError?.code,
+        "the CHECK constraint must refuse a whitespace-only name too",
+      ).toBe(CHECK_VIOLATION);
+    });
+
+    it("has no UPDATE or DELETE grant reachable from the client, even for an admin", async () => {
+      // THROUGH boss.db — the point is that the `authenticated` Postgres
+      // role holds no grant for either verb at all, which an admin's own
+      // is_admin() status cannot work around, because there is no policy
+      // checking it for these two commands in the first place.
+      const name = named("immutable");
+      await admin.from("target_statuses").insert({ name });
+
+      const updated = await boss.db
+        .from("target_statuses").update({ name: `${name}-renamed` }).eq("name", name);
+      expect(
+        updated.error,
+        "renaming was never asked for and must not be reachable",
+      ).not.toBeNull();
+
+      const deleted = await boss.db.from("target_statuses").delete().eq("name", name);
+      expect(
+        deleted.error,
+        "deleting was never asked for and must not be reachable",
+      ).not.toBeNull();
+
+      const { data } = await admin.from("target_statuses").select("name").eq("name", name);
+      expect(data, "the row must be exactly as it was added").toHaveLength(1);
     });
   });
 });

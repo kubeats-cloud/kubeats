@@ -8,9 +8,11 @@ import { ErrorState } from "@/components/states";
 import { MetricList } from "@/components/weekly/metric-list";
 import { ReopenButton } from "@/components/weekly/reopen-button";
 import { TargetsForm } from "@/components/weekly/targets-form";
+import { TargetStatusesPanel } from "@/components/weekly/target-statuses-panel";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getWeekSummary, memberName } from "@/lib/week-summary";
+import { listTargetStatuses } from "@/lib/target-statuses";
 import { completionPercent } from "@/lib/validation/weekly";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
 
@@ -50,9 +52,42 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
   const viewingOther = isAdmin(user) && !!requested && requested !== user.id;
   const memberId = viewingOther ? requested! : user.id;
 
-  const [result, name] = await Promise.all([
+  /*
+   * REP #2 — "Admin should have access to the complete Target tab."
+   *
+   * An admin with no `?member=` used to fall through to `memberId = user.id`
+   * and render THEIR OWN weekly commitment form — the same bug `/report`'s
+   * own comment names for the identical reason: FO021 gives an admin no
+   * campus, so they log no visits and commit to no week. The Target tab had
+   * no meaning for them at all; what they actually have access to in it is
+   * Admin #8's "add a target status," so that is what renders here instead
+   * of a form answering a question that cannot have an answer.
+   */
+  const adminHome = isAdmin(user) && !viewingOther;
+
+  if (adminHome) {
+    const statuses = await listTargetStatuses();
+    return (
+      <PageColumn>
+        <PageHeader
+          title="Targets"
+          description="Target statuses available in the weekly target workflow."
+        />
+        <TargetStatusesPanel
+          statuses={statuses.ok ? statuses.statuses : []}
+          canAdd
+        />
+      </PageColumn>
+    );
+  }
+
+  // Only the rep's own view renders the list below — see where it is used.
+  const [result, name, statuses] = await Promise.all([
     getWeekSummary(memberId, weekStart),
     viewingOther ? memberName(memberId) : Promise.resolve(user.name),
+    viewingOther
+      ? Promise.resolve({ ok: true as const, statuses: [] as string[] })
+      : listTargetStatuses(),
   ]);
 
   const displayName = name ?? "this member";
@@ -151,15 +186,26 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
           )}
         </div>
       ) : (
-        <TargetsForm
-          weekStart={weekStart}
-          targets={record.targets}
-          calls={record.calls}
-          achieved={achieved}
-          locked={record.locked}
-          submittedAt={record.submitted_at}
-          reopenedAt={record.reopened_at}
-        />
+        <div className="space-y-4">
+          <TargetsForm
+            weekStart={weekStart}
+            targets={record.targets}
+            calls={record.calls}
+            achieved={achieved}
+            locked={record.locked}
+            submittedAt={record.submitted_at}
+            reopenedAt={record.reopened_at}
+          />
+
+          {/* Rep #2 — "the newly added status ... displayed consistently
+              wherever target statuses are used" and "available to the
+              appropriate Reps." Read-only here: adding one is Admin #8's
+              control, on the admin's own view of this same tab above. */}
+          <TargetStatusesPanel
+            statuses={statuses.ok ? statuses.statuses : []}
+            canAdd={false}
+          />
+        </div>
       )}
     </PageColumn>
   );
