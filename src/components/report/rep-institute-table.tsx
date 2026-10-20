@@ -1,16 +1,21 @@
 import Link from "next/link";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
 import { COUNT_ZERO_CLASS } from "@/components/ui/count-link";
+import { InstituteStatusBadge } from "@/components/institutes/status-badge";
 import {
   openClosedTotals,
   type InstituteActivityRow,
   type InstituteActivitySortKey,
 } from "@/lib/institute-activity-counts";
 import { instituteActivitySortHref } from "@/lib/institute-activity-links";
+import { TYPE_LABELS, type StatusCatalogue } from "@/lib/validation/institute";
 import type { PipelineRange } from "@/lib/validation/pipeline-report";
 
 /**
- * R1 — a rep's own institute-wise activity, one row per institute they can see.
+ * R1 — a rep's single, consolidated institute-wise table: one row per
+ * institute they can see, with institute details alongside the activity
+ * counts, so this is the only table the Institute tab renders for a rep
+ * (the correction pass folded the separate registry browser into this one).
  *
  * NOT `InstituteActivityTable` (the admin grid): that one is twelve columns,
  * one Open/Closed pair per activity type, built for a registry an admin reads
@@ -22,6 +27,11 @@ import type { PipelineRange } from "@/lib/validation/pipeline-report";
  * staff-only — a rep following that link would be bounced straight back out.
  * Every number here is plain text; the institute name is still a link, into
  * `/institutes/[id]`, which a rep can always reach for their own institute.
+ *
+ * Type, Location and Status are plain (unsorted) columns — the client asked
+ * for column sorting, not that every column carry it, and the five existing
+ * sort keys (institute / open / closed / follow-ups / meetings) already cover
+ * that ask.
  */
 
 type SortState = { key: InstituteActivitySortKey; dir: "asc" | "desc" };
@@ -83,6 +93,11 @@ function Count({ value }: { value: number }) {
   );
 }
 
+/** Area, city, state — the same join order `InstitutesBrowser` uses. */
+function locationOf(row: InstituteActivityRow): string {
+  return [row.area, row.city, row.state].filter(Boolean).join(", ");
+}
+
 export function RepInstituteTable({
   rows,
   sort,
@@ -90,6 +105,7 @@ export function RepInstituteTable({
   caption,
   basePath,
   extraParams,
+  catalogue,
 }: {
   rows: readonly InstituteActivityRow[];
   sort: SortState;
@@ -98,6 +114,8 @@ export function RepInstituteTable({
   basePath: string;
   /** Carried into every sort link — see `SortHeader`'s own comment. */
   extraParams?: Record<string, string>;
+  /** For the Status column's badge. */
+  catalogue: StatusCatalogue;
 }) {
   return (
     <div className="border-border overflow-x-auto rounded-lg border">
@@ -113,6 +131,24 @@ export function RepInstituteTable({
               basePath={basePath}
               extraParams={extraParams}
             />
+            <th
+              scope="col"
+              className="bg-muted/60 text-muted-foreground sticky top-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+            >
+              Type
+            </th>
+            <th
+              scope="col"
+              className="bg-muted/60 text-muted-foreground sticky top-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+            >
+              Location
+            </th>
+            <th
+              scope="col"
+              className="bg-muted/60 text-muted-foreground sticky top-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+            >
+              Status
+            </th>
             <SortHeader
               label="Open"
               sortKey="open_total"
@@ -158,13 +194,14 @@ export function RepInstituteTable({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={6} className="text-muted-foreground px-3 py-8 text-center text-sm">
+              <td colSpan={9} className="text-muted-foreground px-3 py-8 text-center text-sm">
                 No institutes in scope.
               </td>
             </tr>
           ) : (
             rows.map((row) => {
               const oc = openClosedTotals(row);
+              const location = locationOf(row);
               return (
                 <tr key={row.id} className="border-border border-t">
                   <th
@@ -175,6 +212,15 @@ export function RepInstituteTable({
                       {row.name}
                     </Link>
                   </th>
+                  <td className="text-muted-foreground px-3 py-2 text-left whitespace-nowrap">
+                    {TYPE_LABELS[row.type]}
+                  </td>
+                  <td className="text-muted-foreground px-3 py-2 text-left whitespace-nowrap">
+                    {location || "—"}
+                  </td>
+                  <td className="px-3 py-2 text-left whitespace-nowrap">
+                    <InstituteStatusBadge status={row.status} catalogue={catalogue} />
+                  </td>
                   <td className="px-3 py-2 text-right">
                     <Count value={oc.open} />
                   </td>

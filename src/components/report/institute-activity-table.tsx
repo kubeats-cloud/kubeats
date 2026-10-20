@@ -49,17 +49,20 @@ function SortHeader({
   sortKey,
   sort,
   range,
+  basePath,
 }: {
   label: string;
   sortKey: InstituteActivitySortKey;
   sort: SortState;
   range: PipelineRange;
+  basePath?: string;
 }) {
   const href = instituteActivitySortHref({
     key: sortKey,
     currentKey: sort.key,
     currentDir: sort.dir,
     range,
+    basePath,
   });
   const active = sort.key === sortKey;
   const Icon = !active
@@ -92,11 +95,14 @@ export function InstituteActivityTable({
   sort,
   range,
   caption,
+  basePath,
 }: {
   rows: readonly InstituteActivityRow[];
   sort: SortState;
   range: PipelineRange;
   caption: string;
+  /** Where a sort-header click navigates. Defaults to this table's own page. */
+  basePath?: string;
 }) {
   return (
     <div className="border-border overflow-x-auto rounded-lg border">
@@ -109,6 +115,7 @@ export function InstituteActivityTable({
               sortKey="institute"
               sort={sort}
               range={range}
+              basePath={basePath}
             />
             {ACTIVITY_TYPES.map((activity) => (
               <th
@@ -132,6 +139,7 @@ export function InstituteActivityTable({
                 sortKey={`${activity}_open` as InstituteActivitySortKey}
                 sort={sort}
                 range={range}
+                basePath={basePath}
               />,
               <SortHeader
                 key={`${activity}-closed`}
@@ -139,6 +147,7 @@ export function InstituteActivityTable({
                 sortKey={`${activity}_closed` as InstituteActivitySortKey}
                 sort={sort}
                 range={range}
+                basePath={basePath}
               />,
             ])}
           </tr>

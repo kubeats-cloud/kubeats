@@ -227,6 +227,11 @@ export async function getInstituteActivityModel(
   const institutes = registry.institutes.map((row) => ({
     id: row.id,
     name: instituteNameOr(row.name, "institute-activity"),
+    type: row.type,
+    city: row.city,
+    area: row.area,
+    state: row.state,
+    status: row.status,
   }));
 
   const { rows, reconciliationFailures } = buildInstituteActivityRows({

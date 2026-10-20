@@ -496,25 +496,33 @@ describe("the activity report is untouched by all of it", () => {
   });
 });
 
-describe("the two screen callers opt out", () => {
+describe("the remaining screen caller opts out", () => {
   const page = (path: string) =>
     readFileSync(
       fileURLToPath(new URL(`../../src/app/${path}`, import.meta.url)),
       "utf8",
     );
 
-  it("the admin Overview passes showActivities: false", () => {
-    expect(
-      readFileSync(
-        fileURLToPath(
-          new URL("../../src/components/admin/overview-pipeline.tsx", import.meta.url),
-        ),
-        "utf8",
-      ),
-    ).toContain("showActivities={false}");
-  });
-
   it("/team/report passes showActivities: false", () => {
     expect(page("(app)/team/report/page.tsx")).toContain("showActivities: false");
+  });
+});
+
+/**
+ * A1 correction — the admin Overview (`/`) no longer renders the rep-wise
+ * `ActivityGridTable` at all (it used to, with `showActivities: false`,
+ * which is the assertion this replaces). It renders the institute-wise
+ * Activity Report in that same place instead — see `page.tsx`'s own comment.
+ */
+describe("A1: the admin Overview shows the institute-wise report, not the rep grid", () => {
+  const page = () =>
+    readFileSync(
+      fileURLToPath(new URL("../../src/app/(app)/page.tsx", import.meta.url)),
+      "utf8",
+    );
+
+  it("renders InstituteActivityTable and not ActivityGridTable", () => {
+    expect(page()).toContain("<InstituteActivityTable");
+    expect(page()).not.toContain("ActivityGridTable");
   });
 });

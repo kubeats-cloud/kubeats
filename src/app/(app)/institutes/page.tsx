@@ -2,13 +2,12 @@ import Link from "next/link";
 import { PlusIcon, TableIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
-import { SectionTitle } from "@/components/section-title";
 import { ErrorState } from "@/components/states";
 import {
   InstitutesBrowser,
   type InstituteFilters,
 } from "@/components/institutes/institutes-browser";
-import { RepInstituteTable } from "@/components/report/rep-institute-table";
+import { RepInstituteSearch } from "@/components/report/rep-institute-search";
 import { RangeControls } from "@/components/report/range-controls";
 import { listInstitutes } from "@/lib/institutes";
 import { listStatusCatalogue } from "@/lib/statuses";
@@ -64,17 +63,20 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
   };
 
   /*
-   * REP SIDE #1 — "In the Institute tab, show a complete activity summary
-   * for each institute." A SECTION of this existing page, not a route of its
-   * own: `?from=`/`?to=`/`?sort=`/`?dir=` are a second, independent set of
-   * params from the registry's own filters above, so the two cannot collide
-   * or reset each other.
+   * REP SIDE #1 — "Create a single institute-wise table for the Rep."
+   *
+   * A rep no longer sees `InstitutesBrowser` at all (see the render below):
+   * this is the ONE table the Institute tab shows them, built from
+   * `getInstituteActivityModel` and carrying institute details (type,
+   * location, status) alongside the activity counts, sortable, with its own
+   * `?from=`/`?to=`/`?sort=`/`?dir=`.
    *
    * REP ONLY, per the client's own heading ("Rep Side") — not team_lead, not
-   * admin, who already has the fuller per-activity-type grid at
-   * /institutes/report. The model itself needs no role branch (RLS scopes
-   * every role the same way); this `isRep` check is only about which roles
-   * see this SECTION on THIS shared page, not about security.
+   * admin, who keep `InstitutesBrowser` exactly as it was and already have
+   * the fuller per-activity-type grid at /institutes/report. The model
+   * itself needs no role branch (RLS scopes every role the same way); this
+   * `isRep` check is only about which roles see which table on THIS shared
+   * page, not about security.
    */
   const sortParam = first(searchParams.sort);
   const instituteActivitySort = {
@@ -104,15 +106,6 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
           sort: instituteActivitySort,
         })
       : null;
-  // The registry browser's own filters, as plain strings — shared by the
-  // RangeControls and RepInstituteTable below so neither one's links drop
-  // what the other has set.
-  const browserFilterParams = Object.fromEntries(
-    Object.entries(initial).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-
   return (
     <>
       <PageHeader
@@ -148,46 +141,40 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
         }
       />
 
-      {result.ok ? (
-        <InstitutesBrowser
-          institutes={result.institutes}
-          catalogue={catalogue}
-          initial={initial}
-          // Admin-only: a rep sees only their own institutes, so an owner
-          // column would repeat one name down the page.
-          showOwner={admin}
-        />
-      ) : (
-        <ErrorState message="We could not load the registry just now. Please try again in a moment." />
+      {/*
+        R1 — a rep sees the one consolidated table and nothing else on this
+        tab; `InstitutesBrowser` (the old registry grid, with its own
+        text/dropdown filters) stays exactly as it was, but only for the
+        roles that still use it.
+      */}
+      {!isRep && (
+        result.ok ? (
+          <InstitutesBrowser
+            institutes={result.institutes}
+            catalogue={catalogue}
+            initial={initial}
+            // Admin-only: a rep sees only their own institutes, so an owner
+            // column would repeat one name down the page.
+            showOwner={admin}
+          />
+        ) : (
+          <ErrorState message="We could not load the registry just now. Please try again in a moment." />
+        )
       )}
 
-      {/*
-        REP SIDE #1 — a section of THIS tab, not a separate screen. See the
-        comment where `instituteActivityResult` is computed above for why
-        it's rep-only and why its own ?from=/?to=/?sort=/?dir= cannot collide
-        with the registry's filters above.
-      */}
       {isRep && (
-        <div className="mt-8">
-          <SectionTitle>Activity summary</SectionTitle>
-
+        <>
           <RangeControls
             start={instituteActivityRange.from ?? ""}
             end={instituteActivityRange.to ?? ""}
             basePath="/institutes"
             optional
-            // The registry browser above keeps its own filters (?q=, ?status=,
-            // etc.) mirrored into this same URL. Pressing Apply/Clear here
-            // would otherwise drop them — `extraParams` is RangeControls' own
-            // mechanism for "anything else already in the URL that must
-            // survive pressing Apply," built for exactly this.
-            extraParams={{
-              ...(instituteActivitySort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
+            extraParams={
+              instituteActivitySort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
               instituteActivitySort.dir !== DEFAULT_INSTITUTE_ACTIVITY_SORT.dir
                 ? { sort: instituteActivitySort.key, dir: instituteActivitySort.dir }
-                : {}),
-              ...browserFilterParams,
-            }}
+                : undefined
+            }
             hint="Filters by the date the work was logged. Leave both blank for all time."
           />
 
@@ -201,18 +188,16 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
               }
             />
           ) : (
-            <div className="mt-3">
-              <RepInstituteTable
-                rows={instituteActivityResult.model.rows}
-                sort={instituteActivityResult.model.sort}
-                range={instituteActivityRange}
-                caption="Your institutes, Open and Closed activity"
-                basePath="/institutes"
-                extraParams={browserFilterParams}
-              />
-            </div>
+            <RepInstituteSearch
+              rows={instituteActivityResult.model.rows}
+              sort={instituteActivityResult.model.sort}
+              range={instituteActivityRange}
+              caption="Your institutes: details, follow-ups and activity"
+              basePath="/institutes"
+              catalogue={catalogue}
+            />
           )}
-        </div>
+        </>
       )}
     </>
   );

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { FileSpreadsheetIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,8 @@ import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
 import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
-import { OverviewPipeline } from "@/components/admin/overview-pipeline";
+import { InstituteActivityTable } from "@/components/report/institute-activity-table";
+import { RangeControls } from "@/components/report/range-controls";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { countMyInstitutes } from "@/lib/institutes";
 import { listStatusCatalogue } from "@/lib/statuses";
@@ -27,9 +29,18 @@ import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
 import { todayISO } from "@/lib/dates";
 import { getOverview } from "@/lib/admin-workspace";
-import { getOverviewPipeline } from "@/lib/overview-pipeline";
+import {
+  getInstituteActivityModel,
+  DEFAULT_INSTITUTE_ACTIVITY_SORT,
+} from "@/lib/institute-activity-report";
+import { isInstituteActivitySortKey } from "@/lib/institute-activity-counts";
+import { instituteActivityExportHref } from "@/lib/institute-activity-links";
+import { pipelineRangeSchema, type PipelineRange } from "@/lib/validation/pipeline-report";
 
 export const metadata = { title: "Dashboard" };
+
+const first = (value: string | string[] | undefined) =>
+  typeof value === "string" && value !== "" ? value : undefined;
 
 export default async function DashboardPage(props: PageProps<"/">) {
   const user = await getCurrentUser();
@@ -37,6 +48,35 @@ export default async function DashboardPage(props: PageProps<"/">) {
 
   const admin = isAdmin(user);
   const weekStart = mondayOf();
+
+  /*
+   * A1 — the institute-wise Activity Report's own range and sort, read from
+   * this page's URL exactly as `/institutes/report` reads its own: optional,
+   * no default window, so a quiet pipeline is not hidden behind "this month".
+   * Rep branch never reads these.
+   */
+  const searchParams = await props.searchParams;
+  const parsedActivityRange = admin
+    ? pipelineRangeSchema.safeParse({
+        from: first(searchParams.from),
+        to: first(searchParams.to),
+      })
+    : null;
+  const activityRangeError =
+    parsedActivityRange && !parsedActivityRange.success
+      ? (parsedActivityRange.error.issues[0]?.message ??
+        "That date range is not one we can report on.")
+      : null;
+  const activityRange: PipelineRange = parsedActivityRange?.success
+    ? parsedActivityRange.data
+    : {};
+  const activitySortKeyParam = first(searchParams.sort);
+  const activitySort = {
+    key: isInstituteActivitySortKey(activitySortKeyParam)
+      ? activitySortKeyParam
+      : DEFAULT_INSTITUTE_ACTIVITY_SORT.key,
+    dir: first(searchParams.dir) === "desc" ? ("desc" as const) : ("asc" as const),
+  };
 
   // An admin loads the supervision view; a rep loads their own day. Neither
   // pays for the other's queries.
@@ -83,8 +123,12 @@ export default async function DashboardPage(props: PageProps<"/">) {
     // The status vocabulary. Cheap, and needed by the plan picker to say when an
     // institute is being re-opened after a closed loop.
     settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "dashboard:statuses"),
-    admin
-      ? settled(props.searchParams.then(getOverviewPipeline), null, "dashboard:pipeline")
+    admin && !activityRangeError
+      ? settled(
+          getInstituteActivityModel({ range: activityRange, sort: activitySort }),
+          null,
+          "dashboard:report",
+        )
       : Promise.resolve(null),
     /*
      * A3/A1 — today's follow-ups, from `follow_up_tasks`.
@@ -193,7 +237,62 @@ export default async function DashboardPage(props: PageProps<"/">) {
             <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />
           )}
 
-          <OverviewPipeline result={report} />
+          {/* A1 — the institute-wise Activity Report, in the place the old
+              rep-wise "Pipeline by rep" / "Activity this month" grid used to
+              sit. One table, not a compact preview with a link elsewhere:
+              the date filter, the column sorting and the Excel download are
+              all live right here, reusing the exact model and table
+              `/institutes/report` renders — `basePath="/"` is the only thing
+              that differs, so a sort click stays on the dashboard. */}
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+            <SectionTitle className="mb-0">Activity report</SectionTitle>
+            {report?.ok && (
+              <Button asChild variant="outline" className="h-11">
+                <a
+                  href={instituteActivityExportHref({
+                    range: report.model.range,
+                    sortKey: report.model.sort.key,
+                    sortDir: report.model.sort.dir,
+                  })}
+                  download
+                >
+                  <FileSpreadsheetIcon className="size-4" aria-hidden />
+                  Download Excel
+                </a>
+              </Button>
+            )}
+          </div>
+
+          <RangeControls
+            start={activityRange.from ?? ""}
+            end={activityRange.to ?? ""}
+            basePath="/"
+            optional
+            extraParams={
+              report?.ok &&
+              (report.model.sort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
+                report.model.sort.dir !== DEFAULT_INSTITUTE_ACTIVITY_SORT.dir)
+                ? { sort: report.model.sort.key, dir: report.model.sort.dir }
+                : undefined
+            }
+            hint="Filters by the date the work was logged. Leave both blank for all time."
+          />
+
+          {activityRangeError ? (
+            <ErrorState message={activityRangeError} />
+          ) : report?.ok ? (
+            <div className="mt-3">
+              <InstituteActivityTable
+                rows={report.model.rows}
+                sort={report.model.sort}
+                range={report.model.range}
+                basePath="/"
+                caption="Institute-wise activity, Open and Closed by type"
+              />
+            </div>
+          ) : (
+            <ErrorState message="We could not load the activity report just now. Please try again in a moment." />
+          )}
         </>
       ) : (
         <>

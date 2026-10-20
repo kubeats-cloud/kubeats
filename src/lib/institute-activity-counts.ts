@@ -5,6 +5,7 @@ import {
 import {
   isClosedStatus,
   isOpenStatus,
+  type InstituteType,
   type StatusCatalogue,
 } from "@/lib/validation/institute";
 import {
@@ -120,11 +121,31 @@ export interface CountableVisit extends ReconcilableVisit {
 export interface InstituteSeed {
   id: string;
   name: string;
+  /**
+   * R1's "institute details" columns, carried through only so the Rep
+   * Institute tab's single table can show them — A1's admin grid still reads
+   * only `id`/`name` off this same row and is unaffected by the extra fields.
+   *
+   * OPTIONAL HERE, defaulted in `buildInstituteActivityRows` below, so the
+   * pure-function unit tests that seed only `{id, name}` do not have to carry
+   * detail columns they never assert on. The real caller
+   * (`institute-activity-report.ts`) always supplies every one of them.
+   */
+  type?: InstituteType;
+  city?: string | null;
+  area?: string | null;
+  state?: string | null;
+  status?: string | null;
 }
 
 export interface InstituteActivityRow extends InstituteActivityCounts {
   id: string;
   name: string;
+  type: InstituteType;
+  city: string | null;
+  area: string | null;
+  state: string | null;
+  status: string | null;
 }
 
 const ZERO_OC = (): ActivityOpenClosed => ({ open: 0, closed: 0 });
@@ -227,6 +248,11 @@ export function buildInstituteActivityRows(input: {
     return {
       id: institute.id,
       name: institute.name,
+      type: institute.type ?? "school",
+      city: institute.city ?? null,
+      area: institute.area ?? null,
+      state: institute.state ?? null,
+      status: institute.status ?? null,
       byActivity,
       // Visit rows in the six buckets (reconcile's total). Open + Closed may
       // be smaller when a legacy visit has no status_set_to.
