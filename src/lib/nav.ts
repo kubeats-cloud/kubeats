@@ -122,8 +122,15 @@ export const TEAM_LEAD_NAV: NavItem[] = [
  * It lives here rather than in proxy.ts for the reason the two lists below
  * already do: this file is the single place every route-visibility question is
  * answered, so a screen cannot be public in one place and gated in another.
+ *
+ * `/forgot-password` and `/reset-password` (IQ6) join this list and
+ * deliberately NOT `AUTH_PATHS` below. The request form has no reason to bounce
+ * someone who happens to be signed in, and the reset page actively CANNOT be an
+ * auth path: the emailed link hands the browser a real (recovery) session the
+ * moment it lands, so if this were an auth path the proxy would bounce that
+ * same request to "/" before the new-password form ever rendered.
  */
-export const PUBLIC_PATHS = ["/login", "/privacy"] as const;
+export const PUBLIC_PATHS = ["/login", "/privacy", "/forgot-password", "/reset-password"] as const;
 
 /**
  * The subset of PUBLIC_PATHS a SIGNED-IN user is bounced off.

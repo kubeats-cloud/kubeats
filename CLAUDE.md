@@ -217,12 +217,28 @@ KUbeats is a private tool. Exactly three paths answer a stranger:
 **`/login`**, **`/privacy`**, and **`/.well-known/security.txt`**. Everything
 else redirects to `/login` for anyone without a session.
 
+**Two more joined this list for IQ6 (password reset by email), and neither
+weakens it.** `/forgot-password` and `/reset-password` are in `PUBLIC_PATHS`
+because the whole point of a reset flow is reaching it WITHOUT a session — a
+signed-out rep who forgot their password is exactly who needs it. Neither
+leaks anything a stranger could not already infer: the request form answers
+identically whether or not the email is registered (`requestPasswordReset()`
+in `auth-actions.ts`), and the reset page requires the actual emailed link's
+recovery session to do anything, which `updateAccountPassword()` checks before
+touching a password. The three-path count above is the STRANGER's surface, not
+the signed-out one — these two are reachable signed-out but have nothing to
+show a stranger who did not arrive holding a valid, single-use token.
+
 - **`PUBLIC_PATHS` and `AUTH_PATHS` in `src/lib/nav.ts` are two lists on
   purpose**, and collapsing them back into one is the mistake to avoid. Public
   means "reachable with no session"; auth means "and a signed-in user is
   bounced off it". `/login` is both. `/privacy` is only the first, because a rep
   who wants to know what is recorded about them must be able to read it while
-  logged in. The `nav.test.ts` suite asserts the containment and the asymmetry.
+  logged in. `/forgot-password` and `/reset-password` are the same shape as
+  `/privacy`: public but not an auth path, because the reset page's whole job
+  starts the instant the emailed link hands the browser a session — an auth
+  path would bounce that same request to "/" before the new-password form ever
+  rendered. The `nav.test.ts` suite asserts the containment and the asymmetry.
 - **`robots.ts` is a Route Handler, so `proxy.ts`'s matcher must exclude
   `robots.txt`** or the signed-out redirect hands a crawler the login page and
   the file might as well not exist. Same trap `manifest.webmanifest` already

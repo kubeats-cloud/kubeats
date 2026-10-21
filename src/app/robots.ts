@@ -21,8 +21,9 @@ import type { MetadataRoute } from "next";
  * bare link if something external points at it. For a public marketing site the
  * right answer would be to ALLOW crawling and rely on noindex alone. Here it is
  * not, because there is nothing to index: `proxy.ts` turns every path except
- * /login, /privacy and /.well-known/security.txt into a redirect for anyone
- * without a session, so a URL-only listing would expose a path and no content.
+ * /login, /privacy, /forgot-password, /reset-password and
+ * /.well-known/security.txt into a redirect for anyone without a session, so a
+ * URL-only listing would expose a path and no content.
  *
  * NEITHER OF THESE IS A SECURITY CONTROL. They are housekeeping. The boundary
  * is the auth gate in proxy.ts, the server-side check in the (app) layout, and

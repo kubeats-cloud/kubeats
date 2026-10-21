@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MIN_PASSWORD } from "@/lib/validation/admin";
 
 /**
  * Shared by the login form and the sign-in server action, so the client and the
@@ -14,6 +15,42 @@ export const loginSchema = z.object({
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
+
+/**
+ * Shared by the "Forgot password?" form and the server action that calls
+ * Supabase's `resetPasswordForEmail()`. Same email shape as `loginSchema` —
+ * this is still a sign-in surface, just asking for the address instead of the
+ * password.
+ */
+export const forgotPasswordSchema = z.object({
+  email: z.email().max(254),
+});
+
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+/**
+ * The new-password form at the end of the reset-link flow.
+ *
+ * Reuses `MIN_PASSWORD` from admin.ts rather than inventing a second policy —
+ * that constant is already the app's one answer to "how long must a password
+ * be", applied when an admin sets a rep's temporary one. The confirm-match
+ * check is the only rule this flow adds, since there is no existing form that
+ * asks for a password twice.
+ */
+export const resetPasswordSchema = z
+  .object({
+    password: z
+      .string()
+      .min(MIN_PASSWORD, `At least ${MIN_PASSWORD} characters.`)
+      .max(72, "That password is too long."),
+    confirmPassword: z.string(),
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Passwords do not match.",
+  });
+
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
 /**
  * Where the login screen is allowed to send someone afterwards.

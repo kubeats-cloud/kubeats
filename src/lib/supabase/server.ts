@@ -19,6 +19,21 @@ export async function createClient() {
 
   return createServerClient(NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, {
     cookieOptions: COOKIE_OPTIONS,
+    /*
+     * IQ6 (password reset) needs this, and nothing else in the app does.
+     * auth-js's PKCE storage is keyed per flow
+     * (`sb-<ref>-auth-token-flow-<flowId>-code-verifier`) with no reachable
+     * fallback for a SERVER-SIDE exchange — the "most recent verifier" fallback
+     * auth-js documents only resolves `window.location` itself, which does not
+     * exist here. `exchangeCodeForSession()` must be given the matching flowId
+     * explicitly, and this flag is what makes `resetPasswordForEmail()` put one
+     * on the redirect URL in the first place, as GoTrue's reserved `sb_flow_id`
+     * parameter — `requestPasswordReset()` / `exchangeRecoveryCode()` in
+     * auth-actions.ts are the two ends of this. Harmless for every other auth
+     * call this app makes: there is no OAuth sign-in and no email-confirmation
+     * signup here, which are the only other paths that read this flag.
+     */
+    auth: { experimental: { appendPkceFlowIdToRedirects: true } },
     cookies: {
       getAll() {
         return cookieStore.getAll();

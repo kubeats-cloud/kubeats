@@ -62,6 +62,17 @@ const nextConfig: NextConfig = {
    */
   images: { unoptimized: true },
 
+  /*
+   * DEV-ONLY. `next dev` refuses cross-origin requests to its own HMR/RSC
+   * machinery unless the origin is listed here; this has no effect on a
+   * production build. Needed to test IQ6 (password reset) locally, because
+   * the local Supabase project's `site_url` / `additional_redirect_urls`
+   * (supabase/config.toml) are `127.0.0.1:3000`, not `localhost:3000` — the
+   * emailed reset link's `redirect_to` has to match that, so testing the flow
+   * means browsing the app at 127.0.0.1, which this allow-lists.
+   */
+  allowedDevOrigins: ["127.0.0.1"],
+
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

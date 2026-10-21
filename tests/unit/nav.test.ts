@@ -332,9 +332,12 @@ describe("path guards", () => {
 });
 
 describe("the signed-out surface", () => {
-  it("lets a stranger reach only the login and privacy screens", () => {
+  it("lets a stranger reach the login, privacy and password-reset screens", () => {
     expect(isPublicPath("/login")).toBe(true);
     expect(isPublicPath("/privacy")).toBe(true);
+    // IQ6: reachable with no session, same as /privacy — see nav.ts.
+    expect(isPublicPath("/forgot-password")).toBe(true);
+    expect(isPublicPath("/reset-password")).toBe(true);
     // Everything else is behind the gate. /targets is named explicitly because
     // it is the screen that most recently changed shape.
     for (const path of ["/", "/targets", "/log", "/team", "/institutes", "/settings"]) {
@@ -342,12 +345,17 @@ describe("the signed-out surface", () => {
     }
   });
 
-  it("bounces a signed-in user off login but NOT off privacy", () => {
+  it("bounces a signed-in user off login but NOT off privacy or password-reset", () => {
     // THE WHOLE REASON THESE ARE TWO LISTS. A rep who wants to know what is
     // recorded about them must be able to read /privacy while signed in;
     // sending them to the dashboard would answer a fair question with a shrug.
     expect(isAuthPath("/login")).toBe(true);
     expect(isAuthPath("/privacy")).toBe(false);
+    // Same reason as /privacy, for a different one underneath: the reset link
+    // hands the browser a real session the instant it lands, so an auth path
+    // here would bounce that request to "/" before the form ever rendered.
+    expect(isAuthPath("/forgot-password")).toBe(false);
+    expect(isAuthPath("/reset-password")).toBe(false);
   });
 
   it("keeps every auth path inside the public set", () => {
