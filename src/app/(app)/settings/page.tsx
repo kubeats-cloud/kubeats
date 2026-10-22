@@ -16,6 +16,7 @@ import { listAdminFactorStates, viewerHasFactor } from "@/lib/mfa-admin";
 import { getLocationTree } from "@/lib/locations";
 import { settled } from "@/lib/errors";
 import { listCampuses } from "@/lib/campuses";
+import { listStatusFields } from "@/lib/status-fields";
 
 export const metadata = { title: "Settings" };
 
@@ -45,13 +46,14 @@ export default async function SettingsPage() {
    * panels. One unreachable list should empty its own card, not replace the
    * team, the shared lists, the locations and the security panel with an error.
    */
-  const [purposes, statuses, tree, members, campuses, enrolled] = await Promise.all([
+  const [purposes, statuses, tree, members, campuses, enrolled, statusFields] = await Promise.all([
     settled(listPurposeRows(), [], "settings:purposes"),
     settled(listStatusRows(), [], "settings:statuses"),
     settled(getLocationTree(), [], "settings:locations"),
     settled(listTeamMembers(), [], "settings:team"),
     settled(listCampuses(), [], "settings:campuses"),
     settled(viewerHasFactor(), false, "settings:viewer-factor"),
+    settled(listStatusFields(), [], "settings:status-fields"),
   ]);
 
   // Sequenced after `members` because it needs the admin rows. Only admins are
@@ -96,8 +98,8 @@ export default async function SettingsPage() {
         <LocationsPanel tree={tree} />
       </div>
 
-      <SectionTitle className="mt-8">Institute statuses</SectionTitle>
-      <StatusesPanel statuses={statuses} />
+      <SectionTitle className="mt-8">Status Management</SectionTitle>
+      <StatusesPanel statuses={statuses} fields={statusFields} />
 
       <SectionTitle className="mt-8">Storage</SectionTitle>
       <Card>

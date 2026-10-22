@@ -101,6 +101,7 @@ export interface VisitReport {
   follow_up_action: string | null;
   follow_up_date: string | null;
   employee_remarks: string | null;
+  custom_fields: Record<string, string> | null;
 
   /**
    * The one person the SHORT form recorded, between 0022 and change #17.
@@ -130,7 +131,7 @@ const REPORT_COLUMNS = `
   discussion_summary, visit_outcome, primary_outcome,
   applications_collected, admissions_generated,
   follow_up_action, follow_up_date, employee_remarks,
-  met_name, met_phone
+  met_name, met_phone, custom_fields
 `;
 
 /** One visit, with its institute, its people and its photo. RLS-scoped. */
@@ -228,6 +229,7 @@ export async function getVisitReport(visitId: string): Promise<VisitReport | nul
     employee_remarks: value("employee_remarks"),
     met_name: value("met_name"),
     met_phone: value("met_phone"),
+    custom_fields: value("custom_fields") ?? null,
   };
 }
 

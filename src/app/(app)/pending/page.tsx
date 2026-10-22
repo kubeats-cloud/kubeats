@@ -86,29 +86,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
     getOpenFollowUps(openStatuses, user.id),
     // An admin has no half-finished visits of their own: they do not log any.
     admin ? Promise.resolve([]) : getUnreportedVisits(user.id),
-    /*
-     * BOTH ROLES NEED THE PURPOSES, and this used to say otherwise — "only a
-     * rep can start a follow-up, so only a rep needs the purposes" — which was
-     * true of `startFollowUp()` and quietly wrong about stage 5b. An admin does
-     * not START a follow-up; they ASSIGN one, and `AssignFollowUp` renders the
-     * same purpose picker for the same reason `StartFollowUp` does: stage 3
-     * derives the visit's activity from `purpose_id`, so the purpose decides
-     * which weekly metric the rep's work lands in. Handed an empty list, the
-     * picker rendered with nothing in it and the Assign button stayed disabled
-     * for ever — the feature looked present and could not be completed.
-     */
     listPurposes(),
-    /*
-     * A4 — THE SAME SOURCE THE DASHBOARD READS.
-     *
-     * `follow_up_tasks`, asked the same question `DailyPlan` asks it. That is
-     * what makes a follow-up set at the end of a visit appear here AND on the
-     * plan with no write-sync between them: there is one row and two readers,
-     * rather than two rows that have to be kept in step.
-     *
-     * An admin gets none of their own — they do not log visits, so they owe no
-     * follow-ups. Their Pending stays the team's open institutes, read-only.
-     */
     admin
       ? Promise.resolve({ ok: true as const, tasks: [] })
       : listFollowUpTasks(user.id, todayISO()),

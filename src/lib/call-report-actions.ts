@@ -8,6 +8,7 @@ import { listStatusCatalogue } from "@/lib/statuses";
 import { makeReportSchema, feedbackFormDataToInput } from "@/lib/validation/feedback";
 import { eventDateRequired, followUpRequired, nextActionShown, visitFieldErrors } from "@/lib/validation/visit";
 import { selectableStatuses } from "@/lib/validation/institute";
+import { listStatusFields } from "@/lib/status-fields";
 import type { FormState } from "@/lib/visit-form-state";
 
 export async function submitCallReport(formData: FormData): Promise<FormState & { ok?: boolean }> {
@@ -34,6 +35,34 @@ export async function submitCallReport(formData: FormData): Promise<FormState & 
     return { error: "A closed status does not take a next action.", fieldErrors: {} };
   const report = makeReportSchema(catalogue,status).safeParse(feedbackFormDataToInput(formData));
   if (!report.success) return { error: "Check the call report fields.", fieldErrors: visitFieldErrors(report.error) };
+
+  // Parse dynamic fields
+  const customPayload = text("custom_fields_payload");
+  let customFields: Record<string, string> = {};
+  if (customPayload) {
+    try {
+      customFields = JSON.parse(customPayload);
+    } catch {}
+  }
+  for (const [key, val] of formData.entries()) {
+    if (key.startsWith("custom_field_")) {
+      const fieldName = key.replace("custom_field_", "");
+      customFields[fieldName] = String(val).trim();
+    }
+  }
+
+  // Validate required status fields
+  const dynamicFields = await listStatusFields(status);
+  const dynamicErrors: Record<string, string> = {};
+  for (const df of dynamicFields) {
+    if (df.isRequired && (!customFields[df.fieldName] || customFields[df.fieldName].trim() === "")) {
+      dynamicErrors[df.fieldName] = `${df.fieldName} is required.`;
+    }
+  }
+  if (Object.keys(dynamicErrors).length > 0) {
+    return { error: "Please fill in all required fields.", fieldErrors: dynamicErrors };
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.rpc("log_call", {
     p_task_id:value.task, p_status_set_to:status, p_expected_date:value.expected,
@@ -42,6 +71,11 @@ export async function submitCallReport(formData: FormData): Promise<FormState & 
     p_session_taken_by:report.data.session_taken_by, p_next_action:value.next,
   });
   if (error) return {error:"We could not save this call. Check that it is still yours and has not already been logged.",fieldErrors:{}};
+
+  if (Object.keys(customFields).length > 0) {
+    await supabase.from("follow_up_tasks").update({ custom_fields: customFields }).eq("id", value.task);
+  }
+
   revalidatePath("/", "layout");
   return {error:null,fieldErrors:{},ok:true};
 }

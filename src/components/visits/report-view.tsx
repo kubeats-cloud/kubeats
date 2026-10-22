@@ -211,6 +211,11 @@ export function ReportView({ report }: { report: VisitReport }) {
                 ? `${report.follow_up_action}${report.follow_up_date ? ` by ${formatDate(report.follow_up_date)}` : ""}`
                 : null,
             )}
+            {report.custom_fields &&
+              typeof report.custom_fields === "object" &&
+              Object.entries(report.custom_fields).map(([label, value]) =>
+                row(label, String(value)),
+              )}
           </dl>
         </CardContent>
       </Card>

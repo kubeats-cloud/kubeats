@@ -20,6 +20,7 @@ import {
 import { checkoutFixFromFormData } from "@/lib/validation/checkin";
 import { isClosedStatus } from "@/lib/validation/institute";
 import { listStatusCatalogue } from "@/lib/statuses";
+import { listStatusFields } from "@/lib/status-fields";
 
 /**
  * Filing the short feedback form — which is also the check-out.
@@ -320,6 +321,38 @@ export async function logAndFileVisit(
     feedbackFormDataToInput(formData),
   );
 
+  // Parse dynamic fields
+  const customPayload = String(formData.get("custom_fields_payload") ?? "").trim();
+  let customFields: Record<string, string> = {};
+  if (customPayload) {
+    try {
+      customFields = JSON.parse(customPayload);
+    } catch {}
+  }
+  for (const [key, val] of formData.entries()) {
+    if (key.startsWith("custom_field_")) {
+      const fieldName = key.replace("custom_field_", "");
+      customFields[fieldName] = String(val).trim();
+    }
+  }
+
+  // Validate required dynamic fields
+  if (chosenStatus) {
+    const dynamicFields = await listStatusFields(chosenStatus);
+    const dynamicErrors: Record<string, string> = {};
+    for (const df of dynamicFields) {
+      if (df.isRequired && (!customFields[df.fieldName] || customFields[df.fieldName].trim() === "")) {
+        dynamicErrors[df.fieldName] = `${df.fieldName} is required.`;
+      }
+    }
+    if (Object.keys(dynamicErrors).length > 0) {
+      return {
+        error: "Please fill in all required fields.",
+        fieldErrors: dynamicErrors,
+      };
+    }
+  }
+
   // Both, so a rep fixes everything in one pass rather than discovering the
   // second problem after correcting the first.
   if (!visitParsed.success || !feedbackParsed.success) {
@@ -435,6 +468,10 @@ export async function logAndFileVisit(
         " Your visit was saved. Open it again from the Dashboard to finish.",
       fieldErrors: {},
     };
+  }
+
+  if (newVisitId && Object.keys(customFields).length > 0) {
+    await supabase.from("visits").update({ custom_fields: customFields }).eq("id", newVisitId);
   }
 
   revalidatePath("/");

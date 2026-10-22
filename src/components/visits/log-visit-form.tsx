@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/select";
 import { CaptureFields } from "@/components/visits/capture-fields";
 import { FeedbackFields } from "@/components/visits/feedback-fields";
+import { DynamicStatusFields } from "@/components/visits/dynamic-status-fields";
+import type { StatusField } from "@/lib/status-fields";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
 import {
   EMPTY_FEEDBACK,
@@ -129,6 +131,7 @@ export function LogVisitForm({
   plan,
   openLoops,
   catalogue,
+  statusFields = [],
 }: {
   userId: string;
   /** The checked-in plan entry this visit belongs to. */
@@ -142,7 +145,9 @@ export function LogVisitForm({
    * which a constant in the bundle could not know about.
    */
   catalogue: StatusCatalogue;
+  statusFields?: StatusField[];
 }) {
+  const [customFields, setCustomFields] = useState<Record<string, string>>({});
   const [serverState, formAction, isPending] = useActionState(
     logAndFileVisit,
     EMPTY_STATE,
@@ -533,6 +538,15 @@ export function LogVisitForm({
         */}
         {status && (
           <>
+            <DynamicStatusFields
+              status={status}
+              fields={statusFields ?? []}
+              values={customFields}
+              onChange={(name, val) =>
+                setCustomFields((curr) => ({ ...curr, [name]: val }))
+              }
+              fieldErrors={fieldErrors}
+            />
             {needsFollowUp && (
               <div className="space-y-2 sm:max-w-xs">
                 <Label htmlFor="follow-up-date">

@@ -9,10 +9,11 @@ export interface CallReport {
   status_set_to:string|null; expected_date:string|null; follow_up_date:string|null;
   students_attended:number|null; session_topic:string|null; session_taken_by:string|null;
   call_notes:string|null; next_action:string|null; note:string|null; due_date:string;
+  custom_fields?: Record<string, string> | null;
   profiles:{name:string|null}|null; institutes:{name:string;status:string|null}|null;
 }
 
-const columns = "id, member, institute_id, reported_at, status_set_to, expected_date, follow_up_date, students_attended, session_topic, session_taken_by, call_notes, next_action, note, due_date, profiles!follow_up_tasks_member_fkey(name), institutes!inner(name,status)";
+const columns = "id, member, institute_id, reported_at, status_set_to, expected_date, follow_up_date, students_attended, session_topic, session_taken_by, call_notes, next_action, note, due_date, custom_fields, profiles!follow_up_tasks_member_fkey(name), institutes!inner(name,status)";
 
 export async function listCallReports(filters: VisitFilters = {}): Promise<CallReport[]> {
   if (filters.activity || filters.reported === "unreported" || filters.lifecycle || filters.visitStatus === "__none__") return [];

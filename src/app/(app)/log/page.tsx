@@ -16,6 +16,7 @@ import {
 import { visitStatusOf } from "@/lib/validation/checkin";
 import { notesRequired, plannedActivityIsValid } from "@/lib/validation/visit";
 import { listStatusCatalogue } from "@/lib/statuses";
+import { listStatusFields } from "@/lib/status-fields";
 import { statusRow } from "@/lib/validation/institute";
 import { todayISO } from "@/lib/dates";
 
@@ -52,9 +53,10 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
   // The status vocabulary. Needed by BOTH branches below: the full form offers
   // it, and the recovery form reads the already-recorded status off it to know
   // which extra questions that status turns on.
-  const [plan, catalogue] = await Promise.all([
+  const [plan, catalogue, statusFields] = await Promise.all([
     getTodayPlan(user.id),
     listStatusCatalogue(),
+    listStatusFields(),
   ]);
   const entries = plan.ok ? plan.entries : [];
 
@@ -221,6 +223,7 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
         plan={entry}
         openLoops={openLoops}
         catalogue={catalogue}
+        statusFields={statusFields}
       />
     </PageColumn>
   );

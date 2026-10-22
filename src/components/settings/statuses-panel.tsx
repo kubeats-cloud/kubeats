@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
 import { addStatus, setStatusActive } from "@/lib/admin-actions";
+import { addStatusField, deleteStatusField } from "@/lib/status-field-actions";
+import type { StatusField } from "@/lib/status-fields";
 import { EMPTY_ADMIN_STATE, type AdminState } from "@/lib/admin-form-state";
 import { fieldErrorsFrom, statusSchema } from "@/lib/validation/admin";
 import {
@@ -53,7 +55,13 @@ import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
  * no DELETE at all — not even for a status nothing has used. Retiring takes it
  * out of the rep's picker and leaves every existing visit readable.
  */
-export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
+export function StatusesPanel({
+  statuses,
+  fields = [],
+}: {
+  statuses: StatusAdminRow[];
+  fields?: StatusField[];
+}) {
   const [serverState, formAction, isPending] = useActionState(
     addStatus,
     EMPTY_ADMIN_STATE,
@@ -66,6 +74,23 @@ export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
   const [asksSession, setAsksSession] = useState(false);
   const [asksCount, setAsksCount] = useState(false);
   const [retiring, startRetiring] = useTransition();
+  const [fieldMessage, setFieldMessage] = useState<{ error?: string | null; ok?: boolean } | null>(null);
+
+  async function handleAddField(event: React.FormEvent<HTMLFormElement>, statusName: string) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    formData.set("status", statusName);
+    const result = await addStatusField(formData);
+    setFieldMessage(result);
+    if (result.ok) {
+      event.currentTarget.reset();
+    }
+  }
+
+  async function handleDeleteField(fieldId: string) {
+    const result = await deleteStatusField(fieldId);
+    setFieldMessage(result);
+  }
   /*
    * WHAT RETIRE AND RESTORE SAID, WHICH USED TO BE NOTHING AT ALL.
    *
@@ -196,9 +221,107 @@ export function StatusesPanel({ statuses }: { statuses: StatusAdminRow[] }) {
                     </>
                   )}
                 </Button>
+
+                {/* Status-specific dynamic fields */}
+                {(() => {
+                  const statusFields = fields.filter((f) => f.status === row.status);
+                  return (
+                    <div className="mt-3 space-y-2 border-t pt-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-foreground">Status-specific dynamic fields</span>
+                        <span className="text-muted-foreground">{statusFields.length} configured</span>
+                      </div>
+                      {statusFields.length > 0 ? (
+                        <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
+                          {statusFields.map((field) => (
+                            <div
+                              key={field.id}
+                              className="flex items-center justify-between gap-2 border-b border-border/50 pb-1 last:border-0 last:pb-0"
+                            >
+                              <div className="space-x-1.5">
+                                <span className="font-medium text-foreground">{field.fieldName}</span>
+                                <span className="text-muted-foreground">
+                                  (Dropdown: {field.options.join(", ")})
+                                </span>
+                                {field.isRequired && (
+                                  <Badge variant="danger" className="text-[10px] px-1 py-0">
+                                    Required
+                                  </Badge>
+                                )}
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-1.5 text-danger hover:text-danger text-xs"
+                                onClick={() => handleDeleteField(field.id)}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground italic">No status-specific fields configured yet.</p>
+                      )}
+
+                      {row.isActive && (
+                        <details className="pt-1">
+                          <summary className="cursor-pointer font-medium text-primary hover:underline">
+                            + Add dynamic dropdown field
+                          </summary>
+                          <form
+                            onSubmit={(e) => handleAddField(e, row.status)}
+                            className="mt-2 space-y-2.5 rounded-md border p-2.5 bg-background"
+                          >
+                            <div className="space-y-1">
+                              <Label className="text-xs">Field Name</Label>
+                              <Input
+                                name="field_name"
+                                placeholder="e.g. Outcome"
+                                className="h-8 text-xs"
+                                required
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">
+                                Dropdown Options (comma or newline separated)
+                              </Label>
+                              <Input
+                                name="options"
+                                placeholder="e.g. Positive, Follow-up Needed, Rejected"
+                                className="h-8 text-xs"
+                                required
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Checkbox id={`req-${row.status}`} name="is_required" />
+                              <Label htmlFor={`req-${row.status}`} className="text-xs cursor-pointer">
+                                Mark as required field
+                              </Label>
+                            </div>
+                            <Button type="submit" size="sm" className="h-7 text-xs">
+                              Save dynamic field
+                            </Button>
+                          </form>
+                        </details>
+                      )}
+                    </div>
+                  );
+                })()}
               </li>
             ))}
           </ul>
+        )}
+
+        {fieldMessage?.error && <FormNotice message={fieldMessage.error} />}
+        {fieldMessage?.ok && (
+          <p
+            role="status"
+            className="bg-success-subtle text-success-subtle-foreground rounded-md px-3 py-2 text-sm"
+          >
+            Dynamic field saved successfully.
+          </p>
         )}
 
         {/* Retire and restore answer here rather than inside a row: the list is

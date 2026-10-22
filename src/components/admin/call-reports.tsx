@@ -25,6 +25,9 @@ export function CallReportDetails({report}:{report:CallReport}){
     ["Number of Students",report.students_attended],["Topic Title",report.session_topic],
     ["Taken By",report.session_taken_by],["Next Action",report.next_action === "call" ? "Call" : report.next_action === "meeting" ? "Meeting" : null],
     ["Notes",report.call_notes],
+    ...(report.custom_fields && typeof report.custom_fields === "object"
+      ? Object.entries(report.custom_fields).map(([k, v]) => [k, String(v)] as [string, string])
+      : []),
   ];
   return <Card className="p-5"><dl className="space-y-4">{entries.filter(([,v])=>v!==null).map(([label,value])=>
     <div key={label}><dt className="text-muted-foreground text-xs">{label}</dt><dd className="whitespace-pre-wrap text-sm">{value}</dd></div>

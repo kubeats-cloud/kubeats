@@ -17,6 +17,8 @@ import {
   NextActionFields,
   type NextActionValue,
 } from "@/components/visits/next-action-fields";
+import { DynamicStatusFields } from "@/components/visits/dynamic-status-fields";
+import type { StatusField } from "@/lib/status-fields";
 import { RequiredMark } from "@/components/required-mark";
 import {
   applyFeedbackPatch,
@@ -60,6 +62,7 @@ export type StatusOutcomeValue = {
   followUpDate: string;
   nextAction: NextActionValue;
   feedback: FeedbackState;
+  customFields?: Record<string, string>;
 };
 
 const EMPTY_NEXT: NextActionValue = { kind: "", due: "", note: "" };
@@ -72,6 +75,7 @@ export type StatusOutcomePatcher = (
 
 export function StatusOutcomeFields({
   catalogue,
+  statusFields = [],
   value,
   onChange,
   fieldErrors,
@@ -79,6 +83,7 @@ export function StatusOutcomeFields({
   showNextAction,
 }: {
   catalogue: StatusCatalogue;
+  statusFields?: StatusField[];
   value: StatusOutcomeValue;
   onChange: StatusOutcomePatcher;
   fieldErrors: Record<string, string>;
@@ -139,6 +144,20 @@ export function StatusOutcomeFields({
 
       {status && (
         <>
+          <DynamicStatusFields
+            status={status}
+            fields={statusFields}
+            values={value.customFields ?? {}}
+            onChange={(name, val) =>
+              onChange((current) => ({
+                customFields: {
+                  ...(current.customFields ?? {}),
+                  [name]: val,
+                },
+              }))
+            }
+            fieldErrors={fieldErrors}
+          />
           {needsFollowUp && (
             <div className="space-y-2 sm:max-w-xs">
               <Label htmlFor="follow-up-date">

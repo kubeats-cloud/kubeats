@@ -123,5 +123,20 @@
     "item": "R3",
     "caption": "Follow-up calls rendered in Daily Plan without duplicate entries",
     "file": "R3-auto-calls.png"
+  },
+  {
+    "item": "A9",
+    "caption": "Settings Status Management: Admin configures dynamic dropdown fields and required flags",
+    "file": "A9-status-management.png"
+  },
+  {
+    "item": "A9",
+    "caption": "Dynamic dropdown fields and options render when status is selected in forms",
+    "file": "A9-dynamic-form.png"
+  },
+  {
+    "item": "A9",
+    "caption": "Submitted dynamic fields persist and display in Review and reports",
+    "file": "A9-review-report.png"
   }
 ]
