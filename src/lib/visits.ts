@@ -41,6 +41,7 @@ export async function listInstitutesForPicker(): Promise<PickerInstitute[]> {
   const { data, error } = await supabase
     .from("institutes")
     .select("id, name, city, status, registered_by")
+    .is("deleted_at", null)
     .order("name");
 
   if (error) {
@@ -400,6 +401,7 @@ export async function getOpenFollowUps(
   const { data: institutes, error } = await supabase
     .from("institutes")
     .select("id, name, city, status, registered_by")
+    .is("deleted_at", null)
     .in("status", openStatuses)
     .order("name");
 

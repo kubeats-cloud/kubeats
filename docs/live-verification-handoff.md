@@ -84,3 +84,10 @@ Added Role (Rep / Team Lead) inside the existing Name/Campus Edit dialog; no sep
 Live Chromium saved Rep to Team Lead and back, verified profile values, dashboard/nav changes and restricted Settings/Log Visit access. A Rep calling the RPC directly received 42501. Compared every existing ID in institutes, visits, plans, tasks and status history before/after. DOWN was executed and checked in a rolled-back local transaction. Typecheck and 81 Settings tests passed after updating obsolete no-role-edit expectations.
 PDF pages 11-14. No remote application or push.
 
+
+## Completed: IQ1 soft-delete institute
+Admin institute details now has Delete with confirmation and Cancel. Migration 0049 adds deleted_at plus an Admin-only RPC; cancels open tasks/unstarted plans without removing rows; refuses deletion during an active visit; rejects new work for deleted institutes. Registry/pickers/Pending omit deleted institutes. Direct institute history and full reports remain readable; no RLS visibility was widened.
+Live confirmation Cancel kept the institute active; confirmed Delete hid it from Admin and Rep active lists. Full saved report and visit/status history remained readable. Checked all pre-existing IDs across five history tables. Rep RPC and direct deletion-column update refused; new plan insertion refused. DOWN executed/checked in a rolled-back local transaction, retaining deletion history. Typecheck passed.
+Also exercised IQ3 existing reassignment from Alice to Bob and back through the live control, checking saved owner IDs. Full cross-account visibility transfer still requires a dedicated assertion.
+PDF pages 15-18. No remote changes.
+

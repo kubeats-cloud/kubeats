@@ -7,6 +7,7 @@ import { signVisitPhotos, type VisitPhoto } from "@/lib/photos";
 import type { InstituteType } from "@/lib/validation/institute";
 
 export interface Institute {
+  deleted_at?: string | null;
   id: string;
   name: string;
   type: InstituteType;
@@ -66,7 +67,7 @@ export interface Institute {
 }
 
 const COLUMNS = `
-  id, name, type, pincode, address, area, city, state, boards,
+  id, name, type, pincode, address, area, city, state, boards, deleted_at,
   principal_name, principal_mobile,
   decision_maker_name, decision_maker_designation, decision_maker_mobile,
   class11, class12, status, status_updated_at, created_at,
@@ -122,6 +123,7 @@ export async function listInstitutes(
   let query = supabase
     .from("institutes")
     .select(COLUMNS)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
 
   /*

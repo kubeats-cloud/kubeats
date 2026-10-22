@@ -41,6 +41,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { listRepsForCampus } from "@/lib/admin";
 import { ReassignOwner } from "@/components/institutes/reassign-owner";
+import { DeleteInstitute } from "@/components/institutes/delete-institute";
 import { class12Total, STREAMS, TYPE_LABELS } from "@/lib/validation/institute";
 import { cn } from "@/lib/utils";
 
@@ -147,7 +148,7 @@ export default async function InstituteDetailPage(
     isAdmin: admin,
     viewerId: user?.id ?? null,
   });
-  const canEdit = editRefusal === null;
+  const canEdit = editRefusal === null && !institute.deleted_at;
   const counsellors = counsellorList.ok ? counsellorList.counsellors : [];
 
   const visits = history.ok ? history.visits : [];
@@ -204,6 +205,7 @@ export default async function InstituteDetailPage(
           .join(", ")}
         action={
           <div className="flex items-center gap-1">
+            {admin && !institute.deleted_at && <DeleteInstitute id={institute.id} name={institute.name} />}
             {/*
               B1: an admin always, and the owning rep while they still have
               their one correction. The decision comes from the SAME helper the

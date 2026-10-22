@@ -68,5 +68,25 @@
     "item": "A7",
     "caption": "Team Lead demoted back to Rep; original records retained",
     "file": "A7-demote-saved.png"
+  },
+  {
+    "item": "IQ1",
+    "caption": "Admin Delete confirmation; Cancel leaves the institute active",
+    "file": "IQ1-confirmation.png"
+  },
+  {
+    "item": "IQ1",
+    "caption": "Confirmed soft delete removes institute from active list",
+    "file": "IQ1-active-list.png"
+  },
+  {
+    "item": "IQ1",
+    "caption": "Deleted institute remains accessible with saved visit history",
+    "file": "IQ1-history.png"
+  },
+  {
+    "item": "IQ1",
+    "caption": "Full saved report is still readable after institute soft deletion",
+    "file": "IQ1-report.png"
   }
 ]
