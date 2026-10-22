@@ -53,8 +53,6 @@ describe("the flag is one switch, and it hides screens only", () => {
   it("is the only flag the Phase A surfaces consult", () => {
     for (const path of [
       "src/components/dashboard/daily-plan.tsx",
-      "src/components/visits/log-visit-form.tsx",
-      "src/components/visits/feedback-only-form.tsx",
       "src/app/(app)/page.tsx",
     ]) {
       expect(read(path), path).toContain("PHASE_A_DAILY_PLAN");
@@ -155,9 +153,9 @@ describe("a visit still saves with the field gone", () => {
    * Log Visit borrows the one follow-up date already on its own screen
    * instead of NextActionFields asking a second time.
    */
-  it("keeps next_action and follow_up_note inside the component the flag hides", () => {
+  it("keeps next-action inputs inside the status-driven component", () => {
     const fields = read("src/components/visits/next-action-fields.tsx");
-    for (const name of ["next_action", "follow_up_note"]) {
+    for (const name of ["next_action", "follow_up_due"]) {
       expect(fields).toContain(`name="${name}"`);
     }
     for (const path of [

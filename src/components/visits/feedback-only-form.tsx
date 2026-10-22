@@ -3,7 +3,6 @@
 import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FeedbackFields } from "@/components/visits/feedback-fields";
-import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import {
   NextActionFields,
   type NextActionValue,
@@ -142,18 +141,7 @@ export function FeedbackOnlyForm({
         fieldErrors={state.fieldErrors}
         openLoops={openLoops}
       />
-
-      {/*
-        ⚠ Behind PHASE_A_DAILY_PLAN, with Log Visit's copy.
-
-        THE SAME FIELD ON THE OTHER PATH, and leaving one up would be worse than
-        either choice: this is the form a rep reaches when a visit was logged
-        but its report did not go through, so a "Next action" here and none on
-        the ordinary form would mean the question appeared only after a failure.
-        `submitFeedback()` passes null for the pair when it is absent, exactly
-        as it already did for every question the closing report has retired.
-      */}
-      {PHASE_A_DAILY_PLAN && nextActionShown(catalogue, statusSetTo) && (
+      {nextActionShown(catalogue, statusSetTo) && (
         <NextActionFields
           value={nextAction}
           onChange={(patch) => setNextAction((prev) => ({ ...prev, ...patch }))}

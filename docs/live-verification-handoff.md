@@ -65,3 +65,10 @@ Evidence PDF: output/pdf/kubeats_feature_evidence.pdf (A5: pages 1-2; A4: pages 
 ## Completed: A1 label correction
 The existing institute report and its Excel now share the exact names Meetings, Sessions, Campus Visits, Olympiad Registrations, Applications, Admissions. No columns/routes/buttons added. Chromium downloaded the 20 October filtered workbook; XML parsing verified every data cell against the rendered table and checked all headings. Evidence PDF page 6. No schema change.
 
+
+## Completed: R5 Open Next Action correction; IQ5 live verification
+Log Visit and recovery forms show exact Next Action / Call / Meeting for Open statuses and hide it for Closed statuses. Reused the existing Follow-up Date; removed the formerly hidden extra Due/note controls instead of adding unrequested fields. The global Phase A flag remains off.
+Chromium captured a synthetic camera frame, uploaded it, saved an Open report with Call and verified its saved task. A second captured visit was saved as Not Interested; all task IDs and the prior visit remained, tasks were cancelled, and active Owned list excluded the school. No schema changes. Evidence PDF pages 7-9.
+Existing cancellation SQL still deletes future unstarted plan rows (0046); this preservation issue needs an additive cancellation mechanism before R5 can be claimed fully compliant with the all-records constraint. The tested fixture had no such future plan rows.
+Full test run: 1489 passed, 6 skipped, 2 stale flag tests failed; updated those obsolete expectations for the required status-driven visibility. Focused rerun and typecheck passed.
+

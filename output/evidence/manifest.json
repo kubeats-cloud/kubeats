@@ -28,5 +28,20 @@
     "item": "A1",
     "caption": "Exact activity names; date-filtered Excel matches every displayed cell",
     "file": "A1-exact-labels.png"
+  },
+  {
+    "item": "R5 / IQ5",
+    "caption": "Open status offers Call and Meeting",
+    "file": "R5-open.png"
+  },
+  {
+    "item": "R5 / IQ5",
+    "caption": "Not Interested hides Next Action",
+    "file": "R5-not-interested.png"
+  },
+  {
+    "item": "R5 / IQ5",
+    "caption": "Saved Not Interested removes follow-ups from active list; records retained",
+    "file": "R5-cancelled.png"
   }
 ]
