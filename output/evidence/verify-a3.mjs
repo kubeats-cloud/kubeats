@@ -55,7 +55,7 @@ const lead=await browser.newPage({storageState:'output/evidence/Audit-Lead-sessi
 await lead.goto(`http://127.0.0.1:3000/review/${task.id}?kind=call`);
 await lead.getByRole('heading',{name:/not found/i}).waitFor();
 assert.equal(await lead.getByText('Synthetic full call report',{exact:false}).count(),0);
-const down=fs.readFileSync('supabase/rollbacks/0050_saved_call_reports_down.sql','utf8').replace(/^begin;$/m,'').replace(/^commit;$/m,'');
+const down=fs.readFileSync('supabase/rollbacks/0052_saved_call_reports_down.sql','utf8').replace(/^begin;$/m,'').replace(/^commit;$/m,'');
 const sql=`begin;${down} do $$ begin if to_regprocedure('public.log_call(uuid,text,date,date,text,integer,text,text,text,text)') is not null then raise exception 'DOWN failed'; end if; if not exists(select 1 from follow_up_tasks where id='${task.id}' and reported_at is not null) then raise exception 'DOWN lost report'; end if; end $$;rollback;`;
 const result=spawnSync('docker',['exec','-i','supabase_db_free_lance','psql','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1'],{input:sql,encoding:'utf8'});assert.equal(result.status,0,result.stderr);
 await browser.close();

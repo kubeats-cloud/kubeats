@@ -69,3 +69,7 @@ supabase/.temp/
 # Destructive client-data flush. NEVER COMMIT.
 # Destructive data flush for a client project. Never commit.
 flush-client.sql
+
+# Isolated reconciliation runtime, credentials and transient checks.
+/.local-reconcile/
+/supabase/config.toml

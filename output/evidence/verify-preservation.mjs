@@ -22,7 +22,7 @@ assert(after.find(p=>p.id===plan.id)?.cancelled_at);
 const {error}=await db.from('daily_plans').update({checkin_at:new Date().toISOString(),checkin_lat:23.03,checkin_lng:72.58}).eq('id',todayPlan.id);
 assert.equal(error?.code,'23514');
 // Test DOWN inside a transaction and roll it back; no existing data is altered.
-const down=fs.readFileSync('supabase/rollbacks/0047_preserve_cancelled_plans_down.sql','utf8').replace(/^begin;$/m,'').replace(/^commit;$/m,'');
+const down=fs.readFileSync('supabase/rollbacks/0049_preserve_cancelled_plans_down.sql','utf8').replace(/^begin;$/m,'').replace(/^commit;$/m,'');
 const test=`begin; ${down}\ndo $$ begin if exists(select 1 from pg_trigger where tgname='daily_plans_guard_cancelled') then raise exception 'DOWN failed'; end if; if not exists(select 1 from public.daily_plans where id='${plan.id}' and cancelled_at is not null) then raise exception 'DOWN lost history'; end if; end $$; rollback;`;
 const result=spawnSync('docker',['exec','-i','supabase_db_free_lance','psql','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1'],{input:test,encoding:'utf8'});
 assert.equal(result.status,0,result.stderr);

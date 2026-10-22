@@ -129,7 +129,7 @@ const uniqueTaskIds = new Set(taskIdsLinked);
 assert.equal(uniqueTaskIds.size, taskIdsLinked.length, 'No duplicate follow-up plans');
 
 // 7. Verify DOWN script execution in a rolled-back transaction
-const down = fs.readFileSync('supabase/rollbacks/0051_automatic_follow_up_plan_down.sql', 'utf8')
+const down = fs.readFileSync('supabase/rollbacks/0053_automatic_follow_up_plan_down.sql', 'utf8')
   .replace(/^begin;$/m, '')
   .replace(/^commit;$/m, '');
 const sql = `begin;${down} do $$ begin if to_regprocedure('public.materialise_due_followups()') is not null then raise exception 'DOWN failed'; end if; end $$;rollback;`;

@@ -1,5 +1,5 @@
 -- =============================================================================
--- KUbeats - migration 0045: target statuses, a vocabulary of their own
+-- KUbeats - migration 0047: target statuses, a vocabulary of their own
 --
 -- ✅ ADDITIVE AND STANDALONE. SAFE TO APPLY AT ANY TIME BEFORE THE CODE SHIPS.
 --
@@ -164,9 +164,9 @@ begin
   end if;
 
   if array_length(problems, 1) > 0 then
-    raise exception '0045 did not apply cleanly: %', array_to_string(problems, '; ');
+    raise exception '0047 did not apply cleanly: %', array_to_string(problems, '; ');
   end if;
 
   raise notice
-    '0045 applied: target_statuses is live, % policies, select-open and admin-insert-only.', n;
+    '0047 applied: target_statuses is live, % policies, select-open and admin-insert-only.', n;
 end $$;

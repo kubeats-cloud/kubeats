@@ -55,7 +55,7 @@ for(const [table,prior] of Object.entries(baseline)){
  const rows=ck(await db.from(table).select('id')).map(x=>x.id);
  assert(prior.every(id=>rows.includes(id)),table+' history lost');
 }
-const down=fs.readFileSync('supabase/rollbacks/0048_edit_member_role_down.sql','utf8').replace(/^begin;$/m,'').replace(/^commit;$/m,'');
+const down=fs.readFileSync('supabase/rollbacks/0050_edit_member_role_down.sql','utf8').replace(/^begin;$/m,'').replace(/^commit;$/m,'');
 const test=`begin; ${down}\ndo $$ begin if to_regprocedure('public.edit_team_member(uuid,text,text,uuid,boolean)') is not null then raise exception 'DOWN failed'; end if; end $$; rollback;`;
 const result=spawnSync('docker',['exec','-i','supabase_db_free_lance','psql','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1'],{input:test,encoding:'utf8'});
 assert.equal(result.status,0,result.stderr);

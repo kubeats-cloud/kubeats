@@ -1,4 +1,4 @@
--- KUbeats migration 0052: Status Management with status-specific dynamic fields
+-- KUbeats migration 0054: Status Management with status-specific dynamic fields
 begin;
 
 create table if not exists public.status_fields (
@@ -33,4 +33,5 @@ do $$ begin
   end if;
 end $$;
 
+grant select, insert, update, delete on public.status_fields to authenticated;
 commit;

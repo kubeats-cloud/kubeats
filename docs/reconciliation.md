@@ -61,3 +61,20 @@ rollback. No production database operation, push or deployment is authorized.
 
 Phase 1 complete. Replay, fresh-local migration checks, combined runtime verification,
 full tests and build are pending. No reconciled feature is claimed verified yet.
+
+## Phase 2 checkpoint
+
+Replayed source feature commits with original commit provenance in Git history.
+IQ6 was already present on production and was not duplicated. Historical audit-only
+commits were not required to replay behavior. Combined compact Field presence with
+R7 rather than dropping the production preview. Settings preview/search and Role
+editing auto-merged. Team Leads Assign, slab amount/queue/screen, notification bell,
+weekly nudge and Total Institutes remain. Production call entry route is retained;
+its form now uses the corrected saved-call action and dynamic field configuration.
+
+All eight source migrations and DOWN filenames have been renumbered 0047-0054.
+Production 0045/0046 are byte-for-byte unchanged. Saved-call DOWN restores the
+production RPC. Target-status and A9 DOWNs now retain data and revoke configuration
+writes rather than deleting saved configuration or report payloads. These adjusted
+DOWNs still require fresh-local execution. Typecheck passes; full test run has
+failures under investigation. No combined runtime verification has yet passed.

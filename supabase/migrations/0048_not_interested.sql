@@ -1,5 +1,5 @@
 -- =============================================================================
--- KUbeats - migration 0046: Not Interested, and no follow-up on a closed status
+-- KUbeats - migration 0048: Not Interested, and no follow-up on a closed status
 --
 -- ADDITIVE for existing rows. SAFE TO APPLY BEFORE THE CODE SHIPS.
 -- The new status is simply not offered until the app that knows its name
@@ -85,7 +85,7 @@ begin
    where institute_interested = false;
 
   raise notice
-    '0046 historical Not interested left as history: visit_outcome=%, management_response=%, institute_interested=false=%',
+    '0048 historical Not interested left as history: visit_outcome=%, management_response=%, institute_interested=false=%',
     n_outcome, n_response, n_flag;
 end $$;
 
@@ -115,7 +115,7 @@ on conflict (status) do update
       cancels_follow_ups = true;
 
 comment on table public.institute_statuses is
-  'Rule 4''s statuses and their open/closed category. Not Interested (0046) '
+  'Rule 4''s statuses and their open/closed category. Not Interested (0048) '
   'is the built-in closed status that cancels upcoming follow-ups.';
 
 
@@ -388,7 +388,7 @@ begin
          daily_plan_id        = coalesce(p_daily_plan_id, daily_plan_id),
          -- 0039: what the rep said they would do next, recorded on the visit so
          -- the report reads as it was filed. The TASK below is what is acted on.
-         -- 0046: a closed status records no next action. Null status
+         -- 0048: a closed status records no next action. Null status
          -- (a visit from before a status was required) keeps what was sent.
          next_action          = case
                                   when public.institute_status_is_open(v_visit.status_set_to) is false
@@ -444,7 +444,7 @@ begin
    * not own even from here, and the refusal rolls the whole report back rather
    * than filing a report with a dead-end task attached.
    */
-  -- 0046: a closed status creates no follow-up. Skipping, rather than
+  -- 0048: a closed status creates no follow-up. Skipping, rather than
   -- letting the insert raise FO038, keeps the report saveable: the visit
   -- is already logged, and a closed loop is finished. A direct insert into
   -- follow_up_tasks is still refused by enforce_no_follow_up_when_closed.
@@ -513,7 +513,7 @@ comment on function public.close_visit(
 ) is
   'Files a visit''s report, closes any earlier Set it completes, records what '
   'the rep will do next, and stamps the check-out - all in ONE transaction. '
-  '0046: a closed status creates no follow-up task and stores no next action. '
+  '0048: a closed status creates no follow-up task and stores no next action. '
   'The follow-up, when there is one, goes to follow_up_tasks and NEVER to '
   'daily_plans (see 0038). SECURITY INVOKER.';
 
@@ -705,9 +705,9 @@ begin
   end if;
 
   if array_length(problems, 1) > 0 then
-    raise exception '0046 did not apply cleanly: %', array_to_string(problems, '; ');
+    raise exception '0048 did not apply cleanly: %', array_to_string(problems, '; ');
   end if;
 
   raise notice
-    '0046 applied: Not Interested is a closed status that cancels upcoming follow-ups. Retired closing-report values were left as history.';
+    '0048 applied: Not Interested is a closed status that cancels upcoming follow-ups. Retired closing-report values were left as history.';
 end $$;

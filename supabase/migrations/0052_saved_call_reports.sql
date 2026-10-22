@@ -2,7 +2,7 @@
 -- No duplicate reports or visits: the original follow_up_tasks row is updated.
 begin;
 -- =============================================================================
--- KUbeats - migration 0050: a follow-up call is logged like a visit
+-- KUbeats - migration 0052: a follow-up call is logged like a visit
 --
 -- ADDITIVE AND SAFE TO APPLY AT ANY TIME. Nothing in the live app calls
 -- log_call() yet - the UI for it is Phase 2, not this file - so every new
@@ -330,7 +330,7 @@ grant execute on function public.log_call(
 -- array_append() throughout - see 0032 and 0035 for why `||` on a text[] with
 -- a bare literal fails with 22P02 exactly when a check has something to
 -- report. search_path is asked with LIKE 'search_path=%' against proconfig,
--- never array containment - see 0045 for why `@>` gives a false alarm here.
+-- never array containment - see 0047 for why `@>` gives a false alarm here.
 -- -----------------------------------------------------------------------------
 do $$
 declare
@@ -461,11 +461,11 @@ begin
   end if;
 
   if array_length(problems, 1) > 0 then
-    raise exception '0050 did not apply cleanly: %', array_to_string(problems, '; ');
+    raise exception '0052 did not apply cleanly: %', array_to_string(problems, '; ');
   end if;
 
   raise notice
-    '0050 applied: follow_up_tasks carries status_set_to and the closing-report '
+    '0052 applied: follow_up_tasks carries status_set_to and the closing-report '
     'fields, and log_call() closes a call the same way log_visit() + close_visit() '
     'close a visit.';
 end $$;

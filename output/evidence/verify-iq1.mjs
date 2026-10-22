@@ -62,7 +62,7 @@ assert.equal((await db.from('daily_plans').insert({member:ids['Audit Alice'].id,
 const repPage=await browser.newPage({storageState:'output/evidence/Audit-Alice-session.json'});
 await repPage.goto('http://127.0.0.1:3000/institutes');
 assert.equal(await repPage.getByRole('link',{name:school.name,exact:true}).count(),0);
-const down=fs.readFileSync('supabase/rollbacks/0049_soft_delete_institute_down.sql','utf8').replace(/^begin;$/m,'').replace(/^commit;$/m,'');
+const down=fs.readFileSync('supabase/rollbacks/0051_soft_delete_institute_down.sql','utf8').replace(/^begin;$/m,'').replace(/^commit;$/m,'');
 const test=`begin; ${down}\ndo $$ begin if to_regprocedure('public.soft_delete_institute(uuid)') is not null then raise exception 'DOWN failed'; end if; if not exists(select 1 from public.institutes where id='${school.id}' and deleted_at is not null) then raise exception 'DOWN lost history'; end if; end $$; rollback;`;
 const result=spawnSync('docker',['exec','-i','supabase_db_free_lance','psql','-U','postgres','-d','postgres','-v','ON_ERROR_STOP=1'],{input:test,encoding:'utf8'});
 assert.equal(result.status,0,result.stderr);

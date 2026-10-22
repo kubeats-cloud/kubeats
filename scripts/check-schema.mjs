@@ -124,7 +124,7 @@ const PROBES = [
   { id: "0046", table: "follow_up_tasks", column: "status_set_to", needs: true },
   // The app does not select this column. Until 0046 is applied, Not Interested
   // is simply not in the live catalogue, and every screen still works.
-  { id: "0046", table: "institute_statuses", column: "cancels_follow_ups", needs: false },
+  { id: "0048", table: "institute_statuses", column: "cancels_follow_ups", needs: false },
 ];
 
 /*

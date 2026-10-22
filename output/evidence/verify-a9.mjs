@@ -164,7 +164,7 @@ assert(reviewText.includes('Within 1 week'), 'Review detail must show selected T
 await adminPage.screenshot({ path: 'output/evidence/A9-review-report.png', fullPage: false });
 
 // 7. Verify DOWN rollback execution cleanly inside transaction
-const down = fs.readFileSync('supabase/rollbacks/0052_status_management_dynamic_fields_down.sql', 'utf8')
+const down = fs.readFileSync('supabase/rollbacks/0054_status_management_dynamic_fields_down.sql', 'utf8')
   .replace(/^begin;$/m, '')
   .replace(/^commit;$/m, '');
 const testSql = `begin;${down} do $$ begin if to_regclass('public.status_fields') is not null then raise exception 'DOWN failed'; end if; end $$;rollback;`;

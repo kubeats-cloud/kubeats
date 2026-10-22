@@ -166,8 +166,8 @@ describe("per-institute activity reconciliation", () => {
 });
 
 describe("0046 and its down migration", () => {
-  const up = read("supabase/migrations/0046_not_interested.sql");
-  const down = read("supabase/rollbacks/0046_not_interested_down.sql");
+  const up = read("supabase/migrations/0048_not_interested.sql");
+  const down = read("supabase/rollbacks/0048_not_interested_down.sql");
 
   it("adds Not Interested as closed and does not copy the retired field", () => {
     expect(up).toContain("'Not Interested', 'closed'");

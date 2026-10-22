@@ -1,5 +1,5 @@
 -- =============================================================================
--- KUbeats - DOWN migration 0046
+-- KUbeats - DOWN migration 0048
 --
 -- Reverses supabase/migrations/0046_not_interested.sql.
 -- NOT applied by walking migrations/ — this file lives in rollbacks/ so a
@@ -26,7 +26,7 @@
 --
 -- HOW TO RUN
 --   Supabase dashboard -> SQL Editor -> paste this whole file -> Run.
---   Idempotent: safe to run twice. Re-applying 0046 afterwards restores the
+--   Idempotent: safe to run twice. Re-applying 0048 afterwards restores the
 --   feature.
 -- =============================================================================
 
@@ -70,13 +70,13 @@ begin
     select 1 from public.institute_status_history where status = 'Not Interested'
   ) then
     delete from public.institute_statuses where status = 'Not Interested';
-    raise notice '0046 down: removed the unused Not Interested status.';
+    raise notice '0048 down: removed the unused Not Interested status.';
   else
     update public.institute_statuses
        set is_active = false
      where status = 'Not Interested';
     raise notice
-      '0046 down: Not Interested is in use, so it was retired rather than deleted. History was kept.';
+      '0048 down: Not Interested is in use, so it was retired rather than deleted. History was kept.';
   end if;
 end $$;
 
@@ -298,7 +298,7 @@ begin
        'enforce_closed_visit_has_no_next_action'
      )
   ) then
-    problems := array_append(problems, 'a 0046 function is still installed');
+    problems := array_append(problems, 'a 0048 function is still installed');
   end if;
 
   if exists (
@@ -310,7 +310,7 @@ begin
      )
        and not tgisinternal
   ) then
-    problems := array_append(problems, 'a 0046 trigger is still attached');
+    problems := array_append(problems, 'a 0048 trigger is still attached');
   end if;
 
   select pg_get_constraintdef(oid) into def
@@ -331,7 +331,7 @@ begin
   if body is null or position('a closed status creates no follow-up' in body) > 0 then
     problems := array_append(
       problems,
-      'close_visit() still carries the 0046 closed-status guard');
+      'close_visit() still carries the 0048 closed-status guard');
   end if;
 
   if (
@@ -344,8 +344,8 @@ begin
   end if;
 
   if array_length(problems, 1) > 0 then
-    raise exception '0046 down did not apply cleanly: %', array_to_string(problems, '; ');
+    raise exception '0048 down did not apply cleanly: %', array_to_string(problems, '; ');
   end if;
 
-  raise notice '0046 down applied: Not Interested no longer cancels follow-ups. Existing rows were kept.';
+  raise notice '0048 down applied: Not Interested no longer cancels follow-ups. Existing rows were kept.';
 end $$;
