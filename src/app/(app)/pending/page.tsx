@@ -17,7 +17,7 @@ import {
 } from "@/lib/visits";
 import { FollowUpCalls } from "@/components/dashboard/follow-up-calls";
 import { MeetingPrompts } from "@/components/dashboard/meeting-prompts";
-import { AdminFollowUpCards, RepFollowUpCards } from "@/components/visits/follow-up-cards";
+import { RepFollowUpCards } from "@/components/visits/follow-up-cards";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { activityLabelFor, listedFollowUpCount } from "@/lib/validation/visit";
 import { formatDate, todayISO } from "@/lib/dates";
@@ -143,19 +143,13 @@ export default async function PendingPage(props: PageProps<"/pending">) {
         }
       />
 
-      {/* Admin #4 / Rep #6 — at the top of this page, per the client's own
-          placement. */}
-      {followUpCards.ok ? (
-        admin ? (
-          <AdminFollowUpCards counts={followUpCards.model.counts} />
-        ) : (
+      {!admin && (followUpCards.ok ? (
           <RepFollowUpCards counts={followUpCards.model.counts} />
-        )
       ) : (
         <div className="mb-6">
           <ErrorState message={followUpCards.error} />
         </div>
-      )}
+      ))}
 
       {unreported.length > 0 && (
         <div className="mb-6">

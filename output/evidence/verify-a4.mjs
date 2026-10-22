@@ -1,0 +1,30 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {createClient} from '@supabase/supabase-js';
+const {chromium}=createRequire('D:/devcache/npm/_npx/e41f203b7505f1fb/node_modules/playwright/package.json')('playwright');
+process.loadEnvFile('.env.local');
+if(new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname!=='127.0.0.1')throw Error('Local only');
+const db=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY);
+const {data:tasks,error}=await db.from('follow_up_tasks').select('id,due_date,done_at');if(error)throw error;
+const today=JSON.parse(fs.readFileSync('output/evidence/fixtures.json')).today;
+const expected={Owned:tasks.filter(t=>!t.done_at).length,Missed:tasks.filter(t=>!t.done_at&&t.due_date<today).length,Closed:tasks.filter(t=>t.done_at).length};
+const browser=await chromium.launch();
+const context=await browser.newContext({storageState:'output/evidence/Audit-Admin-session.json',viewport:{width:1440,height:1100}});
+const page=await context.newPage();
+await page.goto('http://127.0.0.1:3000/pending');
+assert.equal(await page.getByText('Total Follow-ups Owned',{exact:true}).count(),0);
+for(const [status,count] of Object.entries(expected)){
+ await page.goto('http://127.0.0.1:3000/pending/follow-ups');
+ const card=page.getByRole('link',{name:new RegExp(`Total Follow-ups ${status}`)});
+ assert.match(await card.innerText(),new RegExp(`^${count}\\s`));
+ await card.click();await page.waitForURL(`**/pending/follow-ups?status=${status.toLowerCase()}`);
+ assert.equal(await page.locator('tbody tr').count(),count);
+ if(count)assert.deepEqual(await page.locator('thead th').allTextContents(),['Rep name','Institute name','Follow-up date','Follow-up status']);
+ await page.screenshot({path:`output/evidence/A4-${status.toLowerCase()}.png`,fullPage:true});
+ console.log('PASS A4',status,count,'saved records = list rows');
+}
+await context.close();await browser.close();
+const manifest=JSON.parse(fs.readFileSync('output/evidence/manifest.json'));
+for(const status of Object.keys(expected))manifest.push({item:'A4',caption:`${status} card on Follow-ups Owned page opens matching saved records`,file:`A4-${status.toLowerCase()}.png`});
+fs.writeFileSync('output/evidence/manifest.json',JSON.stringify(manifest,null,2));

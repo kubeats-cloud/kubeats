@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState, ErrorState } from "@/components/states";
+import { AdminFollowUpCards } from "@/components/visits/follow-up-cards";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
 import {
@@ -50,6 +51,8 @@ export default async function FollowUpsPage(props: PageProps<"/pending/follow-up
   return (
     <>
       <PageHeader title={TITLES[status]} />
+
+      {admin && result.ok && <AdminFollowUpCards counts={result.model.counts} />}
 
       {!result.ok ? (
         <ErrorState message={result.error} />

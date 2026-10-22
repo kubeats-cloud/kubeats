@@ -1,0 +1,27 @@
+[
+  {
+    "item": "A5",
+    "caption": "Admin Team filters to Audit Alice while typing",
+    "file": "A5-filter.png"
+  },
+  {
+    "item": "A5",
+    "caption": "Unmatched name shows No Rep found",
+    "file": "A5-empty.png"
+  },
+  {
+    "item": "A4",
+    "caption": "Owned card on Follow-ups Owned page opens matching saved records",
+    "file": "A4-owned.png"
+  },
+  {
+    "item": "A4",
+    "caption": "Missed card on Follow-ups Owned page opens matching saved records",
+    "file": "A4-missed.png"
+  },
+  {
+    "item": "A4",
+    "caption": "Closed card on Follow-ups Owned page opens matching saved records",
+    "file": "A4-closed.png"
+  }
+]

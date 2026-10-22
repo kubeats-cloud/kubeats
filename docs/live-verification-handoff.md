@@ -55,3 +55,9 @@ A8/R2 workflow integration requires completing the existing target workflow.
 Then follow the requested order: A5 verification, A7, IQ1, IQ4, A3, R3, A9.
 Each completed feature needs live screenshots appended to the growing evidence PDF
 and a separate local commit. No feature implementation has yet been changed.
+
+## Completed: A4 placement correction and A5 verification
+A4 cards now appear at the top of the existing Follow-ups Owned page, removed from Admin Pending. Rep Pending is unchanged. Live Chromium asserts 7 Owned / 3 Missed / 0 Closed against local saved task records and matching list lengths, including exact requested columns. Typecheck passed. No schema change or DOWN needed.
+A5 was verified without rewriting existing implementation: live filtering and exact empty state, Admin-only.
+Evidence PDF: output/pdf/kubeats_feature_evidence.pdf (A5: pages 1-2; A4: pages 3-5).
+
