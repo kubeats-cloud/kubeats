@@ -313,7 +313,7 @@ describe("the separation Phase A rests on, at source level", () => {
   it("hands the plan its tasks separately from its entries", () => {
     const plan = read("src/components/dashboard/daily-plan.tsx");
     expect(plan).toContain("tasks: FollowUpTask[]");
-    expect(plan).toContain("<FollowUpCalls tasks={tasks} catalogue={catalogue} />");
+    expect(plan).toContain("<FollowUpCalls tasks={tasks} />");
   });
 
   /** A4: one source, two readers — which is what makes the sync unnecessary. */

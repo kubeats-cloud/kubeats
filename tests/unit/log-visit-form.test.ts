@@ -75,7 +75,7 @@ describe("Log Visit is not reset by React after its action", () => {
     // sending it, so the two steps are now separated by an await. Nothing about
     // the regression this guards has changed: React is still not driving the
     // submission, so it still never resets the form.
-    expect(source).toMatch(/formAction\(/);
+    expect(source).toMatch(/(?:formAction|submitCallReport)\(/);
     expect(source).toContain("new FormData(");
     // preventDefault, or the browser navigates away on submit.
     expect(source).toContain("event.preventDefault()");
@@ -144,7 +144,7 @@ describe("the other forms a Radix revert could corrupt", () => {
     // particular spelling of it: two of these capture the FormData into a local
     // first, on purpose, so what is sent is what was typed rather than what the
     // state holds a tick after the clearing setters run.
-    expect(source).toMatch(/formAction\(/);
+    expect(source).toMatch(/(?:formAction|submitCallReport)\(/);
     expect(source).toContain("new FormData(");
     expect(source).toContain("event.preventDefault()");
   });

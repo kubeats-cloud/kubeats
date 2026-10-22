@@ -78,12 +78,13 @@ export function StatusesPanel({
 
   async function handleAddField(event: React.FormEvent<HTMLFormElement>, statusName: string) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     formData.set("status", statusName);
     const result = await addStatusField(formData);
     setFieldMessage(result);
     if (result.ok) {
-      event.currentTarget.reset();
+      form.reset();
     }
   }
 

@@ -165,37 +165,18 @@ describe("Log Call is the visit form minus photo, not Done/No answer", () => {
   });
 });
 
-describe("NextActionFields' askDate — one date box, not two", () => {
+describe("corrected Next Action uses the existing follow-up date", () => {
   const fields = read("src/components/visits/next-action-fields.tsx");
-
-  it("defaults askDate to false", () => {
-    expect(fields).toMatch(/askDate\s*=\s*false/);
+  it("adds no second visible date or note control", () => {
+    expect(fields).not.toContain('type="date"');
+    expect(fields).not.toContain('What about?');
+    expect(fields).toContain('name="next_action"');
+    expect(fields).toContain('name="follow_up_due"');
   });
-
-  it("only posts follow_up_due when askDate is true", () => {
-    expect(fields).toMatch(/\{askDate && \(\s*<input type="hidden" name="follow_up_due"/);
-  });
-
-  it("Log Visit never passes askDate — it borrows Rule 5's own date instead", () => {
-    const form = read("src/components/visits/log-visit-form.tsx");
-    expect(form).not.toContain("<NextActionFields");
-    expect(form).toContain("<StatusOutcomeFields");
-    // The one shared box: Log Visit's own needsFollowUp now reads next_action.
-    expect(form).toContain('nextAction.kind !== ""');
-
-    const shared = read("src/components/visits/status-outcome-fields.tsx");
-    const usage = shared.slice(shared.indexOf("<NextActionFields"));
-    const tag = usage
-      .slice(0, usage.indexOf("/>") + 2)
-      .replace(/\/\/[^\n]*/g, "");
-    expect(tag).not.toContain("askDate");
-  });
-
-  it("the recovery form passes askDate — it has no visit-date to borrow", () => {
-    const form = read("src/components/visits/feedback-only-form.tsx");
-    const usage = form.slice(form.indexOf("<NextActionFields"));
-    const tag = usage.slice(0, usage.indexOf("/>") + 2);
-    expect(tag).toContain("askDate");
+  it("both status-driven form paths hide the action for closed statuses", () => {
+    expect(read("src/components/visits/status-outcome-fields.tsx")).toContain("nextActionShown(catalogue, status)");
+    expect(read("src/components/visits/log-visit-form.tsx")).toContain("nextActionShown(catalogue, status)");
+    expect(read("src/components/visits/feedback-only-form.tsx")).toContain("nextActionShown(catalogue, statusSetTo)");
   });
 });
 

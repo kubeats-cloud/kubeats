@@ -73,3 +73,6 @@ flush-client.sql
 # Isolated reconciliation runtime, credentials and transient checks.
 /.local-reconcile/
 /supabase/config.toml
+
+/node_modules.shared/
+/supabase/.branches/

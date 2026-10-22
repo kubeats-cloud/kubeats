@@ -18,6 +18,7 @@ const eslintConfig = defineConfig([
     // its dependencies. Linting it means linting node_modules by another name.
     ".open-next/**",
     ".wrangler/**",
+    ".local-reconcile/**",
   ]),
 ]);
 

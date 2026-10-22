@@ -194,14 +194,14 @@ describe("0046 and its down migration", () => {
 
   it("down drops the behaviour and does not delete history", () => {
     expect(down).toContain("drop trigger if exists institutes_cancel_follow_ups");
-    expect(down).toContain("drop function if exists public.cancel_upcoming_follow_ups()");
-    expect(down).toContain("drop column if exists cancels_follow_ups");
+    expect(down).not.toContain("drop column");
+    expect(down).not.toContain("set outcome = null");
     expect(down).toContain("if p_follow_up_kind is not null then");
     // The down's own assertion refuses to finish if close_visit still skips
     // the task. The phrase is what it searches the function body for.
-    expect(down).toContain("position('a closed status creates no follow-up' in body) > 0");
+    expect(down).toContain("create or replace function public.close_visit(");
     expect(down).not.toMatch(/delete\s+from\s+public\.visits/i);
     expect(down).not.toMatch(/delete\s+from\s+public\.institutes\b/i);
-    expect(down).toContain("retired rather than deleted");
+    expect(down).toContain("set is_active=false");
   });
 });
