@@ -203,6 +203,7 @@ export async function getTodayPlan(
     )
     .eq("member", memberId)
     .eq("date", todayISO())
+    .is("cancelled_at", null)
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -990,6 +991,7 @@ export async function getPlanById(
       "id, date, institute_id, purpose, purpose_note, checkin_at, checkout_at, checkout_missing, purposes(activity, lifecycle)",
     )
     .eq("id", planId)
+    .is("cancelled_at", null)
     .eq("member", memberId)
     .maybeSingle();
 

@@ -72,6 +72,7 @@ export async function getMemberToday(memberId: string): Promise<MemberToday> {
     supabase
       .from("daily_plans")
       .select("id", { count: "exact", head: true })
+      .is("cancelled_at", null)
       .eq("member", memberId)
       .eq("date", today),
     supabase

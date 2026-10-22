@@ -72,3 +72,9 @@ Chromium captured a synthetic camera frame, uploaded it, saved an Open report wi
 Existing cancellation SQL still deletes future unstarted plan rows (0046); this preservation issue needs an additive cancellation mechanism before R5 can be claimed fully compliant with the all-records constraint. The tested fixture had no such future plan rows.
 Full test run: 1489 passed, 6 skipped, 2 stale flag tests failed; updated those obsolete expectations for the required status-driven visibility. Focused rerun and typecheck passed.
 
+
+## Completed: R5/IQ5 record-preserving plan cancellation
+Migration 0047 replaces the existing future-plan DELETE with cancelled_at timestamps. Active plan readers/counts ignore cancelled rows; a server trigger prevents checking in to or clearing cancellation on a cancelled plan. All existing plan IDs remain. No institute/visit/task deletion.
+Tested UP on local only; synthetic today/future plans remained after Not Interested; check-in was rejected. DOWN executed successfully inside a rolled-back transaction and preserved the cancellation history. DOWN intentionally retains the additive column to avoid losing historical timestamps; restores prior trigger behavior. No remote migration applied.
+PDF page 10 documents active-list result. This supersedes the preservation limitation above.
+

@@ -751,6 +751,7 @@ export async function getOverview(): Promise<
       supabase
         .from("daily_plans")
         .select("id", { count: "exact", head: true })
+        .is("cancelled_at", null)
         .eq("date", today),
     ]);
 

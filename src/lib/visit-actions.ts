@@ -158,6 +158,7 @@ export async function addToDailyPlan(
     .eq("member", user.id)
     .eq("date", today)
     .eq("institute_id", parsed.data.institute_id)
+    .is("cancelled_at", null)
     .is("checkin_at", null)
     .limit(1);
 
@@ -576,6 +577,7 @@ export async function removeFromDailyPlan(planId: string): Promise<FormState> {
     // straight through FO011's write-once checkin_at, because a new ROW gets a
     // new timestamp honestly. guard_checkin_cycle_final (FO014) says the same
     // thing in the database, where a tampered request also has to hear it.
+    .is("cancelled_at", null)
     .is("checkin_at", null);
 
   if (error) {
@@ -748,6 +750,7 @@ export async function addManyToDailyPlan(
     .eq("member", user.id)
     .eq("date", today)
     .in("institute_id", parsed.data.institute_ids)
+    .is("cancelled_at", null)
     .is("checkin_at", null);
 
   const already = new Set((unstarted ?? []).map((row) => row.institute_id));

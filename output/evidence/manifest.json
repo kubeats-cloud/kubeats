@@ -43,5 +43,10 @@
     "item": "R5 / IQ5",
     "caption": "Saved Not Interested removes follow-ups from active list; records retained",
     "file": "R5-cancelled.png"
+  },
+  {
+    "item": "R5 / IQ5",
+    "caption": "Cancelled follow-ups leave active lists; future plan retained in database",
+    "file": "R5-preserved-plans.png"
   }
 ]
