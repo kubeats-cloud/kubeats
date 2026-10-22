@@ -48,5 +48,25 @@
     "item": "R5 / IQ5",
     "caption": "Cancelled follow-ups leave active lists; future plan retained in database",
     "file": "R5-preserved-plans.png"
+  },
+  {
+    "item": "A7",
+    "caption": "Role dropdown inside the existing Name and Campus Edit form",
+    "file": "A7-promote.png"
+  },
+  {
+    "item": "A7",
+    "caption": "Rep promoted to Team Lead and saved",
+    "file": "A7-promote-saved.png"
+  },
+  {
+    "item": "A7",
+    "caption": "Saved role changes dashboard access; Settings and Log Visit remain restricted",
+    "file": "A7-lead-access.png"
+  },
+  {
+    "item": "A7",
+    "caption": "Team Lead demoted back to Rep; original records retained",
+    "file": "A7-demote-saved.png"
   }
 ]

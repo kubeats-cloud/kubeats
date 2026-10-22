@@ -125,6 +125,7 @@ export function TeamPanel({
   const [editing, setEditing] = useState<TeamMember | null>(null);
   const [editName, setEditName] = useState("");
   const [editCampus, setEditCampus] = useState("");
+  const [editRole, setEditRole] = useState("rep");
   /*
    * THE RETAG, AND IT DEFAULTS ON.
    *
@@ -150,6 +151,7 @@ export function TeamPanel({
   function openEdit(member: TeamMember) {
     setEditing(member);
     setEditName(member.name);
+    setEditRole(member.role);
     setEditCampus(member.campusId ?? "");
     setEditRetag(true);
     setEditErrors({});
@@ -188,7 +190,7 @@ export function TeamPanel({
       // the editor refuse (FO021) a row that is perfectly valid. The admin
       // branch is the one that must send nothing.
       campus_id: editing.role !== "admin" ? editCampus : "",
-      role: editing.role,
+      role: editRole,
       retag: editRetag,
     });
     if (!parsed.success) {
@@ -432,7 +434,7 @@ export function TeamPanel({
                 variant={member.role === "admin" ? "neutral" : "success"}
                 className="shrink-0 capitalize"
               >
-                {member.role}
+                {member.role === "team_lead" ? "Team Lead" : member.role === "rep" ? "Rep" : "Admin"}
               </Badge>
               {member.campusName && (
                 <span className="text-muted-foreground truncate text-xs">
@@ -479,7 +481,7 @@ export function TeamPanel({
                       variant={member.role === "admin" ? "neutral" : "success"}
                       className="capitalize"
                     >
-                      {member.role}
+                      {member.role === "team_lead" ? "Team Lead" : member.role === "rep" ? "Rep" : "Admin"}
                     </Badge>
                       {member.campusName && (
                         <span className="text-muted-foreground ml-2 text-xs">
@@ -745,7 +747,7 @@ export function TeamPanel({
                           : "No institutes moved."}
                       </>
                     ) : (
-                      <>The name was updated.</>
+                      <>The team member was updated.</>
                     )}
                   </DialogDescription>
                 </DialogHeader>
@@ -763,15 +765,13 @@ export function TeamPanel({
                       Edit {editing.name}
                     </DialogTitle>
                     <DialogDescription className="text-left">
-                      Their name and, for a rep, which campus they work from.
-                      Their email address, password and role are not changed
-                      here.
+                      Edit their name, campus and role.
                     </DialogDescription>
                   </DialogHeader>
 
                   <div className="space-y-4 py-4">
                     <input type="hidden" name="member" value={editing.id} />
-                    <input type="hidden" name="role" value={editing.role} />
+                    <input type="hidden" name="role" value={editRole} />
 
                     <div className="space-y-2">
                       <Label htmlFor="edit-name">Name</Label>
@@ -789,6 +789,22 @@ export function TeamPanel({
                         <p className="text-danger text-xs">{editErrors.name}</p>
                       )}
                     </div>
+
+                    {editing.role !== "admin" && (
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-role">Role</Label>
+                        <Select value={editRole} onValueChange={setEditRole}>
+                          <SelectTrigger id="edit-role" aria-label="Role" className="h-11 w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="rep">Rep</SelectItem>
+                            <SelectItem value="team_lead">Team Lead</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {editErrors.role && <p className="text-danger text-xs">{editErrors.role}</p>}
+                      </div>
+                    )}
 
                     {/* An admin has no campus and must not be given one —
                         FO021 refuses it, so offering the field would be

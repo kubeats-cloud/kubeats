@@ -627,7 +627,8 @@ describe("the member editor's action writes only what it is allowed to", () => {
     // Never the credential, never the role, never the id.
     expect(body).not.toContain("email:");
     expect(body).not.toContain("password");
-    expect(body).not.toContain("role: input.role");
+    expect(body).toContain('rpc("edit_team_member"');
+    expect(body).toContain("p_role: input.role");
   });
 
   it("changes the campus through the RPC, not with a bare update", () => {
@@ -640,7 +641,8 @@ describe("the member editor's action writes only what it is allowed to", () => {
 
   it("reads the role from the database rather than trusting the form", () => {
     expect(body).toContain('.select("id, role, campus_id")');
-    expect(body).toContain("current.role !== input.role");
+    expect(body).toContain('current.role !== "admin"');
+    expect(body).toContain('input.role === "admin"');
   });
 
   it("leaves the campus alone when it has not changed", () => {

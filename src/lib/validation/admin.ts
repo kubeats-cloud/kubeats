@@ -402,45 +402,12 @@ export const newMemberSchema = z
 
 export type NewMemberInput = z.infer<typeof newMemberSchema>;
 
-/**
- * Editing a team member: THE NAME AND THE CAMPUS, AND NOTHING ELSE.
- *
- * What is missing from this schema is the specification, not an oversight, so
- * each absence is written down:
- *
- *   EMAIL     is the sign-in credential and lives in `auth.users`, which
- *             PostgREST does not expose at all. Changing it is changing how
- *             somebody logs in, and doing it from a row in a table of twenty
- *             people is how the wrong account gets locked out.
- *   PASSWORD  has its own path. An editor that could set one would be an
- *             editor that could take an account over.
- *   ID        is the `auth.users` foreign key and is referenced by eight
- *             tables. It is not editable in any meaningful sense.
- *   ROLE      is deliberately out. Flipping it inverts the campus requirement
- *             in both directions (FO021 demands one for a rep and forbids one
- *             for an admin), and `guard_profile_role` (0001) has its own
- *             opinion about who may do it. It deserves its own decision, not a
- *             dropdown beside a name.
- *
- * `retag` IS NOT A FIELD ABOUT THE MEMBER. It answers "was the old campus
- * wrong, or did they move?" — the difference between a mis-allocation, where
- * the institutes they own should follow them, and a genuine transfer, where
- * those institutes belong to the campus they were worked from. It is carried
- * here because the form sends it; `correct_member_campus()` (0035) is what acts
- * on it. A checkbox that is absent reads as false, which is why the form sends
- * an explicit value rather than relying on the box being ticked.
- */
+/** Name, campus and the supported role in the existing member Edit form. */
 export const memberUpdateSchema = z
   .object({
     member: z.uuid("That person could not be identified."),
     name: name(120, "The name"),
     campus_id: campusField,
-    /**
-     * The target's role, sent by the form so the campus rule can be checked
-     * without a lookup — NOT a field that may be changed. `updateMember()`
-     * reads the role from the database and refuses if the two disagree, so a
-     * tampered value can only ever cause a refusal.
-     */
     role: z.enum(ROLES),
     retag: z.boolean(),
   })

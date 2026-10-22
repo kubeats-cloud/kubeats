@@ -734,37 +734,7 @@ export async function createMember(
   };
 }
 
-/**
- * Editing a team member: their NAME and their CAMPUS, and nothing else.
- *
- * See `memberUpdateSchema` for why email, password, id and role are all absent;
- * each is a decision of its own rather than a field beside a name.
- *
- * TWO WRITES, AND THEY ARE NOT THE SAME KIND OF WRITE. That asymmetry is the
- * whole shape of this action:
- *
- *   THE NAME is a label. Nothing reads it to decide anything, `profiles_update`
- *            already lets an admin write it, and a plain update is the whole
- *            job.
- *   THE CAMPUS is a security boundary. `institutes_select` (0028) is
- *            `campus_id = my_campus() and registered_by = auth.uid()` — a
- *            strict AND — so moving a rep between campuses without moving the
- *            institutes they own makes every one of them invisible to them.
- *            That needs two tables in one transaction, which is
- *            `correct_member_campus()` (0035), and it needs to be refused while
- *            the rep is mid-visit, which that function does.
- *
- * SO THE NAME GOES FIRST, and the order matters. If the campus half is refused
- * — the likely refusal being a rep part-way through a visit — a rename the
- * admin also asked for has already landed and is reported, rather than being
- * silently rolled back along with it. Two independent edits, two independent
- * outcomes; conflating them would mean a typo in a name could not be fixed
- * until the rep got back to the office.
- *
- * THE CAMPUS IS ONLY TOUCHED WHEN IT CHANGES. An admin editing a name should
- * not trip the mid-visit refusal, and re-sending the campus a rep already has
- * would do exactly that.
- */
+/** Edit the existing member; non-admin edits are atomic and retain history. */
 export async function updateMember(
   _prev: MemberUpdateState,
   formData: FormData,
@@ -806,14 +776,24 @@ export async function updateMember(
   }
   if (!current) return denied("That person no longer has an account.");
 
-  if (current.role !== input.role) {
-    // Not an error the admin can act on so much as a stale screen. Roles are
-    // not editable here, so the two can only disagree if somebody else changed
-    // it or the form was tampered with.
-    return denied(
-      "That account's role has changed since this screen loaded. Reopen Settings and try again.",
-    );
+  if (current.role !== "admin") {
+    if (input.role === "admin") return denied("Choose Rep or Team Lead.");
+    const { data: receipt, error } = await gate.supabase.rpc("edit_team_member", {
+      p_member: input.member, p_name: input.name, p_role: input.role,
+      p_campus: input.campus_id, p_retag: input.retag,
+    });
+    if (error) {
+      logError("admin:edit-member", error);
+      return denied(error.code === "22023" || error.code === "FO033"
+        ? error.message : toFriendlyMessage(error, "We could not save this team member."));
+    }
+    revalidatePath("/", "layout");
+    const result = (receipt ?? {}) as { campus?: string; institutes_moved?: number };
+    return { error: null, fieldErrors: {}, ok: true,
+      updated: { name: input.name, campus: result.campus ?? null,
+        institutesMoved: result.institutes_moved ?? 0 } };
   }
+  if (input.role !== "admin") return denied("Admin roles cannot be changed here.");
 
   const { error: nameError } = await gate.supabase
     .from("profiles")

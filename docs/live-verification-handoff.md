@@ -78,3 +78,9 @@ Migration 0047 replaces the existing future-plan DELETE with cancelled_at timest
 Tested UP on local only; synthetic today/future plans remained after Not Interested; check-in was rejected. DOWN executed successfully inside a rolled-back transaction and preserved the cancellation history. DOWN intentionally retains the additive column to avoid losing historical timestamps; restores prior trigger behavior. No remote migration applied.
 PDF page 10 documents active-list result. This supersedes the preservation limitation above.
 
+
+## Completed: A7 existing Team Edit role dropdown
+Added Role (Rep / Team Lead) inside the existing Name/Campus Edit dialog; no separate button or form. Existing Name/Campus controls retained. Migration 0048 adds an Admin-only atomic edit RPC, retains FO033, detaches obsolete current team links on role changes, and never removes activity/history rows. Outstanding reports must be finished before changing the role.
+Live Chromium saved Rep to Team Lead and back, verified profile values, dashboard/nav changes and restricted Settings/Log Visit access. A Rep calling the RPC directly received 42501. Compared every existing ID in institutes, visits, plans, tasks and status history before/after. DOWN was executed and checked in a rolled-back local transaction. Typecheck and 81 Settings tests passed after updating obsolete no-role-edit expectations.
+PDF pages 11-14. No remote application or push.
+
