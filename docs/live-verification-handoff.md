@@ -102,3 +102,6 @@ PDF pages 19-20; final page is a faithful HTML rendering of cells extracted from
 The documented integration baseline lacked the existing call-report columns/RPC found on deploy-iq6-client. Reviewed and ported that saved-call representation as migration 0050, retaining the original follow_up_tasks row as the only report record. No duplicate reports/visits and no new route. The existing call list now opens a report dialog; shared status-driven fields are reused. Review displays Call Report alongside labelled Log Visit Report entries; complete Call Report opens using the existing Review detail route. Existing date/Rep/institute/status filters apply; RLS scopes access.
 Live Bob submitted a report with status, date, headcount, topic, taken-by and notes. Admin saw both report labels and opened all submitted details. Task and visit IDs/counts remained identical. An unrelated Team Lead saw Page not found and no report data. DOWN ran in a rolled-back transaction and retained the saved report. Typecheck and 37 focused tests passed. PDF pages 21-23.
 
+
+A7 follow-up: a newly promoted Team Lead now lands on the existing scoped Team dashboard instead of the Rep daily-plan page. Re-ran the promotion/demotion, permission and preservation browser checks; PDF A7 dashboard screenshot refreshed. No new page or privilege.
+

@@ -45,6 +45,7 @@ const first = (value: string | string[] | undefined) =>
 export default async function DashboardPage(props: PageProps<"/">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (user.role === "team_lead") redirect("/team");
 
   const admin = isAdmin(user);
   const weekStart = mondayOf();
