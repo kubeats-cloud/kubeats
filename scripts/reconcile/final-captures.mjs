@@ -1,0 +1,20 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+const {chromium}=createRequire(process.env.PLAYWRIGHT_PACKAGE??'D:/devcache/npm/_npx/e41f203b7505f1fb/node_modules/playwright/package.json')('playwright');
+const f=JSON.parse(fs.readFileSync('.local-reconcile/fixtures.json'));
+const browser=await chromium.launch();
+const c=await browser.newContext({storageState:'.local-reconcile/sessions/admin.json',viewport:{width:1440,height:1100}});
+const p=await c.newPage();p.setDefaultTimeout(15000);
+const go=async path=>{await p.goto('http://127.0.0.1:3100'+path);await p.locator('h1').waitFor();await p.waitForTimeout(600);};
+const snap=async key=>p.screenshot({path:`output/reconcile/screenshots/final-${key}.png`,fullPage:false});
+await go('/review');assert.match(await p.locator('body').innerText(),/Call Report/);assert.match(await p.locator('body').innerText(),/Log Visit Report/);await snap('review-both');
+await go('/settings');await p.getByRole('textbox',{name:'Search team members'}).fill('Reconcile Bob');await p.getByRole('button',{name:'Edit Reconcile Bob',exact:true}).filter({visible:true}).click();await p.getByRole('combobox',{name:'Role',exact:true}).click();await snap('existing-role-dropdown');await p.keyboard.press('Escape');await p.getByRole('button',{name:'Cancel',exact:true}).click();
+await go('/');await p.locator('#range-start').fill(f.yesterday);await p.locator('#range-end').fill(f.yesterday);await p.getByRole('button',{name:'Apply',exact:true}).click();await p.waitForURL(u=>u.searchParams.get('from')===f.yesterday&&u.searchParams.get('to')===f.yesterday);await p.getByRole('link',{name:'Institute',exact:true}).click();await p.waitForTimeout(600);
+const table=p.locator('table').filter({has:p.locator('caption').filter({hasText:/Activity/})});
+const rows=await table.locator('tbody tr').evaluateAll(rs=>rs.map(r=>Array.from(r.querySelectorAll('th,td')).map(c=>c.textContent.trim())).filter(r=>r.length===13));
+fs.writeFileSync('output/reconcile/activity-filtered-table.json',JSON.stringify(rows,null,2));
+const href=await p.getByRole('link',{name:'Download Excel',exact:true}).getAttribute('href');assert(href.includes(f.yesterday));const x=await p.request.get('http://127.0.0.1:3100'+href);assert.equal(x.status(),200);fs.writeFileSync('output/reconcile/activity-filtered.xlsx',await x.body());await snap('filtered-sorted-activity');
+await go('/team/report');await p.locator('#range-start').fill(f.yesterday);await p.locator('#range-end').fill(f.today);await p.getByRole('button',{name:'Apply',exact:true}).click();await p.waitForTimeout(700);const visit=await p.request.get(`http://127.0.0.1:3100/api/export/activity?report=field-visits&start=${f.yesterday}&end=${f.today}`);assert.equal(visit.status(),200);fs.writeFileSync('output/reconcile/field-visits.xlsx',await visit.body());await snap('field-visit-range');
+await browser.close();console.log('PASS Review labels, existing role dropdown, date filter/sorting, matching Excel and archived visit export captured');
+

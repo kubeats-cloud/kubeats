@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FeedbackFields } from "@/components/visits/feedback-fields";
 import {
@@ -108,7 +108,7 @@ export function FeedbackOnlyForm({
         event.preventDefault();
         const formData = new FormData(event.currentTarget);
         if (!locatable) {
-          formAction(formData);
+          startTransition(() => formAction(formData));
           return;
         }
         setLocating(true);
@@ -116,7 +116,7 @@ export function FeedbackOnlyForm({
           .then((fix) => appendCheckoutFix(formData, fix))
           .finally(() => {
             setLocating(false);
-            formAction(formData);
+            startTransition(() => formAction(formData));
           });
       }}
       className="space-y-4"
@@ -177,3 +177,4 @@ export function FeedbackOnlyForm({
     </form>
   );
 }
+

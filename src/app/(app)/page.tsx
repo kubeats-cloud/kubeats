@@ -24,7 +24,6 @@ import {
   listPurposes,
 } from "@/lib/visits";
 import { listUnseenAlerts } from "@/lib/alerts";
-import { PHASE_A_DAILY_PLAN } from "@/lib/features";
 import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
 import { todayISO } from "@/lib/dates";

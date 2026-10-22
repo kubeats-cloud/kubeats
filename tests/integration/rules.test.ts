@@ -1984,7 +1984,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
        * are closed, so the two have to answer identically. Only a real
        * database can say whether they still do.
        */
-      it("holds exactly the app's seeded statuses, in the app's order", async () => {
+      it("holds the app's seeded statuses in order alongside Admin-configured statuses", async () => {
         const { data, error } = await admin
           .from("institute_statuses")
           .select("status, category, sort_order")
@@ -1992,13 +1992,13 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
 
         expect(error).toBeNull();
         const names = data?.map((row) => row.status) ?? [];
-        // 0046 adds Not Interested. Until that file is applied the database
+        // 0048 adds Not Interested. Until that file is applied the database
         // still holds the previous seed, and this suite has to be honest on
         // both sides rather than red on the one that has not moved yet.
         const expected = names.includes("Not Interested")
           ? [...SEED_STATUSES]
           : SEED_STATUSES.filter((status) => status !== "Not Interested");
-        expect(names).toEqual(expected);
+        expect(names.filter((name) => SEED_STATUSES.includes(name))).toEqual(expected);
       });
 
       it("gives every status the same category the app does", async () => {
@@ -2006,7 +2006,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           .from("institute_statuses")
           .select("status, category");
 
-        for (const row of data ?? []) {
+        for (const row of (data ?? []).filter((row) => SEED_STATUSES.includes(row.status))) {
           expect(row.category, row.status).toBe(statusCategory(SEED_STATUS_CATALOGUE, row.status));
         }
       });

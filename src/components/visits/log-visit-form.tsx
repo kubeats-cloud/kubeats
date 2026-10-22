@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FormSection } from "@/components/form-section";
 import { Input } from "@/components/ui/input";
@@ -396,7 +396,7 @@ export function LogVisitForm({
           .then((fix) => appendCheckoutFix(formData, fix))
           .finally(() => {
             setLocating(false);
-            formAction(formData);
+            startTransition(() => formAction(formData));
           });
       }}
       className="space-y-4"
