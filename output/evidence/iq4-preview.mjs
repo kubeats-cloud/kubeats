@@ -1,0 +1,11 @@
+import fs from 'node:fs';
+import {createRequire} from 'node:module';
+const {chromium}=createRequire('D:/devcache/npm/_npx/e41f203b7505f1fb/node_modules/playwright/package.json')('playwright');
+const browser=await chromium.launch();
+const page=await browser.newPage({viewport:{width:1440,height:850}});
+await page.setContent(fs.readFileSync('output/evidence/IQ4-workbook.html','utf8'));
+await page.screenshot({path:'output/evidence/IQ4-exact-columns.png',fullPage:true});
+await browser.close();
+const manifest=JSON.parse(fs.readFileSync('output/evidence/manifest.json'));
+for(const [file,caption] of [['IQ4-date-range.png','Admin selects date range and downloads Field Visit Report'],['IQ4-exact-columns.png','Actual downloaded Excel: exact five columns and saved field visits']])manifest.push({item:'IQ4',caption,file});
+fs.writeFileSync('output/evidence/manifest.json',JSON.stringify(manifest,null,2));

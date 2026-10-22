@@ -91,3 +91,9 @@ Live confirmation Cancel kept the institute active; confirmed Delete hid it from
 Also exercised IQ3 existing reassignment from Alice to Bob and back through the live control, checking saved owner IDs. Full cross-account visibility transfer still requires a dedicated assertion.
 PDF pages 15-18. No remote changes.
 
+
+## Completed: IQ4 downloadable field-visit report
+Admin's existing Team report date controls now drive Download Field Visit Report. Reused the existing export endpoint with report=field-visits, no new page/route. Excel has exactly Institution Name, Check-In Date, Check-In Time, Check-Out Time, Location; one row per actual check-in, IST date bounds, actual recorded position, no totals/extra columns. Pagination avoids a 1000-row truncation; deleted-institute visits remain included as history.
+Live Chromium changed the date range and downloaded Excel. Parsed workbook XML checked exact headings/column count, selected check-in dates and both saved visits for the soft-deleted institute. Inverted dates returned 400; Rep and Team Lead returned 403. Typecheck passed. No schema change.
+PDF pages 19-20; final page is a faithful HTML rendering of cells extracted from the actual downloaded workbook, not an app table.
+

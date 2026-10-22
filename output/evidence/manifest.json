@@ -88,5 +88,15 @@
     "item": "IQ1",
     "caption": "Full saved report is still readable after institute soft deletion",
     "file": "IQ1-report.png"
+  },
+  {
+    "item": "IQ4",
+    "caption": "Admin selects date range and downloads Field Visit Report",
+    "file": "IQ4-date-range.png"
+  },
+  {
+    "item": "IQ4",
+    "caption": "Actual downloaded Excel: exact five columns and saved field visits",
+    "file": "IQ4-exact-columns.png"
   }
 ]

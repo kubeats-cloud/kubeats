@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { buildActivityExport } from "@/lib/exports/activity-export";
+import { buildFieldVisitExport } from "@/lib/exports/field-visit-export";
 import { exportRangeSchema } from "@/lib/validation/export";
 
 /**
@@ -51,7 +52,13 @@ export async function GET(request: NextRequest) {
   }
 
   const { start, end, member } = parsed.data;
-  const result = await buildActivityExport({ start, end }, member ?? null);
+  const report = params.get("report");
+  if (report !== null && report !== "field-visits") {
+    return NextResponse.json({ error: "Unknown report." }, { status: 400 });
+  }
+  const result = report === "field-visits"
+    ? await buildFieldVisitExport({ start, end })
+    : await buildActivityExport({ start, end }, member ?? null);
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 422 });

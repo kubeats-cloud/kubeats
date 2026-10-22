@@ -91,6 +91,14 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
 
       <RangeControls start={start} end={end} basePath="/team/report" />
 
+      {gate.isAdmin && (
+        <Button asChild variant="outline" className="mb-3 h-11">
+          <a href={`/api/export/activity?report=field-visits&start=${start}&end=${end}`} download>
+            Download Field Visit Report
+          </a>
+        </Button>
+      )}
+
       {!result.ok ? (
         <ErrorState message={result.error} />
       ) : (
