@@ -97,3 +97,8 @@ Admin's existing Team report date controls now drive Download Field Visit Report
 Live Chromium changed the date range and downloaded Excel. Parsed workbook XML checked exact headings/column count, selected check-in dates and both saved visits for the soft-deleted institute. Inverted dates returned 400; Rep and Team Lead returned 403. Typecheck passed. No schema change.
 PDF pages 19-20; final page is a faithful HTML rendering of cells extracted from the actual downloaded workbook, not an app table.
 
+
+## Completed: A3 saved Call Reports in Admin Review
+The documented integration baseline lacked the existing call-report columns/RPC found on deploy-iq6-client. Reviewed and ported that saved-call representation as migration 0050, retaining the original follow_up_tasks row as the only report record. No duplicate reports/visits and no new route. The existing call list now opens a report dialog; shared status-driven fields are reused. Review displays Call Report alongside labelled Log Visit Report entries; complete Call Report opens using the existing Review detail route. Existing date/Rep/institute/status filters apply; RLS scopes access.
+Live Bob submitted a report with status, date, headcount, topic, taken-by and notes. Admin saw both report labels and opened all submitted details. Task and visit IDs/counts remained identical. An unrelated Team Lead saw Page not found and no report data. DOWN ran in a rolled-back transaction and retained the saved report. Typecheck and 37 focused tests passed. PDF pages 21-23.
+

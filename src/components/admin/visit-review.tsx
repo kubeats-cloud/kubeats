@@ -426,6 +426,7 @@ export function VisitReview({
                     )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">Log Visit Report</Badge>
                     <Badge variant="secondary">{visit.activityLabel}</Badge>
                     {visit.lifecycle && (
                       <Badge
@@ -641,6 +642,7 @@ export function VisitReview({
                       )}
                       {view.shows("report") && (
                         <td className="px-5 py-3">
+                          <span className="mr-2 text-xs">Log Visit Report</span>
                           <Badge variant={visit.reportedAt ? "success" : "neutral"}>
                             {visit.reportedAt ? "Filed" : "None"}
                           </Badge>

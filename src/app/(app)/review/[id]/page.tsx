@@ -11,6 +11,8 @@ import { VisitProof } from "@/components/admin/visit-proof";
 import { requireStaff } from "@/lib/admin";
 import { getVisitReport } from "@/lib/closing-report";
 import { activityLabelFor } from "@/lib/validation/visit";
+import { getCallReport } from "@/lib/call-reports";
+import { CallReportDetails } from "@/components/admin/call-reports";
 
 export const metadata = { title: "Visit" };
 
@@ -35,6 +37,16 @@ export default async function ReviewVisitPage(props: PageProps<"/review/[id]">) 
   }
 
   const { id } = await props.params;
+  const searchParams = await props.searchParams;
+  if (searchParams.kind === "call") {
+    const call = await getCallReport(id);
+    if (!call) notFound();
+    return <PageColumn>
+      <PageHeader title="Call Report" description={call.institutes?.name}
+        action={<Button asChild variant="outline"><Link href="/review">Review</Link></Button>} />
+      <CallReportDetails report={call} />
+    </PageColumn>;
+  }
   const report = await getVisitReport(id);
   if (!report) notFound();
 

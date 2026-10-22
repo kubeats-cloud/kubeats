@@ -6,6 +6,8 @@ import { listTeamVisits } from "@/lib/admin-workspace";
 import { listReps } from "@/lib/closing-report";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { listInstitutesForPicker } from "@/lib/visits";
+import { listCallReports } from "@/lib/call-reports";
+import { CallReports } from "@/components/admin/call-reports";
 
 export const metadata = { title: "Review" };
 
@@ -69,7 +71,7 @@ export default async function ReviewPage(props: PageProps<"/review">) {
    */
   const requestedPage = Number.parseInt(first(searchParams.page) ?? "1", 10);
 
-  const [result, reps, institutes, catalogue] = await Promise.all([
+  const [result, reps, institutes, catalogue, calls] = await Promise.all([
     listTeamVisits(filters, Number.isFinite(requestedPage) ? requestedPage : 1),
     listReps(),
     listInstitutesForPicker(),
@@ -85,14 +87,17 @@ export default async function ReviewPage(props: PageProps<"/review">) {
      * admin added last week has to be filterable this week.
      */
     listStatusCatalogue(),
+    listCallReports(filters),
   ]);
 
   return (
     <>
       <PageHeader
         title="Review"
-        description="Every visit the team has logged, with its photo and closing report."
+        description="Call Reports and Log Visit Reports submitted by the team."
       />
+
+      <CallReports reports={calls} />
 
       {result.ok ? (
         <VisitReview

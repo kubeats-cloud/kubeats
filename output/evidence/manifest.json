@@ -98,5 +98,20 @@
     "item": "IQ4",
     "caption": "Actual downloaded Excel: exact five columns and saved field visits",
     "file": "IQ4-exact-columns.png"
+  },
+  {
+    "item": "A3",
+    "caption": "Rep submits full call report on the original saved call task",
+    "file": "A3-rep-submission.png"
+  },
+  {
+    "item": "A3",
+    "caption": "Admin Review labels Call Report alongside Log Visit Report",
+    "file": "A3-review-labels.png"
+  },
+  {
+    "item": "A3",
+    "caption": "Admin opens complete saved Call Report; no duplicate report rows",
+    "file": "A3-full-report.png"
   }
 ]

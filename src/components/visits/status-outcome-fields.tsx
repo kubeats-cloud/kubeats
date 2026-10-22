@@ -34,6 +34,7 @@ import {
   eventDateRequired,
   followUpRequired,
   notesRequired,
+  nextActionShown,
   postedEventDate,
 } from "@/lib/validation/visit";
 import type { OpenLoop } from "@/lib/visits";
@@ -177,7 +178,7 @@ export function StatusOutcomeFields({
             </div>
           )}
 
-          {showNextAction && (
+          {showNextAction && nextActionShown(catalogue, status) && (
             <NextActionFields
               value={value.nextAction}
               onChange={(patch) =>
@@ -189,6 +190,7 @@ export function StatusOutcomeFields({
                 }))
               }
               fieldErrors={fieldErrors}
+              defaultDue={value.followUpDate}
             />
           )}
 
