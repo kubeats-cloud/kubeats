@@ -113,5 +113,15 @@
     "item": "A3",
     "caption": "Admin opens complete saved Call Report; no duplicate report rows",
     "file": "A3-full-report.png"
+  },
+  {
+    "item": "R3",
+    "caption": "Due and overdue follow-ups automatically added to Today's Plan",
+    "file": "R3-auto-plan.png"
+  },
+  {
+    "item": "R3",
+    "caption": "Follow-up calls rendered in Daily Plan without duplicate entries",
+    "file": "R3-auto-calls.png"
   }
 ]

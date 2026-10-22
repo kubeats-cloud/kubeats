@@ -190,6 +190,11 @@ export async function getTodayPlan(
   memberId: string,
 ): Promise<{ ok: true; entries: PlanEntry[] } | { ok: false }> {
   const supabase = await createClient();
+  const { error: followUpError } = await supabase.rpc("materialise_due_followups");
+  if (followUpError) {
+    logError("visits:auto-follow-ups", followUpError);
+    return { ok: false };
+  }
   const { data, error } = await supabase
     .from("daily_plans")
     // The purpose row rides along, because it is what decides the visit's

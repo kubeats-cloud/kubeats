@@ -148,7 +148,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
      * the cause of. The empty answer is the one the admin branch already
      * returns, so the component below needs no third case.
      */
-    admin || !PHASE_A_DAILY_PLAN
+    admin
       ? Promise.resolve({ ok: true as const, tasks: [] })
       : settled(
           listFollowUpTasks(user.id, todayISO()),
