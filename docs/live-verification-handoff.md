@@ -61,3 +61,7 @@ A4 cards now appear at the top of the existing Follow-ups Owned page, removed fr
 A5 was verified without rewriting existing implementation: live filtering and exact empty state, Admin-only.
 Evidence PDF: output/pdf/kubeats_feature_evidence.pdf (A5: pages 1-2; A4: pages 3-5).
 
+
+## Completed: A1 label correction
+The existing institute report and its Excel now share the exact names Meetings, Sessions, Campus Visits, Olympiad Registrations, Applications, Admissions. No columns/routes/buttons added. Chromium downloaded the 20 October filtered workbook; XML parsing verified every data cell against the rendered table and checked all headings. Evidence PDF page 6. No schema change.
+

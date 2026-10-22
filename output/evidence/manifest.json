@@ -23,5 +23,10 @@
     "item": "A4",
     "caption": "Closed card on Follow-ups Owned page opens matching saved records",
     "file": "A4-closed.png"
+  },
+  {
+    "item": "A1",
+    "caption": "Exact activity names; date-filtered Excel matches every displayed cell",
+    "file": "A1-exact-labels.png"
   }
 ]

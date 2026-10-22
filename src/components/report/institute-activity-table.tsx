@@ -6,7 +6,7 @@ import {
   ACTIVITY_TYPES,
   type ActivityType,
 } from "@/lib/validation/weekly";
-import { activityLabelFor } from "@/lib/validation/visit";
+import { INSTITUTE_ACTIVITY_LABELS } from "@/lib/institute-activity-counts";
 import type {
   InstituteActivityRow,
   InstituteActivitySortKey,
@@ -123,7 +123,7 @@ export function InstituteActivityTable({
                 colSpan={2}
                 className="bg-muted/60 text-muted-foreground sticky top-0 z-20 px-3 py-2 text-center text-xs font-medium"
               >
-                {activityLabelFor(activity)}
+                {INSTITUTE_ACTIVITY_LABELS[activity]}
               </th>
             ))}
           </tr>

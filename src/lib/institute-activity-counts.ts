@@ -16,6 +16,15 @@ import {
 } from "@/lib/validation/weekly";
 import type { StatusCategory } from "@/lib/validation/institute";
 
+export const INSTITUTE_ACTIVITY_LABELS: Record<ActivityType, string> = {
+  meeting: "Meetings",
+  session: "Sessions",
+  campus_visit: "Campus Visits",
+  olympiad: "Olympiad Registrations",
+  application: "Applications",
+  admission: "Admissions",
+};
+
 /**
  * Pure institute-wise activity arithmetic.
  *

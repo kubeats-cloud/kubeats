@@ -7,7 +7,7 @@ import {
 } from "@/lib/institute-activity-report";
 import type { InstituteActivityRow } from "@/lib/institute-activity-counts";
 import { ACTIVITY_TYPES, type ActivityType } from "@/lib/validation/weekly";
-import { activityLabelFor } from "@/lib/validation/visit";
+import { INSTITUTE_ACTIVITY_LABELS } from "@/lib/institute-activity-counts";
 
 /**
  * Excel for the institute-wise Activity Report.
@@ -24,8 +24,8 @@ export type InstituteActivityExportResult =
 const ACTIVITY_HEADERS: { key: ActivityType; open: string; closed: string }[] =
   ACTIVITY_TYPES.map((key) => ({
     key,
-    open: `${activityLabelFor(key)} Open`,
-    closed: `${activityLabelFor(key)} Closed`,
+    open: `${INSTITUTE_ACTIVITY_LABELS[key]} Open`,
+    closed: `${INSTITUTE_ACTIVITY_LABELS[key]} Closed`,
   }));
 
 export function instituteActivitySheetRows(
