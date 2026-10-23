@@ -17,7 +17,7 @@ import {
   instituteActivityExportRangeProblem,
 } from '@/lib/institute-activity-links';
 import { listStatusCatalogue } from "@/lib/statuses";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getCurrentUser, isAdmin, isStaff } from "@/lib/auth";
 import {
   getInstituteActivityModel,
   getInstituteStatusActivityModel,
@@ -63,8 +63,8 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
   ]);
 
   const admin = isAdmin(user);
+  const staff = isStaff(user);
   const isRep = user?.role === "rep";
-  const staff = admin || user?.role === "team_lead";
   const params = Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'));
   const activityView = staff && first(searchParams.view) === 'activity';
   // The registry is not fetched for the activity view: it would be a page of
