@@ -1,0 +1,26 @@
+-- DO NOT RUN — owner reviews. This file intentionally contains comments only.
+-- First run prod_data_hygiene_report.sql read-only and privately approve exact IDs.
+-- Back up schema, auth, application rows and storage; verify restore first.
+-- Test-looking names are candidates, never proof that a row is disposable.
+--
+-- Proposed soft-delete transaction, only as the authorized admin:
+-- BEGIN;
+-- SELECT public.soft_delete_institute('<owner-reviewed institute UUID>'::uuid);
+-- Verify retained visits/status/call history, cancelled future work and no active visit.
+-- ROLLBACK; -- Owner must separately approve a real COMMIT after staging verification.
+-- Use the existing RPC, not a bypassing UPDATE; it preserves current safety rules.
+--
+-- Proposed merge review (NO automatic merge SQL authorized):
+-- Approve survivor/duplicate IDs, campus/owner scope and every dependent FK first.
+-- Never rewrite original visits.member or move historical rep credit.
+-- Preserve slabs, calls, status/assignment history, plan links and source evidence.
+-- If ownership/campus differs, stop for a security decision; do not bypass FO033.
+-- Merging requires its own reviewed migration, tests and rollback mapping.
+-- Do not delete profiles or auth users from a test-name guess.
+--
+-- Proposed future uniqueness migration, AFTER duplicate reconciliation/review:
+-- CREATE UNIQUE INDEX institutes_active_name_per_campus_unique
+-- ON public.institutes(campus_id,lower(trim(name))) NULLS NOT DISTINCT
+-- WHERE deleted_at IS NULL;
+-- Proposed DOWN: DROP INDEX public.institutes_active_name_per_campus_unique;
+-- No index in this file has been applied; this is not an executable migration.

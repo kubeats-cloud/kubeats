@@ -182,5 +182,9 @@ try {
   check((await db.query("select to_regclass('target_statuses_name_normalized_unique') i")).rows[0].i,null);
   await db.exec(targetUp);
   check((await db.query('select count(*)::integer n from target_statuses')).rows[0].n,1);
+  const hygiene = await db.exec(await readFile(new URL('../prod_data_hygiene_report.sql',import.meta.url),'utf8'));
+  check(hygiene.every(result => result.rows.every(row => Object.keys(row).every(key => ['kind','campus_id','n','ids'].includes(key)))),true);
+  const proposal = await readFile(new URL('../prod_data_hygiene_proposal_DO_NOT_RUN.sql',import.meta.url),'utf8');
+  check(proposal.split('\n').every(line => !line.trim() || line.trim().startsWith('--')),true);
   console.log(`PASS activity SQL: ${checks} checks; UP/DOWN/UP; ephemeral PostgreSQL fixture, not full Supabase integration.`);
 } finally { await db.close(); }

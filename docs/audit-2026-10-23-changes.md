@@ -221,3 +221,16 @@ SQL fixture now 43 checks pass, including case/whitespace duplicate rejection,
 blank rejection, index DOWN/UP and preserved existing rows. These are not
 full Supabase integration tests. Authenticated add-status, lock/reopen and
 roster interactions **not verified in browser**. No migration applied to production.
+
+## Hygiene scripts — no cleanup performed
+
+Added owner-run `scripts/prod_data_hygiene_report.sql`, explicit read-only
+transaction/ROLLBACK, outputting counts and IDs only for active same-campus
+case-insensitive duplicates and test-looking institute/profile candidates.
+The separate `prod_data_hygiene_proposal_DO_NOT_RUN.sql` is comments only,
+references the existing reviewed soft-delete RPC and records merge safeguards.
+Its proposed per-campus name index is a comment, never an applied migration.
+No rows, profiles, auth users or artifacts were deleted or changed.
+
+SQL script execution and comments-only proposal check passed against the
+ephemeral fixture (45 harness checks total). Not run against production.
