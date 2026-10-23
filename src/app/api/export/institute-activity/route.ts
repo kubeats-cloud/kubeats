@@ -6,6 +6,7 @@ import {
   type InstituteActivitySortKey,
 } from "@/lib/institute-activity-counts";
 import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
+import { getCurrentUser } from '@/lib/auth';
 
 /**
  * The institute-wise Activity Report export, as an .xlsx download.
@@ -24,12 +25,16 @@ import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
+  const params = request.nextUrl.searchParams;
+  const rawView = params.get('view');
+  const view = rawView === 'rep' || rawView === 'presence' ? rawView : undefined;
   const gate = await requireStaff();
-  if (!gate.ok) {
+  const user = gate.ok ? gate.user : view ? await getCurrentUser() : null;
+  // Staff export unchanged. New rep/presence variants are own-member exports only.
+  if (!gate.ok && (!view || !user || user.role !== 'rep')) {
     return NextResponse.json({ error: gate.error }, { status: 403 });
   }
 
-  const params = request.nextUrl.searchParams;
   const parsedRange = pipelineRangeSchema.safeParse({
     from: params.get("from") ?? undefined,
     to: params.get("to") ?? undefined,
@@ -56,6 +61,10 @@ export async function GET(request: NextRequest) {
     range: parsedRange.data,
     sort: { key: sortKey, dir },
     page: params.get('page') ?? undefined,
+    search: params.get('q') ?? undefined,
+    member: user?.role === 'rep' ? user.id : params.get('member') ?? undefined,
+    campus: params.get('campus') ?? undefined,
+    view,
   });
 
   if (!result.ok) {

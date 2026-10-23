@@ -463,7 +463,7 @@ describe("instituteActivitySheetRows", () => {
     const sheet = instituteActivitySheetRows(sorted);
 
     expect(sheet[0][0]).toBe("Institute");
-    expect(sheet).toHaveLength(3); // header + two institutes
+    expect(sheet).toHaveLength(4); // header + two institutes + visible-page Total
     expect(sheet[1][0]).toBe("Alpha School");
     expect(sheet[2][0]).toBe("Zebra School");
     // Only the six activity types' Open/Closed pairs — no Total, no
@@ -475,5 +475,9 @@ describe("instituteActivitySheetRows", () => {
     expect(sheet[0]).not.toContain("Total activities");
     expect(sheet[0]).not.toContain("Follow-ups owned");
     expect(sheet[0]).not.toContain("Meetings completed");
+    expect(sheet.at(-1)?.[0]).toBe('Total');
+    for (let column=1;column<13;column++) {
+      expect(sheet.at(-1)?.[column]).toBe(Number(sheet[1][column])+Number(sheet[2][column]));
+    }
   });
 });

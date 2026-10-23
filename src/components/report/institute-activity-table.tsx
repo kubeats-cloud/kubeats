@@ -50,12 +50,14 @@ function SortHeader({
   sort,
   range,
   basePath,
+  extraParams,
 }: {
   label: string;
   sortKey: InstituteActivitySortKey;
   sort: SortState;
   range: PipelineRange;
   basePath?: string;
+  extraParams?: Record<string,string>;
 }) {
   const href = instituteActivitySortHref({
     key: sortKey,
@@ -63,6 +65,7 @@ function SortHeader({
     currentDir: sort.dir,
     range,
     basePath,
+  extraParams,
   });
   const active = sort.key === sortKey;
   const Icon = !active
@@ -96,6 +99,7 @@ export function InstituteActivityTable({
   range,
   caption,
   basePath,
+  extraParams,
 }: {
   rows: readonly InstituteActivityRow[];
   sort: SortState;
@@ -103,6 +107,7 @@ export function InstituteActivityTable({
   caption: string;
   /** Where a sort-header click navigates. Defaults to this table's own page. */
   basePath?: string;
+  extraParams?: Record<string,string>;
 }) {
   return (
     <div className="border-border overflow-x-auto rounded-lg border">
@@ -116,6 +121,7 @@ export function InstituteActivityTable({
               sort={sort}
               range={range}
               basePath={basePath}
+              extraParams={extraParams}
             />
             {ACTIVITY_TYPES.map((activity) => (
               <th
@@ -140,6 +146,7 @@ export function InstituteActivityTable({
                 sort={sort}
                 range={range}
                 basePath={basePath}
+              extraParams={extraParams}
               />,
               <SortHeader
                 key={`${activity}-closed`}
@@ -148,6 +155,7 @@ export function InstituteActivityTable({
                 sort={sort}
                 range={range}
                 basePath={basePath}
+              extraParams={extraParams}
               />,
             ])}
           </tr>
@@ -186,6 +194,7 @@ export function InstituteActivityTable({
                           activity,
                           category: "open",
                           range,
+                          member: extraParams?.member,
                         })}
                       />
                     </td>
@@ -197,6 +206,7 @@ export function InstituteActivityTable({
                           activity,
                           category: "closed",
                           range,
+                          member: extraParams?.member,
                         })}
                       />
                     </td>
@@ -206,6 +216,9 @@ export function InstituteActivityTable({
             ))
           )}
         </tbody>
+        <tfoot><tr className="bg-muted/60 border-t font-semibold"><th className="bg-card sticky left-0 px-3 py-2 text-left">Total</th>
+          {ACTIVITY_TYPES.flatMap(activity => (['open','closed'] as const).map(category => <td key={`${activity}-${category}`} className="px-3 py-2 text-right tabular-nums">{rows.reduce((sum,row) => sum + row.byActivity[activity][category],0)}</td>))}
+        </tr></tfoot>
       </table>
     </div>
   );

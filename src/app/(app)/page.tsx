@@ -35,6 +35,7 @@ import {
 import { isInstituteActivitySortKey } from "@/lib/institute-activity-counts";
 import { instituteActivityExportHref } from "@/lib/institute-activity-links";
 import { ActivityPages } from '@/components/report/activity-pages';
+import { ActivityFilters } from '@/components/report/activity-filters';
 import { pipelineRangeSchema, type PipelineRange } from "@/lib/validation/pipeline-report";
 
 export const metadata = { title: "Dashboard" };
@@ -57,6 +58,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
    * Rep branch never reads these.
    */
   const searchParams = await props.searchParams;
+  const activityParams = Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'));
   const parsedActivityRange = admin
     ? pipelineRangeSchema.safeParse({
         from: first(searchParams.from),
@@ -126,7 +128,8 @@ export default async function DashboardPage(props: PageProps<"/">) {
     settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "dashboard:statuses"),
     admin && !activityRangeError
       ? settled(
-          getInstituteActivityModel({ range: activityRange, sort: activitySort, page: first(searchParams.page) }),
+          getInstituteActivityModel({ range: activityRange, sort: activitySort, page: first(searchParams.page),
+            search:first(searchParams.q),member:first(searchParams.member),campus:first(searchParams.campus) }),
           null,
           "dashboard:report",
         )
@@ -255,6 +258,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
                     sortKey: report.model.sort.key,
                     sortDir: report.model.sort.dir,
                     page: String(report.model.page),
+                    search: first(searchParams.q),member:first(searchParams.member),campus:first(searchParams.campus),
                   })}
                   download
                 >
@@ -265,6 +269,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
             )}
           </div>
 
+          <ActivityFilters params={activityParams} />
           <RangeControls
             start={activityRange.from ?? ""}
             end={activityRange.to ?? ""}
@@ -274,8 +279,8 @@ export default async function DashboardPage(props: PageProps<"/">) {
               report?.ok &&
               (report.model.sort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
                 report.model.sort.dir !== DEFAULT_INSTITUTE_ACTIVITY_SORT.dir)
-                ? { sort: report.model.sort.key, dir: report.model.sort.dir }
-                : undefined
+                ? { ...activityParams, page:'1',sort: report.model.sort.key, dir: report.model.sort.dir }
+                : {...activityParams,page:'1'}
             }
             hint="Filters by the date the work was logged. Leave both blank for all time."
           />
@@ -291,7 +296,9 @@ export default async function DashboardPage(props: PageProps<"/">) {
                 range={report.model.range}
                 basePath="/"
                 caption="Institute-wise activity, Open and Closed by type"
+                extraParams={{q:activityParams.q ?? '',member:activityParams.member ?? '',campus:activityParams.campus ?? ''}}
               />
+              <p className="text-muted-foreground mt-2 text-xs">Open and Closed count logged visit activities by their own recorded status category and activity type, not institutes&apos; current statuses. Total sums the displayed page; Excel exports that same page. Held meetings and saved plan visits are different units from logged activities. Open loops above counts all-time unclosed Set visits, not these date-filtered status events.</p>
             </div>
           ) : (
             <ErrorState message="We could not load the activity report just now. Please try again in a moment." />

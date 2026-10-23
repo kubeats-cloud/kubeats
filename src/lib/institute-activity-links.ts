@@ -14,6 +14,7 @@ export function reviewCohortHref(input: {
   activity: ActivityType;
   category: StatusCategory;
   range: PipelineRange;
+  member?: string;
 }): string {
   const params = new URLSearchParams({
     institute: input.instituteId,
@@ -22,6 +23,7 @@ export function reviewCohortHref(input: {
   });
   if (input.range.from) params.set("from", input.range.from);
   if (input.range.to) params.set("to", input.range.to);
+  if (input.member) params.set('member',input.member);
   return `/review?${params.toString()}`;
 }
 
@@ -61,6 +63,10 @@ export function instituteActivityExportHref(input: {
   sortKey: InstituteActivitySortKey;
   sortDir: "asc" | "desc";
   page?: string;
+  search?: string;
+  member?: string;
+  campus?: string;
+  view?: 'rep' | 'presence';
 }): string {
   const params = new URLSearchParams();
   if (input.range.from) params.set("from", input.range.from);
@@ -68,5 +74,9 @@ export function instituteActivityExportHref(input: {
   params.set("sort", input.sortKey);
   params.set("dir", input.sortDir);
   if (input.page) params.set('page', input.page);
+  if (input.search) params.set('q',input.search);
+  if (input.member) params.set('member',input.member);
+  if (input.campus) params.set('campus',input.campus);
+  if (input.view) params.set('view',input.view);
   return `/api/export/institute-activity?${params.toString()}`;
 }

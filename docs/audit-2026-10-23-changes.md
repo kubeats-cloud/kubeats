@@ -145,3 +145,37 @@ and current-status predicate, retaining the behavioral attribution tests. Rerun:
 attribution, IST call day, 0057 DOWN/UP. Signed-out closed-list page returns 307;
 authenticated card/list/action and RLS checks **not verified in browser**.
 0057 has not run on Supabase or production.
+
+## A1/R1/R7 — correct existing reports, not prerequisite ports
+
+Kept Admin 1/2's existing per-activity Open/Closed grid on Overview (the latest
+instruction says follow the client spec, not replace it with Rep 7's different
+presence table). Added Rep/Campus/search filters, preserved dates/sort in every
+sort/export/page URL, and page Total in table and Excel. Each download is the
+displayed max-50 page, explicitly captioned, not an unbounded Worker export.
+Existing SQL model/count definitions feed all three export shapes.
+
+Rep Institutes retains its single nine-column consolidated table and date/search/
+sort controls. Added matching nine-column Excel/Total and a clear `/report` entry
+link. Rep `/report` retains InstitutePresenceTable and gets matching nine-column
+Excel; captions distinguish own historical visits, current ownership, saved
+plan records, held plan meetings, and logged activities. No missing timestamps
+or locations are fabricated. Total sums visible rows, not all matching pages.
+
+The original matrix exporter remains staff-only. New `view=rep|presence` variants
+allow a signed-in rep to export only their own member scope; spoofed member IDs
+are ignored. Existing auth/RLS are not modified, and no service key is used.
+Added route-unit tests for anonymous denial, unchanged staff gate, both own-only
+variants, admin filter forwarding, and invalid dates. These test request-handler
+logic with mocks; real session/RSC/DB isolation is not certified.
+
+Removed duplicate report button; `/institutes/report` retains its staff guard
+and redirects to Overview with URL filters preserved. Old unused pipeline helpers
+remain in source, not speculatively deleted; there is no Pipeline by Rep UI on
+Overview. Open-loops tile's all-time unclosed-Set unit is distinguished from
+date-filtered status-event counts.
+
+Lint/typecheck exit 0. Focused exports/activity/role suite: 4 files / 65 tests
+passed. Pure sheet tests verify exact headers, model row order/count, every
+numeric Total, missing values and filter URLs; they do not assert live browser
+Excel parity. Authenticated reporting/400px UI **not verified in browser**.

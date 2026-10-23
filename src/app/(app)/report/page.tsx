@@ -10,6 +10,7 @@ import { getActivityReport } from "@/lib/activity-report";
 import { getInstituteActivityModel } from "@/lib/institute-activity-report";
 import { sumInstituteActivityRows } from "@/lib/institute-activity-counts";
 import { ActivityPages } from '@/components/report/activity-pages';
+import { instituteActivityExportHref } from '@/lib/institute-activity-links';
 import {
   REPORT_PERIODS,
   isReportPeriod,
@@ -151,6 +152,8 @@ export default async function ReportPage(props: PageProps<"/report">) {
 
 
       {instituteActivityResult.ok && <ActivityPages model={instituteActivityResult.model} basePath="/report" params={{period,start:periodStart}} />}
+      {instituteActivityResult.ok && <a download className="my-3 inline-flex min-h-11 items-center rounded-md border px-4" href={instituteActivityExportHref({range:instituteActivityResult.model.range,sortKey:instituteActivityResult.model.sort.key,sortDir:instituteActivityResult.model.sort.dir,page:String(instituteActivityResult.model.page),view:'presence'})}>Download Excel</a>}
+      <p className="text-muted-foreground mb-3 text-xs">Summary Total visits counts your logged visit rows, including institutes no longer yours. The institute table covers the displayed page of your currently assigned institutes; its Total row and Excel sum that page. Total Number of Visits counts saved plan records in range; Total Number of Meetings counts held plan meetings. Total activity count counts logged visit rows; Open/Closed use each visit&apos;s recorded status category. Check-in/out is the latest plan record in range; missing times are never invented.</p>
       {!result.ok ? (
         <ErrorState message="We could not load this activity report. Please try again in a moment." />
       ) : (

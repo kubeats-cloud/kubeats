@@ -4,6 +4,7 @@ import { COUNT_ZERO_CLASS } from "@/components/ui/count-link";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
 import {
   openClosedTotals,
+  sumInstituteActivityRows,
   type InstituteActivityRow,
   type InstituteActivitySortKey,
 } from "@/lib/institute-activity-counts";
@@ -241,6 +242,14 @@ export function RepInstituteTable({
             })
           )}
         </tbody>
+        <tfoot><tr className="bg-muted/60 border-t font-semibold">
+          <th className="bg-card sticky left-0 px-3 py-2 text-left">Total</th><td /><td /><td />
+          <td className="px-3 py-2 text-right">{sumInstituteActivityRows(rows).open}</td>
+          <td className="px-3 py-2 text-right">{sumInstituteActivityRows(rows).closed}</td>
+          <td className="px-3 py-2 text-right">{rows.reduce((n,r) => n+r.followUpsOwned,0)}</td>
+          <td className="px-3 py-2 text-right">{rows.reduce((n,r) => n+r.followUpsPending,0)}</td>
+          <td className="px-3 py-2 text-right">{sumInstituteActivityRows(rows).meetingsCompleted}</td>
+        </tr></tfoot>
       </table>
     </div>
   );

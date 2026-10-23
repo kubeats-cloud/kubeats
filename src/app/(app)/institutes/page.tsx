@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PlusIcon, TableIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
@@ -11,6 +11,7 @@ import { RepInstituteSearch } from "@/components/report/rep-institute-search";
 import { RangeControls } from "@/components/report/range-controls";
 import { getRegistryPage } from '@/lib/registry-page';
 import { auditHref } from '@/lib/audit-pagination';
+import { instituteActivityExportHref } from '@/lib/institute-activity-links';
 import { listStatusCatalogue } from "@/lib/statuses";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import {
@@ -129,14 +130,6 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
           <div className="flex items-center gap-2">
             {/* Admin only, and off the nav bar: the activity report is read
                 weekly, not daily. A rep has no team-wide report to read. */}
-            {admin && (
-              <Button asChild variant="outline" className="h-11">
-                <Link href="/institutes/report">
-                  <TableIcon className="size-4" aria-hidden />
-                  Activity report
-                </Link>
-              </Button>
-            )}
             <Button asChild className="h-11">
               <Link href="/institutes/new">
                 <PlusIcon className="size-4" aria-hidden />
@@ -146,6 +139,7 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
           </div>
         }
       />
+      {isRep && <Link prefetch={false} href="/report" className="mb-4 inline-flex min-h-11 items-center rounded-md border px-4">My Activity Report</Link>}
 
       {/*
         R1 — a rep sees the one consolidated table and nothing else on this
@@ -188,8 +182,8 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
             extraParams={
               instituteActivitySort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
               instituteActivitySort.dir !== DEFAULT_INSTITUTE_ACTIVITY_SORT.dir
-                ? { sort: instituteActivitySort.key, dir: instituteActivitySort.dir }
-                : undefined
+                ? { q:first(searchParams.q) ?? '',sort: instituteActivitySort.key, dir: instituteActivitySort.dir }
+                : {q:first(searchParams.q) ?? ''}
             }
             hint="Filters by the date the work was logged. Leave both blank for all time."
           />
@@ -205,6 +199,7 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
             />
           ) : (
             <>
+            <a download className="my-3 inline-flex min-h-11 items-center rounded-md border px-4" href={instituteActivityExportHref({range:instituteActivityRange,sortKey:instituteActivityResult.model.sort.key,sortDir:instituteActivityResult.model.sort.dir,page:String(instituteActivityResult.model.page),search:first(searchParams.q),view:'rep'})}>Download Excel</a>
             <ActivityPages model={instituteActivityResult.model} basePath="/institutes" params={Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'))} />
             <RepInstituteSearch
               rows={instituteActivityResult.model.rows}
