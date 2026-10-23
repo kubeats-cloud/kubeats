@@ -458,7 +458,7 @@ No code change was needed; no separate E commit exists.
     lists planned institutes, and still refuses logging.
 11. A rep opening an admin URL gets a server redirect to `/` before any admin
     content or RSC payload is served.
-12. Apply migrations 0055-0059 in order on staging; on a copy, apply the DOWN
+12. Apply migrations 0055-0060 in order on staging; on a copy, apply the DOWN
     files in reverse order and confirm the prior schema returns. Nothing is
     applied to production by this branch.
 13. Measure Worker CPU and SQL query counts on Overview, `/institutes` and
