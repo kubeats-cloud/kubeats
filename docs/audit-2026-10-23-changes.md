@@ -200,3 +200,24 @@ actor preservation, blocked mutation, rep read/insert denial, admin reads and
 DOWN/UP evidence preservation. These use fixture auth/RLS helpers, not the full
 Supabase auth/FO033 stack. Authenticated history UI **not verified in browser**.
 No backfill, production access or Supabase migration was performed.
+
+## D4/R2 / A8 — Targets reachable, existing catalogue retained
+
+Admin nav now includes Targets without removing existing routes. Existing
+TargetStatusesPanel remains in place; added paginated per-rep weekly values,
+real Draft/Locked/Not set state and links to the existing per-rep target/reopen
+screen. Reads are exact rep count + 50 reps + target rows for those IDs (3),
+not raw visit aggregation or one query per rep. Eight metrics and lock rules
+are unchanged; no Foot Mapping field invented. Seven admin tabs need 400px QA.
+
+Empty-name validation and friendly duplicate errors already existed. Confirmed
+0047's text PK was case-sensitive; added 0059 unique expression index on
+lower(trim(name)), with DOWN. If legacy case-only duplicates exist, UP fails
+atomically for owner review without rewriting/deleting any name. Existing 0047
+and its RLS policies remain untouched.
+
+Lint/typecheck exit 0; nav/status schema/action tests: 3 files / 38 passed.
+SQL fixture now 43 checks pass, including case/whitespace duplicate rejection,
+blank rejection, index DOWN/UP and preserved existing rows. These are not
+full Supabase integration tests. Authenticated add-status, lock/reopen and
+roster interactions **not verified in browser**. No migration applied to production.

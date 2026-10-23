@@ -22,6 +22,8 @@ const pendingUp = await readFile(new URL('../../supabase/migrations/0057_audit_o
 const pendingDown = await readFile(new URL('../../supabase/rollbacks/0057_audit_open_follow_ups_down.sql',import.meta.url),'utf8');
 const historyUp = await readFile(new URL('../../supabase/migrations/0058_audit_reassignment_history.sql',import.meta.url),'utf8');
 const historyDown = await readFile(new URL('../../supabase/rollbacks/0058_audit_reassignment_history_down.sql',import.meta.url),'utf8');
+const targetUp = await readFile(new URL('../../supabase/migrations/0059_target_status_case_unique.sql',import.meta.url),'utf8');
+const targetDown = await readFile(new URL('../../supabase/rollbacks/0059_target_status_case_unique_down.sql',import.meta.url),'utf8');
 try {
   // Minimal actual-column fixture, not a claim that the full Supabase schema/RLS was replayed.
   await db.exec(`
@@ -170,5 +172,15 @@ try {
   check((await db.query('select count(*)::integer n from institute_reassignment_history_0058_archive')).rows[0].n,2);
   await db.exec(historyUp);
   check((await db.query('select count(*)::integer n from institute_reassignment_history')).rows[0].n,2);
+  await db.exec("create table target_statuses(name text primary key check(length(trim(name)) > 0)); insert into target_statuses values ('Synthetic Status');");
+  await db.exec(targetUp);
+  for (const value of ['synthetic status','  SYNTHETIC STATUS  ']) {
+    await assert.rejects(db.query('insert into target_statuses values ($1)',[value]),error => error.code === '23505'); checks++;
+  }
+  await assert.rejects(db.query('insert into target_statuses values ($1)',[' ']),error => error.code === '23514'); checks++;
+  await db.exec(targetDown);
+  check((await db.query("select to_regclass('target_statuses_name_normalized_unique') i")).rows[0].i,null);
+  await db.exec(targetUp);
+  check((await db.query('select count(*)::integer n from target_statuses')).rows[0].n,1);
   console.log(`PASS activity SQL: ${checks} checks; UP/DOWN/UP; ephemeral PostgreSQL fixture, not full Supabase integration.`);
 } finally { await db.close(); }

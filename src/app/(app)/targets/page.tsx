@@ -13,6 +13,7 @@ import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getWeekSummary, memberName } from "@/lib/week-summary";
 import { listTargetStatuses } from "@/lib/target-statuses";
+import { AdminTargetRoster } from '@/components/weekly/admin-target-roster';
 import { completionPercent } from "@/lib/validation/weekly";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
 
@@ -77,6 +78,8 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
           statuses={statuses.ok ? statuses.statuses : []}
           canAdd
         />
+        {!statuses.ok && <ErrorState message="Target statuses could not be loaded." />}
+        <AdminTargetRoster week={weekStart} page={first(searchParams.page)} />
       </PageColumn>
     );
   }

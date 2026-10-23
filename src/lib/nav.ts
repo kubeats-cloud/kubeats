@@ -76,6 +76,7 @@ export const REP_NAV: NavItem[] = [
  */
 export const ADMIN_NAV: NavItem[] = [
   { href: "/", label: "Overview", icon: "dashboard" },
+  { href: '/targets', label: 'Targets', icon: 'weekly' },
   { href: "/review", label: "Review", icon: "review" },
   // Assign's old slot. /assign itself still works and its records are
   // untouched; only the tab went. /slabs shows an admin the approval queue.

@@ -104,7 +104,8 @@ describe("navItemsFor", () => {
     expect(navItemsFor("team_lead").map((item) => item.href)).not.toContain("/slabs");
     // Shared by every role. Rep-only would bounce the admin off their queue.
     expect(isRepOnlyPath("/slabs")).toBe(false);
-    expect(ADMIN_NAV.length).toBeLessThanOrEqual(6);
+    expect(ADMIN_NAV.length).toBeLessThanOrEqual(7);
+    expect(ADMIN_NAV.map(item => item.href)).toContain('/targets');
     expect(TEAM_LEAD_NAV.length).toBeLessThanOrEqual(6);
   });
 });
