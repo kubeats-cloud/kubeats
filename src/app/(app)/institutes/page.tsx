@@ -9,6 +9,7 @@ import {
 } from "@/components/institutes/institutes-browser";
 import { RepInstituteSearch } from "@/components/report/rep-institute-search";
 import { RangeControls } from "@/components/report/range-controls";
+import { DownloadActivity } from "@/components/report/download-activity";
 import { getRegistryPage } from '@/lib/registry-page';
 import { auditHref } from '@/lib/audit-pagination';
 import {
@@ -30,6 +31,7 @@ import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
 import { ActivityPages } from '@/components/report/activity-pages';
 import { ActivityFilters } from '@/components/report/activity-filters';
 import { InstituteStatusActivityTable } from '@/components/report/institute-status-activity-table';
+import { defaultExportRange } from "@/lib/validation/export";
 
 export const metadata = { title: "Institutes" };
 
@@ -159,7 +161,15 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
           sort: repActivitySort,
         })
       : null;
-
+  /*
+   * The rep's download follows the table's range when it has both ends, and
+   * otherwise opens on this month. It always offers BOTH ends: the 31-day cap
+   * cannot be checked against a range that is open at one end.
+   */
+  const activityDownloadRange =
+    repRange.from && repRange.to
+      ? { start: repRange.from, end: repRange.to }
+      : defaultExportRange();
   return (
     <>
       <PageHeader
@@ -337,6 +347,14 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
             }
             hint="Filters by the date the work was logged. Leave both blank for all time."
           />
+
+          <div className="mb-4">
+            <DownloadActivity
+              start={activityDownloadRange.start}
+              end={activityDownloadRange.end}
+              sort={repActivitySort}
+            />
+          </div>
 
           {repRangeError ? (
             <ErrorState message={repRangeError} />

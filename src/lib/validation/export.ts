@@ -36,6 +36,40 @@ const isoDate = z
 /** The widest range the export will build, as a guard rather than a rule. */
 export const MAX_RANGE_DAYS = 400;
 
+/**
+ * The rep's own institutes download: a month at a time, not a year.
+ *
+ * A SEPARATE NUMBER FROM `MAX_RANGE_DAYS`, which is an admin report's guard.
+ * Lowering that one would silently cap every admin and team-lead export too;
+ * this is a rule about the small control on the rep's Institutes tab, so it is
+ * enforced only on the rep branch of the route.
+ */
+export const REP_ACTIVITY_EXPORT_MAX_DAYS = 31;
+
+/** Inclusive day count between two ISO dates, so 1 October – 31 is 31 days. */
+export function rangeLengthInDays(start: string, end: string): number {
+  return (Date.parse(end) - Date.parse(start)) / 86_400_000 + 1;
+}
+
+/**
+ * What is wrong with a rep's chosen download range, or `null` when it is fine.
+ *
+ * Shared by the control (to disable its button and say why) and the route (to
+ * refuse a hand-edited URL), so the sentence a rep reads is the same one the
+ * endpoint would answer with.
+ */
+export function repActivityExportRangeProblem(
+  start: string,
+  end: string,
+): string | null {
+  if (!start || !end) return "Choose both a start and an end date.";
+  if (start > end) return "The start date has to be on or before the end date.";
+  if (rangeLengthInDays(start, end) > REP_ACTIVITY_EXPORT_MAX_DAYS) {
+    return `Choose a range of ${REP_ACTIVITY_EXPORT_MAX_DAYS} days or fewer.`;
+  }
+  return null;
+}
+
 export const exportRangeSchema = z
   .object({
     start: isoDate.optional(),
@@ -53,11 +87,7 @@ export const exportRangeSchema = z
     path: ["start"],
   })
   .refine(
-    (value) => {
-      const days =
-        (Date.parse(value.end) - Date.parse(value.start)) / 86_400_000 + 1;
-      return days <= MAX_RANGE_DAYS;
-    },
+    (value) => rangeLengthInDays(value.start, value.end) <= MAX_RANGE_DAYS,
     {
       message: `Choose a range of ${MAX_RANGE_DAYS} days or fewer.`,
       path: ["end"],
