@@ -45,8 +45,8 @@ begin
           lower(concat_ws(' ',i.name,i.city,i.area)),lower(trim(p_search))) > 0)
     ), ranged_visits as materialized (
       select v.id,v.institute_id,v.member,v.activity,v.date,v.status_set_to,
-        v.follow_up_date,v.follow_up_time,
-        d.checkin_at,d.checkout_at,d.checkin_lat,d.checkin_lng,d.checkout_lat,d.checkout_lng
+        v.follow_up_date,v.follow_up_time,v.next_action,
+        d.purpose,d.checkin_at,d.checkout_at,d.checkin_lat,d.checkin_lng,d.checkout_lat,d.checkout_lng
       from visits v join registry r on r.id = v.institute_id
         left join daily_plans d on d.id = v.daily_plan_id
       where (p_from is null or v.date >= p_from) and (p_to is null or v.date <= p_to)
@@ -135,8 +135,10 @@ begin
         'institute',r.name,
         'member',p.name,
         'activity',rv.activity,
+        'meetingPurpose',rv.purpose,
         'date',rv.date,
         'status',rv.status_set_to,
+        'nextAction',rv.next_action,
         'checkinAt',rv.checkin_at,
         'checkoutAt',rv.checkout_at,
         'checkinLat',rv.checkin_lat,

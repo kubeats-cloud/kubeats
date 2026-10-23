@@ -10,10 +10,10 @@ export async function ActivityFilters({params,action='/',clearHref='/'}: {
 }) {
   const [reps,campuses] = await Promise.all([listReps(),listCampuses(true)]);
   return <form action={action} className="my-3 grid grid-cols-2 gap-3 rounded-lg border p-3 text-sm md:grid-cols-4">
-    <label className="grid gap-1">Rep<select name="member" defaultValue={params.member ?? ''} className="bg-card min-h-11 rounded-md border px-2">
+    <label className="grid min-w-0 gap-1">Rep<select name="member" defaultValue={params.member ?? ''} className="bg-card min-h-11 w-full min-w-0 rounded-md border px-2">
       <option value="">All reps</option>{reps.map(rep => <option key={rep.id} value={rep.id}>{rep.name}</option>)}
     </select></label>
-    <label className="grid gap-1">Campus<select name="campus" defaultValue={params.campus ?? ''} className="bg-card min-h-11 rounded-md border px-2">
+    <label className="grid min-w-0 gap-1">Campus<select name="campus" defaultValue={params.campus ?? ''} className="bg-card min-h-11 w-full min-w-0 rounded-md border px-2">
       <option value="">All campuses</option>{campuses.map(campus => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
     </select></label>
     <label className="col-span-2 grid gap-1">Search<input name="q" defaultValue={params.q} maxLength={120} className="min-h-11 rounded-md border px-3" /></label>

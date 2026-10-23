@@ -493,10 +493,12 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
       institute: "Alpha School",
       member: "Rep A",
       activity: "meeting",
+      meetingPurpose: "First meeting",
       date: "2026-10-01",
       status: "First meeting done",
+      nextAction: "call",
       checkinAt: "2026-10-01T05:00:00.000Z",
-      checkoutAt: null,
+      checkoutAt: "2026-10-01T06:25:00.000Z",
       location: "Gandhinagar",
       followUpDate: "2026-10-05",
       followUpTime: "09:30:00",
@@ -506,8 +508,10 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
       institute: "Beta School",
       member: null,
       activity: "session",
+      meetingPurpose: null,
       date: "2026-10-02",
       status: "RSVP received",
+      nextAction: null,
       checkinAt: null,
       checkoutAt: null,
       location: null,
@@ -520,7 +524,23 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
   it("writes one row per visit, a column per active status, and IST times", () => {
     const sheet = statusActivitySheetRows(statuses, visits);
     expect(sheet).toHaveLength(4); // header + two visits + Total
-    expect(sheet[0].slice(10, 13)).toEqual([
+    expect(sheet[0].slice(0, 13)).toEqual([
+      "Institute",
+      "Rep",
+      "Activity",
+      "Meeting purpose",
+      "Visit date",
+      "Check-In Date (IST)",
+      "Check-In Time (IST)",
+      "Check-Out Date (IST)",
+      "Check-Out Time (IST)",
+      "Duration",
+      "Location",
+      "Status",
+      "Next action",
+    ]);
+    const statusStart = sheet[0].indexOf("First meeting done");
+    expect(sheet[0].slice(statusStart, statusStart + 3)).toEqual([
       "First meeting done",
       "RSVP received",
       "No visits",
@@ -531,26 +551,58 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
       "Follow-up Created",
     ]);
     // A status with no visits still gets a column; its row flags are 0.
-    expect(sheet[1].slice(10, 13)).toEqual([1, 0, 0]);
-    expect(sheet[2].slice(10, 13)).toEqual([0, 1, 0]);
-    // Check-in 05:00Z is 10:30 IST; a missing check-out is blank, not invented.
-    expect(sheet[1].slice(4, 8)).toEqual([
+    expect(sheet[1].slice(statusStart, statusStart + 3)).toEqual([1, 0, 0]);
+    expect(sheet[2].slice(statusStart, statusStart + 3)).toEqual([0, 1, 0]);
+    // 05:00Z to 06:25Z is 85 minutes; the clock reads 10:30 to 11:55 IST.
+    expect(sheet[1].slice(3, 13)).toEqual([
+      "First meeting",
+      "1 Oct 2026",
       "1 Oct 2026",
       "10:30",
+      "1 Oct 2026",
+      "11:55",
+      "1h 25m",
+      "Gandhinagar",
+      "First meeting done",
+      "Call",
+    ]);
+    expect(sheet[2].slice(3, 13)).toEqual([
       null,
+      "2 Oct 2026",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "RSVP received",
       null,
     ]);
-    expect(sheet[2].slice(4, 8)).toEqual([null, null, null, null]);
     expect(sheet[1].slice(-3)).toEqual(["5 Oct 2026", "09:30", 1]);
     expect(sheet[2].slice(-3)).toEqual([null, null, 0]);
+  });
+
+  it("leaves Duration, Meeting purpose and Next action blank when absent", () => {
+    const sheet = statusActivitySheetRows(statuses, [
+      {
+        ...visits[0],
+        meetingPurpose: null,
+        checkoutAt: null,
+        nextAction: null,
+      },
+    ]);
+    expect(sheet[1][sheet[0].indexOf("Meeting purpose")]).toBeNull();
+    expect(sheet[1][sheet[0].indexOf("Duration")]).toBeNull();
+    expect(sheet[1][sheet[0].indexOf("Next action")]).toBeNull();
   });
 
   it("sums the status and follow-up columns into the final Total row", () => {
     const sheet = statusActivitySheetRows(statuses, visits);
     const total = sheet.at(-1)!;
+    const statusStart = sheet[0].indexOf("First meeting done");
     expect(total[0]).toBe("Total");
-    expect(total.slice(1, 10)).toEqual(Array(9).fill(null));
-    expect(total.slice(10, 13)).toEqual([1, 1, 0]);
+    expect(total.slice(1, statusStart)).toEqual(Array(statusStart - 1).fill(null));
+    expect(total.slice(statusStart, statusStart + 3)).toEqual([1, 1, 0]);
     expect(total.slice(-3)).toEqual([null, null, 1]);
   });
 });

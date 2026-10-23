@@ -344,13 +344,53 @@ over every matching institute, not only the visible page. A status with no
 visits still gets a column and a zero.
 
 Excel: built server-side by `src/lib/xlsx.ts` (the repo's store-only writer), one
-row per **visit** in the chosen range, with the section-C columns and one 1/0
-column per status, then a final **Total** row that sums the per-status columns
-and the Follow-up Created column. It covers every matching row, never a page.
-From/To are mandatory for an export and the inclusive maximum is **31 days**;
-the route refuses longer ranges with 400 and the screens replace the link with
-"Choose a date range of 31 days or fewer…". The limit is enforced in the route
-and again inside the SQL RPC for `p_page = 0`.
+row per **visit** in the chosen range. The fixed columns are Institute, Rep,
+Activity, Meeting purpose, Visit date, Check-In Date (IST), Check-In Time (IST),
+Check-Out Date (IST), Check-Out Time (IST), Duration, Location, Status, Next
+action; then one 1/0 column per status and Follow-up Date, Follow-up Time (IST),
+Follow-up Created. A final **Total** row sums the per-status columns and the
+Follow-up Created column; it does not invent a per-visit follow-up count. It
+covers every matching row, never a page. From/To are mandatory for an export and
+the inclusive maximum is **31 days**; the route refuses longer ranges with 400
+and the screens replace the link with "Choose a date range of 31 days or
+fewer…". The limit is enforced in the route and again inside the SQL RPC for
+`p_page = 0`.
+
+### Client-required columns vs delivered
+
+`docs/client_changes.md` IQcity §4 requires five columns. All five are present:
+
+| Client-required column (IQcity §4) | Delivered Excel column | Status |
+| --- | --- | --- |
+| Institution Name | `Institute` | present |
+| Check-In Date | `Check-In Date (IST)` | present |
+| Check-In Time | `Check-In Time (IST)` | present |
+| Check-Out Time | `Check-Out Time (IST)` | present |
+| Location | `Location` | present |
+
+The column label is `Institute` rather than `Institution Name`, and the
+check-out is also split into `Check-Out Date (IST)` and `Check-Out Time (IST)`
+so an overnight visit is unambiguous; the time columns carry the `(IST)`
+qualifier for the same reason. The screen is one row per institute, while the
+workbook is one row per visit by the owner's explicit instruction; the filtered
+visit/status data matches the screen, but the row grain does not. The workbook
+carries additional columns because Admin §1 requires the Excel to match the
+displayed activity data and the owner explicitly requested Duration, Meeting
+purpose and Next action this round. The spec's preamble also says "no extra
+columns"; read as a strict cap that line would conflict with Admin §1's richer
+table, so the five required IQcity columns were treated as the minimum. No other
+field was added this round. The date range is mandatory and capped at 31 days by
+the owner's instruction, which is narrower than the client's unspecified
+"required date range".
+
+Three fields were added to the per-visit sheet at the owner's request; none
+changes the status totals or replaces Follow-up Created:
+
+| Added column | Source |
+| --- | --- |
+| Duration | `daily_plans.checkout_at` minus `daily_plans.checkin_at`, formatted `Xh Ym`; blank unless both timestamps exist |
+| Meeting purpose | `daily_plans.purpose` for the visit's plan; blank when the visit has no surviving plan |
+| Next action | `visits.next_action`, rendered `Call` or `Meeting`; blank when none was filed |
 
 Column sources:
 
@@ -358,6 +398,9 @@ Column sources:
 | --- | --- |
 | Visit date, Activity, recorded Status | `visits.date`, `visits.activity`, `visits.status_set_to` |
 | Check-in/out date and time (IST) | `daily_plans.checkin_at` / `checkout_at`, rendered in Asia/Kolkata; blank when never recorded |
+| Duration (Excel) | `daily_plans.checkout_at` minus `checkin_at`; blank when either timestamp is missing |
+| Meeting purpose (Excel) | `daily_plans.purpose`; blank when the visit has no surviving plan |
+| Next action (Excel) | `visits.next_action`, rendered `Call`/`Meeting`; blank when none |
 | Location | latest check-in/out coordinates resolved to an area |
 | Total visits | count of logged `visits` rows in range |
 | Each status column | count of `visits.status_set_to` for that status |
@@ -381,26 +424,63 @@ Column sources:
 Rehearsal (`kubeats_rehearsal`, 0060 applied) evidence, counts only:
 
 - Admin status RPC, October 2026, export mode `p_page=0`: 717 institutes, 534
-  visits, 18 statuses, status-column sum 534, 357 meetings, payload 646,052
-  bytes. Runtimes observed: 2,626.9 ms cold (first call after restore) and
-  808.5 ms warm. Page mode `p_page=1`: 50 rows, 0 visit payload, 32,796 bytes,
-  425.2 ms.
-- Parity: 0 mismatched status columns out of 18; Follow-up Created 84.
-- Rep RPC, same range: 82 institutes (the rep's own), 44 visits, 51.997 ms,
-  84,516 bytes.
-- Rep calling the admin RPC: denied, SQLSTATE 42501. Admin calling the rep RPC:
-  denied, SQLSTATE 42501. Rep export through the route: 403. Rep's own export:
-  200, 82 institute rows (SQL count 82), never 717.
-- Excel downloaded through the real route for the same filter: 534 data rows
-  plus the Total row; every one of the 18 status totals equals the on-screen
-  footer (e.g. 199, 37, 88 … 22, summing to 534); Follow-up Created 84.
-- 0060 DOWN → UP round-trip applied; the DOWN restores the 0055-era function and
-  removes the rep RPC.
+  visits, 18 statuses, status-column sum 534, 534 meeting purposes, 84 next
+  actions, 534 complete check-in/check-out pairs, JSON payload length 628,828
+  characters. Payload length is `length(payload::text)` in psql, not an HTTP
+  byte count; it supersedes the earlier 646,052-byte figure, which used a
+  different capture. First call after reapplying 0060: 101.761 ms; warm calls
+  33.641/34.910 ms.
+- Parity: 0 mismatched status columns out of 18; Follow-up Created 107 (427
+  visits with 0, 107 with 1).
+- Role boundary, rerun with current local sessions: admin → admin RPC 200;
+  rep → admin RPC 403/42501; admin → rep RPC 403/42501; rep → own RPC 200. The
+  local test rep has no assigned institutes after the rehearsal rebuild, so its
+  own RPC returned 0 rows; the earlier pre-rebuild run returned that rep's 82
+  institutes and 44 visits and is not current.
+- Excel downloaded through the real route for the same filter: 811,804 bytes,
+  534 data rows plus the Total row; all 18 status totals equal the on-screen
+  footer; 534 Meeting purpose, 534 Duration, 84 Next action, 107 Follow-up
+  Created. A blank new field is an omitted cell, not a placeholder.
+- 0060 DOWN → UP round-trip applied in the earlier client-change round; 0060 was
+  reapplied after the new payload fields were added.
 
-The app's own follow-up automation inserted 45 tasks during the live UI pass, so
-the owned/pending figures moved from 83/40 to 128/85. Status-column parity is
-unaffected: it is visit-based, and the two figures matched the table at each
-measurement.
+During an earlier live UI pass, before the rehearsal rebuild, the app's own
+follow-up automation inserted 45 tasks, so the owned/pending figures moved from
+83/40 to 128/85. Status-column parity is unaffected: it is visit-based, and the
+two figures matched the table at each measurement.
+
+### 400 px pass (24 October 2026)
+
+Admin, `/institutes?view=activity&from=2026-10-01&to=2026-10-31`, viewport
+400×800: document and body scrollWidth 400, the 18-status table scrolls inside
+its own `overflow-x: auto` container (3,831 px table), and no link, button,
+input or select sits outside the viewport. The first run exposed a real 566 px
+page: the Rep and Campus selects had an intrinsic width of 360 px. Both labels
+now have `min-w-0` and both selects `w-full min-w-0` in
+`src/components/report/activity-filters.tsx`; the shared filter is also used by
+the rep-wise Overview report. Re-measured at 400 px after the fix. Screenshots
+were kept in the temp directory, not committed.
+
+Rep, `/institutes`: document and body scrollWidth 400, no control outside the
+viewport, no `Download Excel` and no `Institute Activity` entry. The local test
+rep has no assigned institutes after the rehearsal rebuild, so the body rendered
+its empty state; the header, filters and empty state were checked.
+
+### Production build from a normal checkout (24 October 2026)
+
+A temporary snapshot of the branch working tree was placed at
+`D:\free-lance-build-2026-10-24` (tracked files, no `.git`). Its `node_modules`
+was a real copy of `D:\free lance\node_modules` (53,400 files, 0.8 GB; not a
+symlink), and `.env.local` was copied alongside. Command run:
+
+`npm run build` — `opennextjs-cloudflare build && node scripts/trim-worker.mjs`
+
+Result: exit 0. Next.js 16.3.4 (Turbopack) compiled successfully in 17.2 s;
+TypeScript finished in 11.9 s. OpenNext wrote `.open-next/worker.js` and a 47 MB
+`.open-next` bundle. `trim-worker` removed the `@vercel/og` wasm imports from
+the middleware bundle and reported no service-role key in the Worker or assets.
+Warnings only: OpenNext is not fully compatible with Windows, and Node.js
+middleware support on Cloudflare is experimental. Nothing was deployed.
 
 ### Section E assessment — target statuses
 
@@ -420,13 +500,18 @@ No code change was needed; no separate E commit exists.
 
 ### Verification of this round
 
-- Lint, typecheck, build and unit/integration tests as recorded at the end of
-  this branch.
-- Authenticated browser pass against the local dev server: admin Overview
-  sections; Institutes → Institute Activity; 50-row table with 18 status
-  columns; export message at 32+ days; real `.xlsx` parity; `/institutes/report`
-  redirect; rep Institutes restore; rep yearly report cap message; admin and rep
-  Targets views.
+- Focused Excel tests: 2 files / 41 tests passed. `npx tsc --noEmit` exit 0;
+  ESLint on the changed files exit 0.
+- 400 px pass: admin Institute Activity and rep Institutes at 400×800, results
+  above. The admin Excel downloaded through the real route has 534 data rows,
+  all 18 status totals equal the screen footer, 534 Meeting purpose, 534
+  Duration, 84 Next action and 107 Follow-up Created.
+- Production build from the normal checkout: `npm run build` exit 0, Next.js
+  16.3.4 Turbopack, result above.
+- The earlier authenticated browser pass against the local dev server also
+  covered admin Overview sections, the 18-status table, the 32+ day export
+  message, `/institutes/report` redirect, rep Institutes restore, the rep yearly
+  report cap and admin/rep Targets views.
 - No production access, no production database, no Cloudflare change and no
   push. The 31-day limit is a product limit for exports, not a worker setting.
 
@@ -460,11 +545,20 @@ No code change was needed; no separate E commit exists.
     content or RSC payload is served.
 12. Apply migrations 0055-0060 in order on staging; on a copy, apply the DOWN
     files in reverse order and confirm the prior schema returns. Nothing is
-    applied to production by this branch.
+    applied to production by this branch. Use the final deploy checklist below.
 13. Measure Worker CPU and SQL query counts on Overview, `/institutes` and
     `/pending` before/after deploy and record the numbers.
+14. Admin Institute Activity Excel: Duration is blank when either check-in or
+    check-out is missing; Meeting purpose and Next action match the saved plan
+    and visit; the Total row still sums all 18 status columns and Follow-up
+    Created.
+15. At 400 px, admin Institute Activity has no page-level horizontal scroll
+    (only the table scrolls) and the rep Institutes tab shows no export or
+    admin entry.
 
-## New migrations to apply (in order)
+## Final deploy list — migrations 0055-0060
+
+Apply in this order; each DOWN path is the matching rollback.
 
 1. `supabase/migrations/0055_audit_institute_activity.sql` — DOWN:
    `supabase/rollbacks/0055_audit_institute_activity_down.sql`
@@ -479,13 +573,39 @@ No code change was needed; no separate E commit exists.
 6. `supabase/migrations/0060_audit_status_activity.sql` — DOWN:
    `supabase/rollbacks/0060_audit_status_activity_down.sql`
 
-Nothing has been applied to production. 0047-0054 are untouched.
+DOWN order (reverse; run only on a copy or after stopping writes, never before
+the backup):
 
-## Deploy order and rollback
+1. `supabase/rollbacks/0060_audit_status_activity_down.sql`
+2. `supabase/rollbacks/0059_target_status_case_unique_down.sql`
+3. `supabase/rollbacks/0058_audit_reassignment_history_down.sql`
+4. `supabase/rollbacks/0057_audit_open_follow_ups_down.sql`
+5. `supabase/rollbacks/0056_audit_registry_down.sql`
+6. `supabase/rollbacks/0055_audit_institute_activity_down.sql`
 
-Order: backup → apply 0055-0060 in order → push `client/main` → run the manual
-checklist. Rollback: apply the DOWN files in reverse order, then redeploy the
-previous commit.
+Nothing has been applied to production. 0047-0054 are untouched. No push was
+performed.
+
+## Final deploy checklist
+
+1. Take and verify the production backup; record the current commit and Worker
+   version.
+2. Apply 0055 → 0060 in order. Stop on the first error; do not continue.
+3. Run the role probes: rep → `audit_institute_activity` denied with 42501;
+   admin → `audit_rep_institute_activity` denied with 42501; each rep's own RPC
+   returns only that rep's rows.
+4. Deploy the Worker built by `npm run build` from a normal checkout. Confirm
+   `trim-worker` reports no service-role key in the bundle or assets.
+5. Smoke-test: admin Institutes → Institute Activity, 18 status columns, Excel
+   for a ≤31-day range (534-row rehearsal shape is not a production count),
+   `/institutes/report` redirect, rep Institutes tab with no export.
+6. Check the new Excel fields: Duration blank unless both timestamps exist;
+   Meeting purpose from `daily_plans.purpose`; Next action Call/Meeting/blank;
+   Total row sums status and Follow-up Created.
+7. Rollback if needed: apply the six DOWN files in the reverse order above, then
+   redeploy the previous commit.
+8. Record Worker CPU and SQL timings before and after; do not treat the local
+   rehearsal timings as production telemetry.
 
 ## Remaining / not verified
 
@@ -493,11 +613,12 @@ previous commit.
   client has not defined the fields/data and instructs not to design or
   implement it. This overrides the audit prompt's request; no metric, migration
   or lock rule was invented.
-- Authenticated browser checks, live Excel parity and the 0060 DOWN/reapply were
-  verified on the local Supabase stack and `kubeats_rehearsal` in the
-  client-change round above. A 400 px layout pass was **not** run this round.
-  RLS/RSC isolation was verified with role-scoped SQL calls, not by capturing
-  another user's response body.
+- Authenticated browser checks, live Excel parity and the 0060 reapply were
+  verified on the local Supabase stack and `kubeats_rehearsal`. The 400 px pass
+  was run on 24 October with the results above; it covers page overflow, the
+  table scroller and admin/rep controls, not a redesign of the shared mobile
+  navigation. RLS/RSC isolation was verified with role-scoped SQL calls, not by
+  capturing another user's response body.
 - Production before/after latency and CPU were **not measured**. The rehearsal
   timings are a local Postgres measurement, not production telemetry.
 - The 583/592/9 counts in the audit were not re-read from production.

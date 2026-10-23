@@ -35,11 +35,13 @@ const statuses = [
   {status:'RSVP received',category:'closed' as const,sortOrder:2},
 ];
 const visits = [
-  {institute:'Synthetic Institute',member:'Synthetic Rep',activity:'meeting',date:'2026-10-01',
-    status:'First meeting done',checkinAt:'2026-10-01T05:00:00.000Z',checkoutAt:null,location:'Synthetic Area',
+  {institute:'Synthetic Institute',member:'Synthetic Rep',activity:'meeting',
+    meetingPurpose:'First meeting',date:'2026-10-01',status:'First meeting done',nextAction:'call',
+    checkinAt:'2026-10-01T05:00:00.000Z',checkoutAt:'2026-10-01T06:25:00.000Z',location:'Synthetic Area',
     followUpDate:'2026-10-05',followUpTime:'09:30:00',followUpCreated:true},
-  {institute:'Synthetic Institute',member:'Synthetic Rep',activity:'meeting',date:'2026-10-02',
-    status:'RSVP received',checkinAt:null,checkoutAt:null,location:null,
+  {institute:'Synthetic Institute',member:'Synthetic Rep',activity:'meeting',
+    meetingPurpose:null,date:'2026-10-02',status:'RSVP received',nextAction:null,
+    checkinAt:null,checkoutAt:null,location:null,
     followUpDate:null,followUpTime:null,followUpCreated:false},
 ];
 const statusTotals = {byStatus:{'First meeting done':1,'RSVP received':1},totalVisits:2,
@@ -52,12 +54,18 @@ describe('visit-level export shape and parity',() => {
     expect(sheet).toHaveLength(visits.length+2);
     // Parity: each status column in the file sums to the number the table
     // shows for that status over the same filter.
-    for (const [index,status] of statuses.entries()) {
+    for (const status of statuses) {
+      const index = sheet[0].indexOf(status.status);
+      expect(index).toBeGreaterThan(-1);
       const fileSum = sheet.slice(1,-1)
-        .reduce((sum,row) => sum + Number(row[10+index] ?? 0),0);
+        .reduce((sum,row) => sum + Number(row[index] ?? 0),0);
       expect(fileSum).toBe(statusTotals.byStatus[status.status as keyof typeof statusTotals.byStatus]);
-      expect(sheet.at(-1)?.[10+index]).toBe(fileSum);
+      expect(sheet.at(-1)?.[index]).toBe(fileSum);
     }
+    expect(sheet[1].slice(3,13)).toEqual([
+      'First meeting','1 Oct 2026','1 Oct 2026','10:30','1 Oct 2026','11:55','1h 25m',
+      'Synthetic Area','First meeting done','Call',
+    ]);
   });
   it('asks the admin model for every matching visit and writes its exact sheet',async () => {
     exportMocks.statusModel.mockResolvedValue({ok:true,model:{rows:[],statuses,range:{from:'2026-10-01',to:'2026-10-02'},
@@ -68,7 +76,7 @@ describe('visit-level export shape and parity',() => {
     expect(exportMocks.statusModel).toHaveBeenCalledWith(expect.objectContaining({allRows:true,page:undefined}));
     const sheet = exportMocks.book.mock.calls[0][0] as {rows:unknown[][]};
     expect(sheet.rows).toHaveLength(visits.length+2);
-    expect(sheet.rows.at(-1)).toEqual(['Total',...Array(9).fill(null),1,1,null,null,1]);
+    expect(sheet.rows.at(-1)).toEqual(['Total',...Array(12).fill(null),1,1,null,null,1]);
   });
   it('matches the rep consolidated table columns and totals',() => {
     const sheet = repInstituteSheetRows(rows);

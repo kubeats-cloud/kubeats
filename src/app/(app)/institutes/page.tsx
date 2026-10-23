@@ -284,7 +284,11 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
                 completed is <code>daily_plans.meetings_actual = 1</code>. Total
                 visits counts every logged visit row. The totals row covers every
                 matching institute, not only this page. In the Excel, one row is
-                one visit; Follow-up Date and Time come from{' '}
+                one visit; Meeting purpose is{' '}
+                <code>daily_plans.purpose</code>, Next action is{' '}
+                <code>visits.next_action</code>, Duration is check-out minus
+                check-in and is blank unless both times are recorded; Follow-up
+                Date and Time come from{' '}
                 <code>visits.follow_up_date</code> and{' '}
                 <code>visits.follow_up_time</code>, Follow-up Created is whether
                 a <code>follow_up_tasks</code> row names the visit in{' '}

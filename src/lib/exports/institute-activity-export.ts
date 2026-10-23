@@ -22,6 +22,7 @@ import { TYPE_LABELS } from "@/lib/validation/institute";
 import { activityLabel } from "@/lib/activities";
 import { formatClockTime, formatDate, formatDateTime, formatTime } from "@/lib/dates";
 import { formatArea } from "@/lib/location-display";
+import { formatDuration, visitMinutes } from "@/lib/validation/checkin";
 
 /**
  * Excel for the Institute Activity report.
@@ -57,14 +58,32 @@ const VISIT_HEADERS: CellValue[] = [
   "Institute",
   "Rep",
   "Activity",
+  "Meeting purpose",
   "Visit date",
   "Check-In Date (IST)",
   "Check-In Time (IST)",
   "Check-Out Date (IST)",
   "Check-Out Time (IST)",
+  "Duration",
   "Location",
   "Status",
+  "Next action",
 ];
+
+function durationOf(visit: StatusActivityVisit): string | null {
+  const minutes = visitMinutes({
+    checkinAt: visit.checkinAt,
+    checkoutAt: visit.checkoutAt,
+    checkoutMissing: false,
+  });
+  return minutes === null ? null : formatDuration(minutes);
+}
+
+function nextActionLabel(value: string | null): string | null {
+  if (value === "call") return "Call";
+  if (value === "meeting") return "Meeting";
+  return null;
+}
 
 const FOLLOW_UP_HEADERS: CellValue[] = [
   "Follow-up Date",
@@ -80,7 +99,7 @@ function sheetFor(rows: CellValue[][]): SheetSpec {
     boldRows: [0, rows.length - 1],
     freezeRows: 1,
     widths: Array.from({ length: colCount }, (_, i) =>
-      i === 0 || i === 8 ? 28 : 14,
+      i === 0 || i === 10 ? 28 : 14,
     ),
   };
 }
@@ -96,7 +115,9 @@ function sheetFor(rows: CellValue[][]): SheetSpec {
  * the number in the file an independent check on the number on the screen.
  *
  * Blank cells are null, not a placeholder: a missing check-in time is not a
- * recorded time and must not read like one.
+ * recorded time and must not read like one. Duration is derived from the two
+ * timestamps; Meeting purpose and Next action are read from the plan and visit
+ * as recorded, not inferred.
  */
 export function statusActivitySheetRows(
   statuses: readonly StatusColumn[],
@@ -112,13 +133,16 @@ export function statusActivitySheetRows(
     visit.institute,
     visit.member ?? null,
     activityLabel(visit.activity),
+    visit.meetingPurpose ?? null,
     formatDate(visit.date) || null,
     visit.checkinAt ? formatDate(visit.checkinAt) : null,
     visit.checkinAt ? formatTime(visit.checkinAt) : null,
     visit.checkoutAt ? formatDate(visit.checkoutAt) : null,
     visit.checkoutAt ? formatTime(visit.checkoutAt) : null,
+    durationOf(visit),
     visit.location ?? null,
     visit.status ?? null,
+    nextActionLabel(visit.nextAction),
     ...statuses.map((status) => (visit.status === status.status ? 1 : 0)),
     visit.followUpDate ? formatDate(visit.followUpDate) : null,
     visit.followUpTime ? formatClockTime(visit.followUpTime) : null,

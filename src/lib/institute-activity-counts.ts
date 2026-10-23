@@ -74,8 +74,12 @@ export interface StatusActivityVisit {
   institute: string;
   member: string | null;
   activity: string;
+  /** `daily_plans.purpose`; blank when the visit has no surviving plan. */
+  meetingPurpose: string | null;
   date: string;
   status: string | null;
+  /** `visits.next_action`, as filed: "call", "meeting", or none. */
+  nextAction: string | null;
   checkinAt: string | null;
   checkoutAt: string | null;
   location: string | null;
