@@ -269,3 +269,102 @@ fixtures containing more plans than visits and a future unstarted plan. Earlier
 sections describe the initial preservation of the old definition; this correction
 supersedes it. Updated 0055 in place, since it has never been applied on Supabase.
 Summary versus current-owned table coverage remains explicitly labelled.
+Committed as `794865c`.
+
+## Rep data-leak review (route → scoping method)
+
+Static review of every server component, route handler and RPC a rep can reach.
+The shared server client uses the anon key plus the caller's session cookies, so
+RLS applies on every query (`src/lib/supabase/server.ts:12-20`). The session
+predicate is `supervises(member)` = own row, an admin's all rows, or a team
+lead's own reps (`supabase/migrations/0041_team_leads.sql:519-527`).
+
+| Route / entry | Data path | Scoping method | Columns / result |
+| --- | --- | --- | --- |
+| `/` (rep) | `src/app/(app)/page.tsx:117,124,171` | Explicit own id for plan, week, alerts; admin-only Overview is skipped at line 126 | Plan, target summary, alert banner only |
+| `/institutes` (rep) | `src/app/(app)/institutes/page.tsx:57,109` | Admin registry skipped; Activity RPC 0055 is SECURITY INVOKER over RLS-scoped registry/visits/plans/tasks | Nine report columns only |
+| `/pending` (rep) | `src/app/(app)/pending/page.tsx:87,104` | Viewer id passed for `mine`; open list uses view 0057 `security_invoker`; cards rely on `follow_up_tasks_select` (0042:379) | Displayed institute/follow-up fields |
+| `/targets` (rep) | `src/app/(app)/targets/page.tsx:53-54` | `memberId` forced to `user.id` unless the caller is an admin; `targets_select` (0042:244) | Own weekly targets |
+| `/report` (rep) | `src/app/(app)/report/page.tsx:107`; `src/lib/activity-report.ts:227-255` | RPC 0055 invoker plus explicit `.eq("member", memberId)` on every summary query | Presence/report columns only |
+| `/missed` (rep) | `src/app/(app)/missed/page.tsx:118,127` | `alert_events_select` (0042:272) narrows to own member; days call uses own id | Aggregated missed-days record |
+| `/slabs` | `src/lib/slabs.ts:82,156`; `supabase/migrations/0044_institute_slabs.sql:209` | `institute_slabs_select` = `supervises(i.registered_by)` | Slab fields for readable institutes |
+| `/log` | `src/app/(app)/log/page.tsx:57` | Explicit own id on the plan loader; remaining reads use caller RLS | Today's own plan and status catalogue |
+| RSC payloads | `src/lib/supabase/server.ts:12-20` | Caller session + RLS; only rendered props are serialised | Same columns as the screen |
+| `/api/export/activity` | `src/app/api/export/activity/route.ts:32` | `requireAdmin()`; RLS underneath; no service key | Admin export only |
+| `/api/export/institute-activity` | `src/app/api/export/institute-activity/route.ts:30-64` | Staff gate, or rep only with `view=rep|presence`; a rep's `member` is overwritten with `user.id` | Same nine columns as the table |
+| `/api/health` | `src/app/api/health/route.ts:70,144` | Public by design; purposes count and cron metadata only | No personal rows |
+| `/api/pincode`, `/api/place` | `[code]/route.ts:123`; `place/route.ts:175` | Public cache lookups | Postal/place labels only |
+
+No route returning another rep's rows or an admin's rows was found. No
+`security:` commit was needed. This is a code/policy review, **not** an
+authenticated response-body capture: real session, RSC payload and live RLS
+behaviour remain unverified. Existing RLS policies and auth were not changed.
+
+## Manual test checklist (owner, staging then production)
+
+1. Admin Overview: apply rep, campus and From/To; sort a header; confirm the
+   page shows at most 50 rows, the Total row equals the sum of those rows, and
+   Download Excel has the same row count and column sums as the page.
+2. `/institutes` and `/pending` as admin: each renders at most 50 rows/cards,
+   the stated total matches SQL `count`, and paging preserves filters.
+3. `/pending/follow-ups`: Owned/Missed/Closed card counts equal the total shown
+   after opening each list; every list pages; a rep still sees exactly the two
+   cards the client asked for (Owned, Missed).
+4. Reassign an institute: a history row records institute, from, to, actor and
+   time; saving without changing the owner adds no row; a rep cannot read
+   another institute's history.
+5. Targets: Targets appears in the admin nav; adding an empty or case/whitespace
+   duplicate status is rejected; a new status appears in the rep target flow.
+6. Rep Institutes: "My Activity Report", matching Excel and Total row; header
+   sort arrows change order; at 400 px the first column stays visible while the
+   table scrolls horizontally.
+7. Admin header has no bell and no link to `/notifications`; opening
+   `/notifications` is not advertised anywhere.
+8. Board filter: NA / na / Not applicable collapse to one value; NIOS / Nios /
+   nios collapse to one value; stored values are unchanged.
+9. Field-visit Excel: rows with no check-out stay blank (no invented time); the
+   page clearly labels check-in-record counts versus status-event counts.
+10. `/log` before check-in: the gate explains the rule, links to the Dashboard,
+    lists planned institutes, and still refuses logging.
+11. A rep opening an admin URL gets a server redirect to `/` before any admin
+    content or RSC payload is served.
+12. Apply migrations 0055-0059 in order on staging; on a copy, apply the DOWN
+    files in reverse order and confirm the prior schema returns. Nothing is
+    applied to production by this branch.
+13. Measure Worker CPU and SQL query counts on Overview, `/institutes` and
+    `/pending` before/after deploy and record the numbers.
+
+## New migrations to apply (in order)
+
+1. `supabase/migrations/0055_audit_institute_activity.sql` — DOWN:
+   `supabase/rollbacks/0055_audit_institute_activity_down.sql`
+2. `supabase/migrations/0056_audit_registry.sql` — DOWN:
+   `supabase/rollbacks/0056_audit_registry_down.sql`
+3. `supabase/migrations/0057_audit_open_follow_ups.sql` — DOWN:
+   `supabase/rollbacks/0057_audit_open_follow_ups_down.sql`
+4. `supabase/migrations/0058_audit_reassignment_history.sql` — DOWN:
+   `supabase/rollbacks/0058_audit_reassignment_history_down.sql`
+5. `supabase/migrations/0059_target_status_case_unique.sql` — DOWN:
+   `supabase/rollbacks/0059_target_status_case_unique_down.sql`
+
+Nothing has been applied to Supabase or production. 0047-0054 are untouched.
+
+## Deploy order and rollback
+
+Order: backup → apply 0055-0059 in order → push `client/main` → run the manual
+checklist. Rollback: apply the DOWN files in reverse order, then redeploy the
+previous commit.
+
+## Remaining / not verified
+
+- **I2 Foot Mapping**: not implemented. `docs/client_changes.md:167` says the
+  client has not defined the fields/data and instructs not to design or
+  implement it. This overrides the audit prompt's request; no metric, migration
+  or lock rule was invented.
+- Authenticated browser checks, 400 px layout, live Excel parity, real RLS/RSC
+  isolation and DOWN/reapply against a real Supabase project were **not
+  verified**. The earlier local database attempt failed and no production
+  credentials were used.
+- Production before/after latency and CPU were **not measured**. The query-path
+  numbers above are static counts from the code, not telemetry.
+- The 583/592/9 counts in the audit were not re-read from production.
