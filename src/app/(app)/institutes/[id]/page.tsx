@@ -41,6 +41,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { listRepsForCampus } from "@/lib/admin";
 import { ReassignOwner } from "@/components/institutes/reassign-owner";
+import { ReassignmentHistory } from '@/components/institutes/reassignment-history';
 import { DeleteInstitute } from "@/components/institutes/delete-institute";
 import { class12Total, STREAMS, TYPE_LABELS } from "@/lib/validation/institute";
 import { cn } from "@/lib/utils";
@@ -696,6 +697,7 @@ export default async function InstituteDetailPage(
           ))}
         </ul>
       )}
+      {isAdmin(user) && <ReassignmentHistory instituteId={id} page={typeof (await props.searchParams).historyPage === 'string' ? (await props.searchParams).historyPage as string : undefined} />}
     </PageColumn>
   );
 }

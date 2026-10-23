@@ -179,3 +179,24 @@ Lint/typecheck exit 0. Focused exports/activity/role suite: 4 files / 65 tests
 passed. Pure sheet tests verify exact headers, model row order/count, every
 numeric Total, missing values and filter URLs; they do not assert live browser
 Excel parity. Authenticated reporting/400px UI **not verified in browser**.
+
+## I3 — append-only future reassignment history
+
+0058 UP/DOWN adds new table and admin-only SELECT policy. Ownership changes
+record from/to/actor/time atomically through an AFTER trigger; same-owner saves
+produce no event. No existing assignment, visit credit, RLS or FO033 logic is
+changed. Direct authenticated INSERT is denied; UPDATE/DELETE/TRUNCATE are also
+rejected by an immutable trigger even for the fixture database owner.
+No cascading FK can delete audit evidence. Admin institute page shows history
+in pages of 50 with one bounded profile-name lookup, never per-row queries.
+
+DOWN removes the recording hook and archives the table with its RLS/immutability;
+it does not destroy evidence or restore an identical empty schema. UP restores
+the archive. This preservation cycle passed on the ephemeral fixture.
+
+Lint/typecheck exit 0; institute/scope/pagination tests 3 files / 13 passed.
+SQL harness now 38 checks pass: two actual changes versus same-owner save,
+actor preservation, blocked mutation, rep read/insert denial, admin reads and
+DOWN/UP evidence preservation. These use fixture auth/RLS helpers, not the full
+Supabase auth/FO033 stack. Authenticated history UI **not verified in browser**.
+No backfill, production access or Supabase migration was performed.

@@ -20,6 +20,8 @@ const registryUp = await readFile(new URL('../../supabase/migrations/0056_audit_
 const registryDown = await readFile(new URL('../../supabase/rollbacks/0056_audit_registry_down.sql',import.meta.url),'utf8');
 const pendingUp = await readFile(new URL('../../supabase/migrations/0057_audit_open_follow_ups.sql',import.meta.url),'utf8');
 const pendingDown = await readFile(new URL('../../supabase/rollbacks/0057_audit_open_follow_ups_down.sql',import.meta.url),'utf8');
+const historyUp = await readFile(new URL('../../supabase/migrations/0058_audit_reassignment_history.sql',import.meta.url),'utf8');
+const historyDown = await readFile(new URL('../../supabase/rollbacks/0058_audit_reassignment_history_down.sql',import.meta.url),'utf8');
 try {
   // Minimal actual-column fixture, not a claim that the full Supabase schema/RLS was replayed.
   await db.exec(`
@@ -143,5 +145,30 @@ try {
   check((await db.query("select to_regprocedure('audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer)') f")).rows[0].f,null);
   await db.exec(up);
   check((await model()).total,120);
+  await db.exec(`create function public.is_admin() returns boolean language sql stable as $$
+    select coalesce(current_setting('audit.admin',true),'false') = 'true' $$;
+    set audit.member = '${repA}';`);
+  await db.exec(historyUp);
+  await db.query('update institutes set registered_by = $1 where id = $2',[repB,institute(1)]);
+  await db.query('update institutes set registered_by = $1 where id = $2',[repB,institute(1)]);
+  await db.query('update institutes set registered_by = $1 where id = $2',[repA,institute(1)]);
+  check((await db.query('select count(*)::integer n from institute_reassignment_history')).rows[0].n,2);
+  check((await db.query('select from_rep,to_rep,changed_by from institute_reassignment_history order by changed_at,id')).rows
+    .every(row => row.changed_by === repA && row.from_rep !== row.to_rep),true);
+  for (const statement of ['update institute_reassignment_history set changed_by = null',
+    'delete from institute_reassignment_history','truncate institute_reassignment_history']) {
+    await assert.rejects(db.exec(statement),error => error.code === '42501'); checks++;
+  }
+  await db.exec(`set role authenticated; set audit.admin = 'false';`);
+  check((await db.query('select count(*)::integer n from institute_reassignment_history')).rows[0].n,0);
+  await assert.rejects(db.exec(`insert into institute_reassignment_history(institute_id,from_rep,to_rep)
+    values ('${institute(1)}','${repA}','${repB}')`),error => error.code === '42501'); checks++;
+  await db.exec("set audit.admin = 'true'");
+  check((await db.query('select count(*)::integer n from institute_reassignment_history')).rows[0].n,2);
+  await db.exec('reset role');
+  await db.exec(historyDown);
+  check((await db.query('select count(*)::integer n from institute_reassignment_history_0058_archive')).rows[0].n,2);
+  await db.exec(historyUp);
+  check((await db.query('select count(*)::integer n from institute_reassignment_history')).rows[0].n,2);
   console.log(`PASS activity SQL: ${checks} checks; UP/DOWN/UP; ephemeral PostgreSQL fixture, not full Supabase integration.`);
 } finally { await db.close(); }
