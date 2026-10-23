@@ -27,6 +27,7 @@ import {
   type InstituteType,
 } from "@/lib/validation/institute";
 import { cn } from "@/lib/utils";
+import type { RegistryFacets } from '@/lib/registry-page';
 
 const ALL = "__all__";
 /** Its own sentinel, because "no owner" is a real filter and not the absence of one. */
@@ -50,6 +51,7 @@ export interface InstituteFilters {
   city?: string;
   area?: string;
   type?: string;
+  board?: string;
 }
 
 /**
@@ -101,6 +103,8 @@ export function InstitutesBrowser({
   catalogue,
   showOwner = false,
   initial = {},
+  serverFacets,
+  total,
 }: {
   institutes: Institute[];
   /** The status vocabulary, loaded by the page that renders this. */
@@ -120,6 +124,8 @@ export function InstitutesBrowser({
    * render and never again, which is what lets typing stay instant.
    */
   initial?: InstituteFilters;
+  serverFacets?: RegistryFacets;
+  total?: number;
 }) {
   const router = useRouter();
 
@@ -129,7 +135,7 @@ export function InstitutesBrowser({
   const [city, setCity] = useState(initial.city ?? ALL);
   const [area, setArea] = useState(initial.area ?? ALL);
   const [type, setType] = useState(initial.type ?? ALL);
-  const [boards, setBoards] = useState<string[]>([]);
+  const [boards, setBoards] = useState<string[]>(initial.board?.split('|').filter(Boolean) ?? []);
   /*
    * OWNER IS IGNORED FOR A REP, even when it is in the URL.
    *
@@ -194,6 +200,7 @@ export function InstitutesBrowser({
     put("city", next.city);
     put("area", next.area);
     put("type", next.type);
+    put('board',next.board);
     // Never written for a rep: they have no control to clear it with.
     if (showOwner) put("owner", next.owner);
     const query = params.toString();
@@ -210,6 +217,7 @@ export function InstitutesBrowser({
       area,
       type,
       owner,
+      board: boards.join('|'),
       ...patch,
     });
     if (viaRouter) router.replace(url, { scroll: false });
@@ -228,12 +236,12 @@ export function InstitutesBrowser({
   }
 
   const availableStates = useMemo(
-    () => [...new Set(institutes.map((i) => i.state).filter(Boolean))].sort() as string[],
-    [institutes],
+    () => serverFacets?.states ?? [...new Set(institutes.map((i) => i.state).filter(Boolean))].sort() as string[],
+    [institutes,serverFacets],
   );
 
   const availableCities = useMemo(
-    () =>
+    () => serverFacets?.cities ??
       [
         ...new Set(
           institutes
@@ -242,11 +250,11 @@ export function InstitutesBrowser({
             .filter(Boolean),
         ),
       ].sort() as string[],
-    [institutes, state],
+    [institutes, state,serverFacets],
   );
 
   const availableAreas = useMemo(
-    () =>
+    () => serverFacets?.areas ??
       [
         ...new Set(
           institutes
@@ -256,12 +264,12 @@ export function InstitutesBrowser({
             .filter(Boolean),
         ),
       ].sort() as string[],
-    [institutes, state, city],
+    [institutes, state, city,serverFacets],
   );
 
   const availableBoards = useMemo(
-    () => [...new Set(institutes.flatMap((i) => i.boards ?? []))].sort(),
-    [institutes],
+    () => serverFacets?.boards ?? [...new Set(institutes.flatMap((i) => i.boards ?? []))].sort(),
+    [institutes,serverFacets],
   );
 
   /**
@@ -278,6 +286,7 @@ export function InstitutesBrowser({
    * scrolling the registry looking for red badges.
    */
   const ownerOptions = useMemo(() => {
+    if (serverFacets) return serverFacets.owners;
     const named = new Map<string, string>();
     let anyUnassigned = false;
     for (const institute of institutes) {
@@ -293,9 +302,10 @@ export function InstitutesBrowser({
         .sort((a, b) => a.name.localeCompare(b.name)),
       anyUnassigned,
     };
-  }, [institutes]);
+  }, [institutes,serverFacets]);
 
   const filtered = useMemo(() => {
+    if (serverFacets) return institutes;
     const term = search.trim().toLowerCase();
     return institutes.filter((i) => {
       if (term) {
@@ -317,17 +327,15 @@ export function InstitutesBrowser({
         return false;
       return true;
     });
-  }, [institutes, search, status, state, city, area, type, boards, owner]);
+  }, [institutes, search, status, state, city, area, type, boards, owner,serverFacets]);
 
   function toggleBoard(board: string) {
-    setBoards((current) =>
-      current.includes(board)
-        ? current.filter((b) => b !== board)
-        : [...current, board],
-    );
+    const next = boards.includes(board) ? boards.filter((b) => b !== board) : [...boards,board];
+    setBoards(next);
+    if (serverFacets) mirror({board:next.join('|')},true);
   }
 
-  if (institutes.length === 0) {
+  if (institutes.length === 0 && !serverFacets) {
     return (
       <EmptyState
         icon={Building2Icon}
@@ -339,12 +347,13 @@ export function InstitutesBrowser({
 
   return (
     <div className="space-y-4">
-      <div className="relative md:max-w-lg">
+      <form action="/institutes" className="relative flex flex-wrap gap-2 md:max-w-lg">
         <SearchIcon
           className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
           aria-hidden
         />
         <Input
+          name="q"
           className="h-11 pl-9"
           placeholder="Search by name, city or area"
           value={search}
@@ -352,11 +361,17 @@ export function InstitutesBrowser({
             setSearch(e.target.value);
             // replaceState, not router.replace — see the note where `mirror`
             // is defined. A text field must not refetch the registry per key.
-            mirror({ q: e.target.value }, false);
+            if (!serverFacets) mirror({ q: e.target.value }, false);
           }}
           aria-label="Search institutes"
         />
-      </div>
+        {serverFacets && <>
+          {Object.entries({status,state,city,area,type,owner:showOwner ? owner : undefined,board:boards.join('|')})
+            .filter(([,value]) => value && value !== ALL)
+            .map(([key,value]) => <input key={key} type="hidden" name={key} value={value} />)}
+          <button className="bg-primary text-primary-foreground min-h-11 rounded-md px-4">Apply</button>
+        </>}
+      </form>
 
       <div className="grid grid-cols-2 gap-2 md:max-w-4xl md:grid-cols-3">
         <Select
@@ -512,8 +527,7 @@ export function InstitutesBrowser({
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-muted-foreground text-xs">
-          {filtered.length} of {institutes.length} institute
-          {institutes.length === 1 ? "" : "s"}
+          {filtered.length} of {total ?? institutes.length} institutes
         </p>
         {/* Hidden below `md` with the table it belongs to — see
             INSTITUTE_COLUMNS for why a phone has no columns to fold. */}

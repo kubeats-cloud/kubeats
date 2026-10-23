@@ -9,7 +9,8 @@ import {
 } from "@/components/institutes/institutes-browser";
 import { RepInstituteSearch } from "@/components/report/rep-institute-search";
 import { RangeControls } from "@/components/report/range-controls";
-import { listInstitutes } from "@/lib/institutes";
+import { getRegistryPage } from '@/lib/registry-page';
+import { auditHref } from '@/lib/audit-pagination';
 import { listStatusCatalogue } from "@/lib/statuses";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import {
@@ -43,15 +44,16 @@ const first = (value: string | string[] | undefined) =>
  * already decided by RLS before this function returned.
  */
 export default async function InstitutesPage(props: PageProps<"/institutes">) {
-  const [searchParams, result, catalogue, user] = await Promise.all([
+  const [searchParams, catalogue, user] = await Promise.all([
     props.searchParams,
-    listInstitutes(),
     listStatusCatalogue(),
     getCurrentUser(),
   ]);
 
   const admin = isAdmin(user);
   const isRep = user?.role === "rep";
+  const params = Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'));
+  const result = !isRep ? await getRegistryPage(params) : null;
 
   const initial: InstituteFilters = {
     q: first(searchParams.q),
@@ -61,6 +63,7 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
     city: first(searchParams.city),
     area: first(searchParams.area),
     type: first(searchParams.type),
+    board: first(searchParams.board),
   };
 
   /*
@@ -151,15 +154,25 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
         roles that still use it.
       */}
       {!isRep && (
-        result.ok ? (
+        result?.ok ? (
+          <>
           <InstitutesBrowser
+            key={new URLSearchParams(params).toString()}
             institutes={result.institutes}
             catalogue={catalogue}
             initial={initial}
             // Admin-only: a rep sees only their own institutes, so an owner
             // column would repeat one name down the page.
             showOwner={admin}
+            serverFacets={result.facets}
+            total={result.total}
           />
+          <nav aria-label="Registry pages" className="my-4 flex items-center justify-between gap-3 text-sm">
+            <p>Page {result.page} of {result.pages}</p>
+            {result.page > 1 && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/institutes',params,result.page-1)}>Previous</Link>}
+            {result.page < result.pages && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/institutes',params,result.page+1)}>Next</Link>}
+          </nav>
+          </>
         ) : (
           <ErrorState message="We could not load the registry just now. Please try again in a moment." />
         )

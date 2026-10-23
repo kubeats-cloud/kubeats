@@ -93,3 +93,29 @@ FO033, team-lead scoping or authenticated RSC/browser behavior.
 Local dev server ready at loopback 3104; `/?page=2` returns 307 signed-out.
 Authenticated table/count/400px browser checks: **not verified in browser**.
 0055 has run only in the ephemeral fixture, never on Supabase/production.
+
+## P0 — admin registry, read-only board normalization
+
+0056 invoker view/facet RPC and matching DOWN; `registry-page.ts` shares one
+filter builder for exact HEAD count and max-50 page. Search/location/type/status/
+owner/board filtering precedes SQL sort/range. Old registry component remains,
+with its contact/stream/Class 12 columns, mobile cards and column preferences;
+server mode prevents filtering only the page. Search uses Apply; discrete
+filters refetch, reset pagination, and preserve the multi-board OR selection.
+Dropdown values come from SQL DISTINCT under caller RLS, never just one page.
+
+NA/N/A/Not applicable variants normalize to Not applicable; trimmed NIOS variants
+normalize to NIOS. Storage is not rewritten. Query selects only display fields,
+not the old registry's unused phone/address/edit fields. Rep branch no longer
+also fetches the entire unused registry before its Activity model.
+
+Data reads: old whole-registry + owner lookup (2) → exact count + facets + page
+(3, or 2 if empty). Extra count query bounds rows; no N+1. Rendered institute
+rows/cards <=50, not the supplied audit's unbounded 758. Production figures
+were not reproduced locally and no latency/Worker CPU improvement is measured.
+
+Lint/typecheck exit 0; institute/activity/table-view tests 3 files / 53 passed;
+new pagination tests 1 file / 2 passed. SQL fixture now 26 checks passing,
+including normalized boards, owner facets respecting fixture RLS, and 0056
+DOWN/UP. Local filtered page returns 307 signed-out; authenticated interactions
+and 400px layout remain **not verified in browser**. Nothing applied to Supabase.

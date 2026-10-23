@@ -16,6 +16,8 @@ const repB = '10000000-0000-0000-0000-000000000002';
 const institute = (n) => `20000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 const up = await readFile(new URL('../../supabase/migrations/0055_audit_institute_activity.sql',import.meta.url),'utf8');
 const down = await readFile(new URL('../../supabase/rollbacks/0055_audit_institute_activity_down.sql',import.meta.url),'utf8');
+const registryUp = await readFile(new URL('../../supabase/migrations/0056_audit_registry.sql',import.meta.url),'utf8');
+const registryDown = await readFile(new URL('../../supabase/rollbacks/0056_audit_registry_down.sql',import.meta.url),'utf8');
 try {
   // Minimal actual-column fixture, not a claim that the full Supabase schema/RLS was replayed.
   await db.exec(`
@@ -67,6 +69,16 @@ try {
       ('${institute(1)}','${repA}','2026-10-19','2026-10-20');
   `);
   await db.exec(up);
+  await db.exec(`alter table institutes add column boards text[];
+    create table profiles(id uuid primary key,name text);
+    grant select on profiles to authenticated;
+    alter table profiles enable row level security;
+    create policy fixture_profiles on profiles using (id = auth.uid());
+    insert into profiles values ('${repA}','Synthetic A'),('${repB}','Synthetic B');
+    update institutes set boards = array['NIOS',' Nios ','nios','NA',' na ','Not applicable'];`);
+  await db.exec(registryUp);
+  check((await db.query('select normalized_boards from audit_registry limit 1')).rows[0].normalized_boards.sort(),['NIOS','Not applicable']);
+  check((await db.query('select audit_registry_facets() facets')).rows[0].facets.boards,['NIOS','Not applicable']);
   const model = async (over={}) => {
     const args = {from:null,to:null,search:'',member:null,campus:null,sort:'institute',desc:false,page:1,...over};
     const result = await db.query('select audit_institute_activity($1,$2,$3,$4,$5,$6,$7,$8) model',Object.values(args));
@@ -89,10 +101,16 @@ try {
   check((await model({from:'2026-10-21',to:'2026-10-21'})).rows[0].totalActivities,0);
   await db.exec(`set role authenticated; set audit.member = '${repA}';`);
   check((await model()).total,110);
+  check((await db.query('select count(*)::integer n from audit_registry')).rows[0].n,110);
+  check((await db.query('select audit_registry_facets() facets')).rows[0].facets.owners.reps.map(r=>r.id),[repA]);
   check((await model({member:repB})).total,0); // Filter cannot widen invoker RLS.
   await db.exec(`set audit.member = '${repB}';`);
   check((await model()).total,10);
   await db.exec('reset role');
+  await db.exec(registryDown);
+  check((await db.query("select to_regclass('audit_registry') v")).rows[0].v,null);
+  await db.exec(registryUp);
+  check((await db.query('select count(*)::integer n from audit_registry')).rows[0].n,120);
   await db.exec(`insert into visits(institute_id,member,date,activity,lifecycle_status,status_set_to)
     values ('${institute(1)}','${repA}','2026-10-20','session',null,'Synthetic Open')`);
   const drift = await model({search:'Synthetic 001'});
