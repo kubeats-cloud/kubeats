@@ -171,6 +171,13 @@ export default async function LogVisitPage(props: PageProps<"/log">) {
             </Button>
           }
         />
+        {entries.some(item => item.checkinAt === null) && <section className="mt-6 space-y-3" aria-label="Today's planned institutes">
+          <h2 className="font-semibold">Today&apos;s planned institutes</h2>
+          <ul className="divide-y rounded-lg border">{entries.filter(item => item.checkinAt === null).slice(0,50).map(item => <li key={item.id} className="p-3 text-sm">
+            <Link prefetch={false} href="/" className="inline-flex min-h-11 items-center underline">{item.instituteName}</Link>
+          </li>)}</ul>
+          <p className="text-muted-foreground text-xs">Up to 50 planned entries shown. Open Dashboard to check in; logging still requires an active check-in.</p>
+        </section>}
       </PageColumn>
     );
   }

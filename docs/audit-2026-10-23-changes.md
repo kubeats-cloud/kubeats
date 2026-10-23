@@ -234,3 +234,10 @@ No rows, profiles, auth users or artifacts were deleted or changed.
 
 SQL script execution and comments-only proposal check passed against the
 ephemeral fixture (45 harness checks total). Not run against production.
+
+## Log Visit gate
+
+Existing Dashboard link/check-in rule retained. Added up to 50 own planned,
+not-yet-checked-in entries below the gate, using the already-loaded own plan;
+no extra query and no bypass. Lint/typecheck exit 0. Local `/log` redirects
+signed-out users to login. Authenticated gate/actions **not verified in browser**.
