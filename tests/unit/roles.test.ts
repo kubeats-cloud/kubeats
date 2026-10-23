@@ -345,11 +345,28 @@ describe("H1 is behaviour-neutral, and the migration says so at source level", (
       "src/app/(app)/team/page.tsx",
       "src/app/(app)/team/report/page.tsx",
       "src/app/(app)/team/hierarchy/page.tsx",
-      "src/app/(app)/institutes/report/page.tsx",
     ]) {
       expect(tsCode(path), path).toContain("requireStaff");
       expect(tsCode(path), path).not.toContain("requireAdmin");
     }
+  });
+
+  /**
+   * The old /institutes/report screen is a REDIRECT now, and its report lives
+   * on the Institutes tab behind `?view=activity`. The tab is not staff-gated
+   * as a page — a rep has their own table there — so the role check moved into
+   * the admin RPC, where 0060 refuses every non-admin/team-lead caller.
+   */
+  it("redirects the old report URL to the Institutes tab's activity view", () => {
+    const page = tsCode("src/app/(app)/institutes/report/page.tsx");
+    expect(page).toContain("redirect(`/institutes?");
+    expect(page).toContain("query.set('view', 'activity')");
+    expect(page).not.toContain("requireStaff");
+    const migration = tsCode("supabase/migrations/0060_audit_status_activity.sql");
+    expect(migration).toContain(
+      "if not (public.is_admin() or public.is_team_lead()) then",
+    );
+    expect(migration).toContain("errcode = '42501'");
   });
 
   /** And the three un-scopable ones must NOT have moved. */

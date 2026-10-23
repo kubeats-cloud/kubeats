@@ -62,13 +62,23 @@ describe("institutesMatchingQuery", () => {
 describe("R1 consolidated table placement", () => {
   const page = readFileSync("src/app/(app)/institutes/page.tsx", "utf8");
 
-  it("shows the registry browser only to non-reps, and the one table only to reps", () => {
-    expect(page).toContain("{!isRep && (");
+  it("shows the registry browser to non-reps, and the one table to reps", () => {
+    expect(page).toContain("!isRep");
     expect(page).toContain("<InstitutesBrowser");
-    expect(page).toContain("{isRep && (");
     expect(page).toContain("<RepInstituteSearch");
+    expect(page).toContain("isRep &&");
     // The old two-section rep layout (registry + a separate "Activity
     // summary") must not come back.
     expect(page).not.toContain("Activity summary");
+  });
+
+  it("keeps the pasted-aef8213 rep table free of the later search/export controls", () => {
+    // B1 restored the rep tab to aef8213: local search, no server paging,
+    // no Excel link and no "My Activity Report" shortcut of its own.
+    const search = readFileSync("src/components/report/rep-institute-search.tsx", "utf8");
+    expect(search).toContain('"use client"');
+    expect(search).toContain("institutesMatchingQuery");
+    expect(search).not.toContain("Download Excel");
+    expect(page).not.toContain("My Activity Report");
   });
 });

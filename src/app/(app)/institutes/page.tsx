@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PlusIcon } from "lucide-react";
+import { ArrowLeftIcon, PlusIcon, TableIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
@@ -11,16 +11,25 @@ import { RepInstituteSearch } from "@/components/report/rep-institute-search";
 import { RangeControls } from "@/components/report/range-controls";
 import { getRegistryPage } from '@/lib/registry-page';
 import { auditHref } from '@/lib/audit-pagination';
-import { instituteActivityExportHref } from '@/lib/institute-activity-links';
+import {
+  instituteActivityExportHref,
+  instituteActivityExportRangeProblem,
+} from '@/lib/institute-activity-links';
 import { listStatusCatalogue } from "@/lib/statuses";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import {
   getInstituteActivityModel,
+  getInstituteStatusActivityModel,
   DEFAULT_INSTITUTE_ACTIVITY_SORT,
 } from "@/lib/institute-activity-report";
-import { isInstituteActivitySortKey } from "@/lib/institute-activity-counts";
+import {
+  isInstituteActivitySortKey,
+  isStatusActivitySortKey,
+} from "@/lib/institute-activity-counts";
 import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
 import { ActivityPages } from '@/components/report/activity-pages';
+import { ActivityFilters } from '@/components/report/activity-filters';
+import { InstituteStatusActivityTable } from '@/components/report/institute-status-activity-table';
 
 export const metadata = { title: "Institutes" };
 
@@ -53,8 +62,66 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
 
   const admin = isAdmin(user);
   const isRep = user?.role === "rep";
+  const staff = admin || user?.role === "team_lead";
   const params = Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'));
-  const result = !isRep ? await getRegistryPage(params) : null;
+  const activityView = staff && first(searchParams.view) === 'activity';
+  // The registry is not fetched for the activity view: it would be a page of
+  // rows nothing on screen reads.
+  const result = !isRep && !activityView ? await getRegistryPage(params) : null;
+
+  /*
+   * "INSTITUTE ACTIVITY" IS THE ADMIN/TEAM-LEAD REPORT, BEHIND A BUTTON.
+   *
+   * The client asked for the institute-wise table to live on the Institutes
+   * tab rather than on Overview, reached by its own button — so the registry
+   * stays the default view and `?view=activity` swaps it for the report.
+   * Keeping it in the URL rather than local state means a filtered report
+   * (dates, rep, campus, sort, page) can be linked and bookmarked, and the
+   * Excel link reads the same parameters the table did.
+   *
+   * REP ONLY BELOW is the restored R1 table; a rep never sees this branch.
+   */
+  const parsedActivityRange = activityView
+    ? pipelineRangeSchema.safeParse({
+        from: first(searchParams.from),
+        to: first(searchParams.to),
+      })
+    : null;
+  const activityRangeError =
+    parsedActivityRange && !parsedActivityRange.success
+      ? (parsedActivityRange.error.issues[0]?.message ??
+        "That date range is not one we can report on.")
+      : null;
+  const activityRange = parsedActivityRange?.success
+    ? parsedActivityRange.data
+    : {};
+  const rawActivitySort = first(searchParams.sort);
+  const activitySort = {
+    key: isStatusActivitySortKey(rawActivitySort)
+      ? rawActivitySort
+      : 'institute',
+    dir: first(searchParams.dir) === 'desc' ? ('desc' as const) : ('asc' as const),
+  };
+  const activityResult =
+    activityView && !activityRangeError
+      ? await getInstituteStatusActivityModel({
+          range: activityRange,
+          sort: activitySort,
+          page: first(searchParams.page),
+          search: first(searchParams.q),
+          member: first(searchParams.member),
+          campus: first(searchParams.campus),
+        })
+      : null;
+  const exportProblem = instituteActivityExportRangeProblem(activityRange);
+  const activityExtraParams = Object.fromEntries(
+    Object.entries({
+      view: 'activity',
+      q: first(searchParams.q),
+      member: first(searchParams.member),
+      campus: first(searchParams.campus),
+    }).filter((entry): entry is [string, string] => Boolean(entry[1])),
+  );
 
   const initial: InstituteFilters = {
     q: first(searchParams.q),
@@ -67,52 +134,32 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
     board: first(searchParams.board),
   };
 
-  /*
-   * REP SIDE #1 — "Create a single institute-wise table for the Rep."
-   *
-   * A rep no longer sees `InstitutesBrowser` at all (see the render below):
-   * this is the ONE table the Institute tab shows them, built from
-   * `getInstituteActivityModel` and carrying institute details (type,
-   * location, status) alongside the activity counts, sortable, with its own
-   * `?from=`/`?to=`/`?sort=`/`?dir=`.
-   *
-   * REP ONLY, per the client's own heading ("Rep Side") — not team_lead, not
-   * admin, who keep `InstitutesBrowser` exactly as it was and already have
-   * the fuller per-activity-type grid at /institutes/report. The model
-   * itself needs no role branch (RLS scopes every role the same way); this
-   * `isRep` check is only about which roles see which table on THIS shared
-   * page, not about security.
-   */
-  const sortParam = first(searchParams.sort);
-  const instituteActivitySort = {
-    key: isInstituteActivitySortKey(sortParam)
-      ? sortParam
+  const repActivitySort = {
+    key: isInstituteActivitySortKey(first(searchParams.sort))
+      ? first(searchParams.sort)!
       : DEFAULT_INSTITUTE_ACTIVITY_SORT.key,
     dir: first(searchParams.dir) === "desc" ? ("desc" as const) : ("asc" as const),
   };
-  const parsedInstituteActivityRange = isRep
+  const parsedRepRange = isRep
     ? pipelineRangeSchema.safeParse({
         from: first(searchParams.from),
         to: first(searchParams.to),
       })
     : null;
-  const instituteActivityRangeError =
-    parsedInstituteActivityRange && !parsedInstituteActivityRange.success
-      ? (parsedInstituteActivityRange.error.issues[0]?.message ??
+  const repRangeError =
+    parsedRepRange && !parsedRepRange.success
+      ? (parsedRepRange.error.issues[0]?.message ??
         "That date range is not one we can report on.")
       : null;
-  const instituteActivityRange = parsedInstituteActivityRange?.success
-    ? parsedInstituteActivityRange.data
-    : {};
-  const instituteActivityResult =
-    isRep && !instituteActivityRangeError
+  const repRange = parsedRepRange?.success ? parsedRepRange.data : {};
+  const repActivityResult =
+    isRep && !repRangeError
       ? await getInstituteActivityModel({
-          range: instituteActivityRange,
-          sort: instituteActivitySort,
-          page: first(searchParams.page),
-          search: first(searchParams.q),
+          range: repRange,
+          sort: repActivitySort,
         })
       : null;
+
   return (
     <>
       <PageHeader
@@ -127,9 +174,23 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
             : "The schools, coaching centres and consultants you registered."
         }
         action={
-          <div className="flex items-center gap-2">
-            {/* Admin only, and off the nav bar: the activity report is read
-                weekly, not daily. A rep has no team-wide report to read. */}
+          <div className="flex flex-wrap items-center gap-2">
+            {staff && !activityView && (
+              <Button asChild variant="outline" className="h-11">
+                <Link href="/institutes?view=activity">
+                  <TableIcon className="size-4" aria-hidden />
+                  Institute Activity
+                </Link>
+              </Button>
+            )}
+            {activityView && (
+              <Button asChild variant="outline" className="h-11">
+                <Link href="/institutes">
+                  <ArrowLeftIcon className="size-4" aria-hidden />
+                  Back to institutes
+                </Link>
+              </Button>
+            )}
             <Button asChild className="h-11">
               <Link href="/institutes/new">
                 <PlusIcon className="size-4" aria-hidden />
@@ -139,15 +200,102 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
           </div>
         }
       />
-      {isRep && <Link prefetch={false} href="/report" className="mb-4 inline-flex min-h-11 items-center rounded-md border px-4">My Activity Report</Link>}
 
-      {/*
-        R1 — a rep sees the one consolidated table and nothing else on this
-        tab; `InstitutesBrowser` (the old registry grid, with its own
-        text/dropdown filters) stays exactly as it was, but only for the
-        roles that still use it.
-      */}
-      {!isRep && (
+      {activityView ? (
+        <>
+          {/*
+            A1 — the institute-wise report, moved here from Overview at the
+            client's request. One row per institute with one column per active
+            status, the SQL totals across every matching institute in the
+            footer, and an Excel link that exports every matching visit.
+          */}
+          <ActivityFilters
+            params={params}
+            action="/institutes"
+            clearHref="/institutes?view=activity"
+          />
+          <RangeControls
+            start={activityRange.from ?? ""}
+            end={activityRange.to ?? ""}
+            basePath="/institutes"
+            optional
+            extraParams={{
+              ...activityExtraParams,
+              page: '1',
+              sort: activitySort.key,
+              dir: activitySort.dir,
+            }}
+            hint="Filters by the date the work was logged. Leave both blank for all time; the Excel export needs both dates."
+          />
+
+          {activityRangeError ? (
+            <ErrorState message={activityRangeError} />
+          ) : !activityResult?.ok ? (
+            <ErrorState
+              message={
+                activityResult?.error ??
+                "We could not load the institute activity just now. Please try again in a moment."
+              }
+            />
+          ) : (
+            <>
+              {exportProblem ? (
+                <p className="text-muted-foreground my-3 text-sm">
+                  {exportProblem}
+                </p>
+              ) : (
+                <a
+                  download
+                  className="my-3 inline-flex min-h-11 items-center rounded-md border px-4"
+                  href={instituteActivityExportHref({
+                    range: activityResult.model.range,
+                    sortKey: activityResult.model.sort.key,
+                    sortDir: activityResult.model.sort.dir,
+                    search: first(searchParams.q),
+                    member: first(searchParams.member),
+                    campus: first(searchParams.campus),
+                  })}
+                >
+                  Download Excel
+                </a>
+              )}
+              <ActivityPages
+                model={activityResult.model}
+                basePath="/institutes"
+                params={params}
+              />
+              <InstituteStatusActivityTable
+                rows={activityResult.model.rows}
+                statuses={activityResult.model.statuses}
+                totals={activityResult.model.totals}
+                sort={activityResult.model.sort}
+                range={activityResult.model.range}
+                basePath="/institutes"
+                caption="One row per institute, one column per active status"
+                extraParams={activityExtraParams}
+              />
+              <p className="text-muted-foreground mt-2 text-xs">
+                Counts are logged visit rows in the chosen range. Status columns
+                come from the status table — one per active status, in the
+                app&apos;s order — and count the status recorded on the visit; a
+                status with no visits still shows a 0 column. Follow-ups owned
+                and pending come from <code>follow_up_tasks</code> (owned: not
+                done; pending: not done and due on or before today). Meetings
+                completed is <code>daily_plans.meetings_actual = 1</code>. Total
+                visits counts every logged visit row. The totals row covers every
+                matching institute, not only this page. In the Excel, one row is
+                one visit; Follow-up Date and Time come from{' '}
+                <code>visits.follow_up_date</code> and{' '}
+                <code>visits.follow_up_time</code>, Follow-up Created is whether
+                a <code>follow_up_tasks</code> row names the visit in{' '}
+                <code>from_visit_id</code>, times are IST, missing times are
+                blank, and the Total row sums the status and Follow-up Created
+                columns.
+              </p>
+            </>
+          )}
+        </>
+      ) : !isRep ? (
         result?.ok ? (
           <>
           <InstitutesBrowser
@@ -170,47 +318,40 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
         ) : (
           <ErrorState message="We could not load the registry just now. Please try again in a moment." />
         )
-      )}
-
-      {isRep && (
+      ) : (
         <>
           <RangeControls
-            start={instituteActivityRange.from ?? ""}
-            end={instituteActivityRange.to ?? ""}
+            start={repRange.from ?? ""}
+            end={repRange.to ?? ""}
             basePath="/institutes"
             optional
             extraParams={
-              instituteActivitySort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
-              instituteActivitySort.dir !== DEFAULT_INSTITUTE_ACTIVITY_SORT.dir
-                ? { q:first(searchParams.q) ?? '',sort: instituteActivitySort.key, dir: instituteActivitySort.dir }
-                : {q:first(searchParams.q) ?? ''}
+              repActivitySort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
+              repActivitySort.dir !== DEFAULT_INSTITUTE_ACTIVITY_SORT.dir
+                ? { sort: repActivitySort.key, dir: repActivitySort.dir }
+                : undefined
             }
             hint="Filters by the date the work was logged. Leave both blank for all time."
           />
 
-          {instituteActivityRangeError ? (
-            <ErrorState message={instituteActivityRangeError} />
-          ) : !instituteActivityResult?.ok ? (
+          {repRangeError ? (
+            <ErrorState message={repRangeError} />
+          ) : !repActivityResult?.ok ? (
             <ErrorState
               message={
-                instituteActivityResult?.error ??
+                repActivityResult?.error ??
                 "We could not load your activity just now. Please try again in a moment."
               }
             />
           ) : (
-            <>
-            <a download className="my-3 inline-flex min-h-11 items-center rounded-md border px-4" href={instituteActivityExportHref({range:instituteActivityRange,sortKey:instituteActivityResult.model.sort.key,sortDir:instituteActivityResult.model.sort.dir,page:String(instituteActivityResult.model.page),search:first(searchParams.q),view:'rep'})}>Download Excel</a>
-            <ActivityPages model={instituteActivityResult.model} basePath="/institutes" params={Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'))} />
             <RepInstituteSearch
-              rows={instituteActivityResult.model.rows}
-              sort={instituteActivityResult.model.sort}
-              range={instituteActivityRange}
+              rows={repActivityResult.model.rows}
+              sort={repActivityResult.model.sort}
+              range={repRange}
               caption="Your institutes: details, follow-ups and activity"
               basePath="/institutes"
               catalogue={catalogue}
-              extraParams={{q: first(searchParams.q) ?? ''}}
             />
-            </>
           )}
         </>
       )}

@@ -3,22 +3,42 @@ import "server-only";
 import { buildWorkbook, type CellValue, type SheetSpec } from "@/lib/xlsx";
 import {
   getInstituteActivityModel,
+  getInstituteStatusActivityModel,
   type InstituteActivityQuery,
+  type InstituteStatusActivityQuery,
 } from "@/lib/institute-activity-report";
-import type { InstituteActivityRow } from "@/lib/institute-activity-counts";
+import type {
+  InstituteActivityRow,
+  StatusActivityVisit,
+  StatusColumn,
+} from "@/lib/institute-activity-counts";
 import { ACTIVITY_TYPES, type ActivityType } from "@/lib/validation/weekly";
 import { INSTITUTE_ACTIVITY_LABELS } from "@/lib/institute-activity-counts";
-import { openClosedTotals,sumInstituteActivityRows } from '@/lib/institute-activity-counts';
-import { TYPE_LABELS } from '@/lib/validation/institute';
-import { formatDateTime } from '@/lib/dates';
-import { formatArea } from '@/lib/location-display';
+import {
+  openClosedTotals,
+  sumInstituteActivityRows,
+} from "@/lib/institute-activity-counts";
+import { TYPE_LABELS } from "@/lib/validation/institute";
+import { activityLabel } from "@/lib/activities";
+import { formatClockTime, formatDate, formatDateTime, formatTime } from "@/lib/dates";
+import { formatArea } from "@/lib/location-display";
 
 /**
- * Excel for the institute-wise Activity Report.
+ * Excel for the Institute Activity report.
  *
- * Built from the SAME model the screen renders (`getInstituteActivityModel`),
- * so filter + sort on the URL produce a file that matches the table. No second
- * counting path.
+ * Two shapes, because the two screens ask different questions:
+ *
+ *   - The admin/team-lead export is ONE ROW PER VISIT in the chosen range,
+ *     with one column per active status (1/0) and the visit's follow-up
+ *     columns, plus a Total row that sums the status and follow-up-created
+ *     columns. The on-screen table is one row per institute; those status
+ *     column totals are the parity check between the two.
+ *   - The rep and presence exports stay one row per institute: they are the
+ *     rep's own list and the R7 presence table, neither of which the client
+ *     asked to change.
+ *
+ * Built from the SAME model the screen renders, so a filtered screen and its
+ * file cannot count differently.
  */
 
 export type InstituteActivityExportResult =
@@ -32,16 +52,98 @@ const ACTIVITY_HEADERS: { key: ActivityType; open: string; closed: string }[] =
     closed: `${INSTITUTE_ACTIVITY_LABELS[key]} Closed`,
   }));
 
+/** The visit sheet's fixed columns, before the status block. */
+const VISIT_HEADERS: CellValue[] = [
+  "Institute",
+  "Rep",
+  "Activity",
+  "Visit date",
+  "Check-In Date (IST)",
+  "Check-In Time (IST)",
+  "Check-Out Date (IST)",
+  "Check-Out Time (IST)",
+  "Location",
+  "Status",
+];
+
+const FOLLOW_UP_HEADERS: CellValue[] = [
+  "Follow-up Date",
+  "Follow-up Time (IST)",
+  "Follow-up Created",
+];
+
+function sheetFor(rows: CellValue[][]): SheetSpec {
+  const colCount = rows[0]?.length ?? 1;
+  return {
+    name: "Institute activity",
+    rows,
+    boldRows: [0, rows.length - 1],
+    freezeRows: 1,
+    widths: Array.from({ length: colCount }, (_, i) =>
+      i === 0 || i === 8 ? 28 : 14,
+    ),
+  };
+}
+
+/**
+ * One row per visit, one column per active status, then the follow-up columns.
+ *
+ * A status with no visits still gets its column, all zeros, because its
+ * absence would read as "not a status" rather than "nothing happened".
+ *
+ * The Total row is the SUM OF THE ROWS ABOVE IT (each status flag is 1 or 0,
+ * and Follow-up Created likewise), not the RPC's totals — that is what makes
+ * the number in the file an independent check on the number on the screen.
+ *
+ * Blank cells are null, not a placeholder: a missing check-in time is not a
+ * recorded time and must not read like one.
+ */
+export function statusActivitySheetRows(
+  statuses: readonly StatusColumn[],
+  visits: readonly StatusActivityVisit[],
+): CellValue[][] {
+  const header: CellValue[] = [
+    ...VISIT_HEADERS,
+    ...statuses.map((status) => status.status),
+    ...FOLLOW_UP_HEADERS,
+  ];
+
+  const body = visits.map((visit) => [
+    visit.institute,
+    visit.member ?? null,
+    activityLabel(visit.activity),
+    formatDate(visit.date) || null,
+    visit.checkinAt ? formatDate(visit.checkinAt) : null,
+    visit.checkinAt ? formatTime(visit.checkinAt) : null,
+    visit.checkoutAt ? formatDate(visit.checkoutAt) : null,
+    visit.checkoutAt ? formatTime(visit.checkoutAt) : null,
+    visit.location ?? null,
+    visit.status ?? null,
+    ...statuses.map((status) => (visit.status === status.status ? 1 : 0)),
+    visit.followUpDate ? formatDate(visit.followUpDate) : null,
+    visit.followUpTime ? formatClockTime(visit.followUpTime) : null,
+    visit.followUpCreated ? 1 : 0,
+  ]);
+
+  const total: CellValue[] = [
+    "Total",
+    ...Array<CellValue>(VISIT_HEADERS.length - 1).fill(null),
+    ...statuses.map(
+      (status) => visits.filter((visit) => visit.status === status.status).length,
+    ),
+    null,
+    null,
+    visits.filter((visit) => visit.followUpCreated).length,
+  ];
+
+  return [header, ...body, total];
+}
+
 export function instituteActivitySheetRows(
   rows: readonly InstituteActivityRow[],
   /** SQL totals over all matching rows; falls back to the passed rows. */
-  totals?: Record<ActivityType, {open: number; closed: number}>,
+  totals?: Record<ActivityType, { open: number; closed: number }>,
 ): CellValue[][] {
-  // No "Total" column: Admin #1/#2 name only the six activity types' Open/
-  // Closed counts, and "the downloaded Excel file must contain the same
-  // data as the displayed table" — this sheet can carry no column the table
-  // itself does not show. Reconciliation stays internal
-  // (`reconcileActivityCounts()`), not a displayed figure.
   const header: CellValue[] = [
     "Institute",
     ...ACTIVITY_HEADERS.flatMap((h) => [h.open, h.closed]),
@@ -55,65 +157,159 @@ export function instituteActivitySheetRows(
     return cells;
   });
 
-  const total: CellValue[] = ['Total',...ACTIVITY_TYPES.flatMap(key => (['open','closed'] as const)
-    .map(category => totals ? totals[key][category]
-      : rows.reduce((sum,row) => sum + row.byActivity[key][category],0)))];
-  return [header, ...body,total];
+  const total: CellValue[] = [
+    "Total",
+    ...ACTIVITY_TYPES.flatMap((key) =>
+      (["open", "closed"] as const).map((category) =>
+        totals
+          ? totals[key][category]
+          : rows.reduce((sum, row) => sum + row.byActivity[key][category], 0),
+      ),
+    ),
+  ];
+  return [header, ...body, total];
 }
 
-export function repInstituteSheetRows(rows: readonly InstituteActivityRow[]): CellValue[][] {
+export function repInstituteSheetRows(
+  rows: readonly InstituteActivityRow[],
+): CellValue[][] {
   const totals = sumInstituteActivityRows(rows);
   return [
-    ['Institute','Type','Location','Status','Open','Closed','Follow-ups owned','Follow-ups pending','Meetings completed'],
-    ...rows.map(row => {const oc = openClosedTotals(row); return [row.name,TYPE_LABELS[row.type],
-      [row.area,row.city,row.state].filter(Boolean).join(', ') || '—',row.status ?? 'No status yet',
-      oc.open,oc.closed,row.followUpsOwned,row.followUpsPending,row.meetingsCompleted];}),
-    ['Total','','','',totals.open,totals.closed,rows.reduce((n,r) => n+r.followUpsOwned,0),
-      rows.reduce((n,r) => n+r.followUpsPending,0),totals.meetingsCompleted],
+    [
+      "Institute",
+      "Type",
+      "Location",
+      "Status",
+      "Open",
+      "Closed",
+      "Follow-ups owned",
+      "Follow-ups pending",
+      "Meetings completed",
+    ],
+    ...rows.map((row) => {
+      const oc = openClosedTotals(row);
+      return [
+        row.name,
+        TYPE_LABELS[row.type],
+        [row.area, row.city, row.state].filter(Boolean).join(", ") || "—",
+        row.status ?? "No status yet",
+        oc.open,
+        oc.closed,
+        row.followUpsOwned,
+        row.followUpsPending,
+        row.meetingsCompleted,
+      ];
+    }),
+    [
+      "Total",
+      "",
+      "",
+      "",
+      totals.open,
+      totals.closed,
+      rows.reduce((n, r) => n + r.followUpsOwned, 0),
+      rows.reduce((n, r) => n + r.followUpsPending, 0),
+      totals.meetingsCompleted,
+    ],
   ];
 }
 
-export function presenceSheetRows(rows: readonly InstituteActivityRow[]): CellValue[][] {
+export function presenceSheetRows(
+  rows: readonly InstituteActivityRow[],
+): CellValue[][] {
   const totals = sumInstituteActivityRows(rows);
   return [
-    ['Institute Name','Check-In Date and Time','Check-Out Date and Time','Location',
-      'Number of Open Status activities','Number of Closed Status activities','Total Number of Visits','Total Number of Meetings','Total activity count'],
-    ...rows.map(row => {const oc = openClosedTotals(row); return [row.name,
-      row.lastCheckinAt ? formatDateTime(row.lastCheckinAt) : 'Not recorded',
-      row.lastCheckoutAt ? formatDateTime(row.lastCheckoutAt) : 'Not recorded',
-      row.lastCheckinAt ? formatArea(row.lastCheckinArea) : '—',oc.open,oc.closed,row.totalVisits,row.meetingsCompleted,row.totalActivities];}),
-    ['Total','','','',totals.open,totals.closed,totals.totalVisits,totals.meetingsCompleted,totals.totalActivities],
+    [
+      "Institute Name",
+      "Check-In Date and Time",
+      "Check-Out Date and Time",
+      "Location",
+      "Number of Open Status activities",
+      "Number of Closed Status activities",
+      "Total Number of Visits",
+      "Total Number of Meetings",
+      "Total activity count",
+    ],
+    ...rows.map((row) => {
+      const oc = openClosedTotals(row);
+      return [
+        row.name,
+        row.lastCheckinAt ? formatDateTime(row.lastCheckinAt) : "Not recorded",
+        row.lastCheckoutAt ? formatDateTime(row.lastCheckoutAt) : "Not recorded",
+        row.lastCheckinAt ? formatArea(row.lastCheckinArea) : "—",
+        oc.open,
+        oc.closed,
+        row.totalVisits,
+        row.meetingsCompleted,
+        row.totalActivities,
+      ];
+    }),
+    [
+      "Total",
+      "",
+      "",
+      "",
+      totals.open,
+      totals.closed,
+      totals.totalVisits,
+      totals.meetingsCompleted,
+      totals.totalActivities,
+    ],
   ];
 }
 
-export async function buildInstituteActivityExport(
-  query: InstituteActivityQuery & {view?: 'rep' | 'presence'} = {},
+/** The admin/team-lead visit-level workbook, over EVERY matching visit. */
+export async function buildInstituteStatusActivityExport(
+  query: InstituteStatusActivityQuery = {},
 ): Promise<InstituteActivityExportResult> {
-  // The admin download is the whole filtered report, not the page on screen:
-  // `p_page = 0` returns every matching institute, and the Total row uses the
-  // RPC's sum over those same rows.
-  const allRows = query.view === undefined;
-  const result = await getInstituteActivityModel({...query, allRows, page: allRows ? undefined : query.page});
+  // `p_page = 0` is the RPC's export mode: every matching institute and every
+  // visit row, with the same 31-day ceiling enforced in SQL. Nothing is
+  // assembled in the browser.
+  const result = await getInstituteStatusActivityModel({
+    ...query,
+    allRows: true,
+    page: undefined,
+  });
   if (!result.ok) return { ok: false, error: result.error };
 
-  const dataRows = query.view === 'rep' ? repInstituteSheetRows(result.model.rows)
-    : query.view === 'presence' ? presenceSheetRows(result.model.rows)
-      : instituteActivitySheetRows(result.model.rows, result.model.totals.byActivity);
-  const colCount = dataRows[0]?.length ?? 1;
-  const sheet: SheetSpec = {
-    name: "Institute activity",
-    rows: dataRows,
-    boldRows: [0,dataRows.length-1],
-    freezeRows: 1,
-    widths: Array.from({ length: colCount }, (_, i) => (i === 0 ? 28 : 12)),
-  };
-
-  const bytes = buildWorkbook(sheet);
+  const dataRows = statusActivitySheetRows(
+    result.model.statuses,
+    result.model.visits,
+  );
+  const bytes = buildWorkbook(sheetFor(dataRows));
   const { from, to } = result.model.range;
-  const stamp =
-    from || to
-      ? `${from ?? "start"}_${to ?? "end"}`
-      : "all";
+  return {
+    ok: true,
+    filename: `institute-activity-${from ?? "start"}_${to ?? "end"}.xlsx`,
+    bytes,
+  };
+}
+
+/** The rep and presence workbooks, one institute per row. */
+export async function buildInstituteActivityExport(
+  query: InstituteActivityQuery & { view?: "rep" | "presence" } = {},
+): Promise<InstituteActivityExportResult> {
+  // Every export is the whole filtered set, not the page on screen.
+  const allRows = true;
+  const result = await getInstituteActivityModel({
+    ...query,
+    allRows,
+    page: undefined,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  const dataRows =
+    query.view === "rep"
+      ? repInstituteSheetRows(result.model.rows)
+      : query.view === "presence"
+        ? presenceSheetRows(result.model.rows)
+        : instituteActivitySheetRows(
+            result.model.rows,
+            result.model.totals.byActivity,
+          );
+  const bytes = buildWorkbook(sheetFor(dataRows));
+  const { from, to } = result.model.range;
+  const stamp = from || to ? `${from ?? "start"}_${to ?? "end"}` : "all";
   return {
     ok: true,
     filename: `institute-activity-${stamp}.xlsx`,

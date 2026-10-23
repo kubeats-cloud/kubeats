@@ -1,7 +1,6 @@
 import type { PipelineRange } from "@/lib/validation/pipeline-report";
 import type { ActivityType } from "@/lib/validation/weekly";
 import type { StatusCategory } from "@/lib/validation/institute";
-import type { InstituteActivitySortKey } from "@/lib/institute-activity-counts";
 
 /**
  * URL builders for the institute-wise Activity Report.
@@ -27,9 +26,45 @@ export function reviewCohortHref(input: {
   return `/review?${params.toString()}`;
 }
 
+/**
+ * The Excel export's fixed maximum, in calendar days inclusive.
+ *
+ * Chosen rather than arbitrary: a month is the longest range an admin reads a
+ * report over, and 31 days keeps the visit-level sheet to one screenful of
+ * dates per rep while still allowing "this month". The RPC enforces the same
+ * number in SQL (0060); this constant is what the screen and route use so the
+ * message a reader sees before clicking matches the refusal they would get.
+ */
+export const MAX_ACTIVITY_EXPORT_DAYS = 31;
+
+/**
+ * Why this range cannot be exported, or null when it can.
+ *
+ * The message is the one the RPC raises, word for word, so a download that is
+ * blocked in the browser and one refused by the database read the same.
+ */
+export function instituteActivityExportRangeProblem(
+  range: PipelineRange,
+): string | null {
+  if (!range.from || !range.to) {
+    return "Choose a From and To date for the Excel export.";
+  }
+  if (range.to < range.from) {
+    return "The To date must not be before the From date.";
+  }
+  const [fy, fm, fd] = range.from.split("-").map(Number);
+  const [ty, tm, td] = range.to.split("-").map(Number);
+  const days =
+    (Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000 + 1;
+  if (days > MAX_ACTIVITY_EXPORT_DAYS) {
+    return `Choose a date range of ${MAX_ACTIVITY_EXPORT_DAYS} days or fewer for the Excel export.`;
+  }
+  return null;
+}
+
 export function instituteActivitySortHref(input: {
-  key: InstituteActivitySortKey;
-  currentKey: InstituteActivitySortKey;
+  key: string;
+  currentKey: string;
   currentDir: "asc" | "desc";
   range: PipelineRange;
   basePath?: string;
@@ -60,7 +95,7 @@ export function instituteActivitySortHref(input: {
 
 export function instituteActivityExportHref(input: {
   range: PipelineRange;
-  sortKey: InstituteActivitySortKey;
+  sortKey: string;
   sortDir: "asc" | "desc";
   page?: string;
   search?: string;

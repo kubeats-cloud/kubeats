@@ -17,7 +17,7 @@ import {
   instituteActivitySortHref,
   reviewCohortHref,
 } from "@/lib/institute-activity-links";
-import { instituteActivitySheetRows } from "@/lib/exports/institute-activity-export";
+import { instituteActivitySheetRows, statusActivitySheetRows } from "@/lib/exports/institute-activity-export";
 import { SEED_STATUS_CATALOGUE } from "@/lib/validation/institute";
 
 /**
@@ -479,5 +479,78 @@ describe("instituteActivitySheetRows", () => {
     for (let column=1;column<13;column++) {
       expect(sheet.at(-1)?.[column]).toBe(Number(sheet[1][column])+Number(sheet[2][column]));
     }
+  });
+});
+
+describe("statusActivitySheetRows — the visit-level Institute Activity Excel", () => {
+  const statuses = [
+    { status: "First meeting done", category: "open" as const, sortOrder: 1 },
+    { status: "RSVP received", category: "closed" as const, sortOrder: 2 },
+    { status: "No visits", category: "closed" as const, sortOrder: 3 },
+  ];
+  const visits = [
+    {
+      institute: "Alpha School",
+      member: "Rep A",
+      activity: "meeting",
+      date: "2026-10-01",
+      status: "First meeting done",
+      checkinAt: "2026-10-01T05:00:00.000Z",
+      checkoutAt: null,
+      location: "Gandhinagar",
+      followUpDate: "2026-10-05",
+      followUpTime: "09:30:00",
+      followUpCreated: true,
+    },
+    {
+      institute: "Beta School",
+      member: null,
+      activity: "session",
+      date: "2026-10-02",
+      status: "RSVP received",
+      checkinAt: null,
+      checkoutAt: null,
+      location: null,
+      followUpDate: null,
+      followUpTime: null,
+      followUpCreated: false,
+    },
+  ];
+
+  it("writes one row per visit, a column per active status, and IST times", () => {
+    const sheet = statusActivitySheetRows(statuses, visits);
+    expect(sheet).toHaveLength(4); // header + two visits + Total
+    expect(sheet[0].slice(10, 13)).toEqual([
+      "First meeting done",
+      "RSVP received",
+      "No visits",
+    ]);
+    expect(sheet[0].slice(-3)).toEqual([
+      "Follow-up Date",
+      "Follow-up Time (IST)",
+      "Follow-up Created",
+    ]);
+    // A status with no visits still gets a column; its row flags are 0.
+    expect(sheet[1].slice(10, 13)).toEqual([1, 0, 0]);
+    expect(sheet[2].slice(10, 13)).toEqual([0, 1, 0]);
+    // Check-in 05:00Z is 10:30 IST; a missing check-out is blank, not invented.
+    expect(sheet[1].slice(4, 8)).toEqual([
+      "1 Oct 2026",
+      "10:30",
+      null,
+      null,
+    ]);
+    expect(sheet[2].slice(4, 8)).toEqual([null, null, null, null]);
+    expect(sheet[1].slice(-3)).toEqual(["5 Oct 2026", "09:30", 1]);
+    expect(sheet[2].slice(-3)).toEqual([null, null, 0]);
+  });
+
+  it("sums the status and follow-up columns into the final Total row", () => {
+    const sheet = statusActivitySheetRows(statuses, visits);
+    const total = sheet.at(-1)!;
+    expect(total[0]).toBe("Total");
+    expect(total.slice(1, 10)).toEqual(Array(9).fill(null));
+    expect(total.slice(10, 13)).toEqual([1, 1, 0]);
+    expect(total.slice(-3)).toEqual([null, null, 1]);
   });
 });

@@ -1,37 +1,60 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireStaff } from "@/lib/admin";
-import { buildInstituteActivityExport } from "@/lib/exports/institute-activity-export";
+import {
+  buildInstituteActivityExport,
+  buildInstituteStatusActivityExport,
+} from "@/lib/exports/institute-activity-export";
 import {
   isInstituteActivitySortKey,
-  type InstituteActivitySortKey,
+  isStatusActivitySortKey,
 } from "@/lib/institute-activity-counts";
+import {
+  instituteActivityExportRangeProblem,
+} from "@/lib/institute-activity-links";
 import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser } from "@/lib/auth";
 
 /**
- * The institute-wise Activity Report export, as an .xlsx download.
+ * The Institute Activity export, as an .xlsx download.
  *
- * STAFF-GATED, NOT ADMIN-ONLY — same gate as `/institutes/report` itself
- * (`requireStaff`), because a team lead's Excel must match the team lead's
- * own screen. RLS underneath is what actually scopes the rows, the same way
- * every other export in this app works: the query runs as the signed-in
- * caller, never with an elevated key.
+ * TWO SHAPES, TWO GATES:
  *
- * Same model the screen renders (`getInstituteActivityModel`, reached through
- * `buildInstituteActivityExport`), so the file always matches the filtered,
- * sorted table — there is no second counting path to drift from it.
+ *   - No `view` is the admin/team-lead report: one row per visit with one
+ *     column per active status. `requireStaff()` gates the route and
+ *     `audit_institute_activity` checks the same roles again in SQL, so a rep
+ *     calling this endpoint directly is refused twice.
+ *   - `view=rep` (the rep's own institute list) and `view=presence` (R7) are
+ *     rep-only. The SQL behind them takes NO rep id; it derives the member
+ *     from auth.uid(), so a forged URL cannot widen the file.
+ *
+ * EVERY VIEW REQUIRES A COMPLETE RANGE OF AT MOST 31 DAYS. The check happens
+ * here before any query and again inside the RPC, so neither a crafted URL nor
+ * a future caller can build a wider file. Nothing is assembled in the browser.
  */
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
-  const rawView = params.get('view');
-  const view = rawView === 'rep' || rawView === 'presence' ? rawView : undefined;
+  const rawView = params.get("view");
+  const view =
+    rawView === "rep" || rawView === "presence" ? rawView : undefined;
+  const gatedView = rawView !== null && view === undefined;
+
   const gate = await requireStaff();
-  const user = gate.ok ? gate.user : view ? await getCurrentUser() : null;
-  // Staff export unchanged. New rep/presence variants are own-member exports only.
-  if (!gate.ok && (!view || !user || user.role !== 'rep')) {
+  if (gatedView) {
+    return NextResponse.json({ error: "Unknown export view." }, { status: 400 });
+  }
+
+  if (view) {
+    const user = gate.ok ? gate.user : await getCurrentUser();
+    if (!user || user.role !== "rep") {
+      return NextResponse.json(
+        { error: "This export belongs to a rep." },
+        { status: 403 },
+      );
+    }
+  } else if (!gate.ok) {
     return NextResponse.json({ error: gate.error }, { status: 403 });
   }
 
@@ -51,23 +74,33 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const rangeProblem = instituteActivityExportRangeProblem(parsedRange.data);
+  if (rangeProblem) {
+    return NextResponse.json({ error: rangeProblem }, { status: 400 });
+  }
+
   const rawSort = params.get("sort") ?? undefined;
-  const sortKey: InstituteActivitySortKey = isInstituteActivitySortKey(rawSort)
-    ? rawSort
-    : "institute";
   const dir = params.get("dir") === "desc" ? "desc" : "asc";
 
-  const result = await buildInstituteActivityExport({
-    range: parsedRange.data,
-    sort: { key: sortKey, dir },
-    // The admin download is the full filtered report, so `page` is not
-    // forwarded; rep/presence exports keep their page parameter.
-    ...(view ? { page: params.get('page') ?? undefined } : {}),
-    search: params.get('q') ?? undefined,
-    member: user?.role === 'rep' ? user.id : params.get('member') ?? undefined,
-    campus: params.get('campus') ?? undefined,
-    view,
-  });
+  const result = view
+    ? await buildInstituteActivityExport({
+        range: parsedRange.data,
+        sort: {
+          key: isInstituteActivitySortKey(rawSort) ? rawSort : "institute",
+          dir,
+        },
+        view,
+      })
+    : await buildInstituteStatusActivityExport({
+        range: parsedRange.data,
+        sort: {
+          key: isStatusActivitySortKey(rawSort) ? rawSort : "institute",
+          dir,
+        },
+        search: params.get("q") ?? undefined,
+        member: params.get("member") ?? undefined,
+        campus: params.get("campus") ?? undefined,
+      });
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 422 });

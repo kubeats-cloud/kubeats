@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { FileSpreadsheetIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
@@ -10,8 +9,6 @@ import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
 import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
-import { InstituteActivityTable } from "@/components/report/institute-activity-table";
-import { RangeControls } from "@/components/report/range-controls";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { countMyInstitutes } from "@/lib/institutes";
 import { listStatusCatalogue } from "@/lib/statuses";
@@ -28,58 +25,16 @@ import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
 import { todayISO } from "@/lib/dates";
 import { getOverview } from "@/lib/admin-workspace";
-import {
-  getInstituteActivityModel,
-  DEFAULT_INSTITUTE_ACTIVITY_SORT,
-} from "@/lib/institute-activity-report";
-import { isInstituteActivitySortKey } from "@/lib/institute-activity-counts";
-import { instituteActivityExportHref } from "@/lib/institute-activity-links";
-import { ActivityPages } from '@/components/report/activity-pages';
-import { ActivityFilters } from '@/components/report/activity-filters';
-import { pipelineRangeSchema, type PipelineRange } from "@/lib/validation/pipeline-report";
 
 export const metadata = { title: "Dashboard" };
 
-const first = (value: string | string[] | undefined) =>
-  typeof value === "string" && value !== "" ? value : undefined;
-
-export default async function DashboardPage(props: PageProps<"/">) {
+export default async function DashboardPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.role === "team_lead") redirect("/team");
 
   const admin = isAdmin(user);
   const weekStart = mondayOf();
-
-  /*
-   * A1 — the institute-wise Activity Report's own range and sort, read from
-   * this page's URL exactly as `/institutes/report` reads its own: optional,
-   * no default window, so a quiet pipeline is not hidden behind "this month".
-   * Rep branch never reads these.
-   */
-  const searchParams = await props.searchParams;
-  const activityParams = Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'));
-  const parsedActivityRange = admin
-    ? pipelineRangeSchema.safeParse({
-        from: first(searchParams.from),
-        to: first(searchParams.to),
-      })
-    : null;
-  const activityRangeError =
-    parsedActivityRange && !parsedActivityRange.success
-      ? (parsedActivityRange.error.issues[0]?.message ??
-        "That date range is not one we can report on.")
-      : null;
-  const activityRange: PipelineRange = parsedActivityRange?.success
-    ? parsedActivityRange.data
-    : {};
-  const activitySortKeyParam = first(searchParams.sort);
-  const activitySort = {
-    key: isInstituteActivitySortKey(activitySortKeyParam)
-      ? activitySortKeyParam
-      : DEFAULT_INSTITUTE_ACTIVITY_SORT.key,
-    dir: first(searchParams.dir) === "desc" ? ("desc" as const) : ("asc" as const),
-  };
 
   // An admin loads the supervision view; a rep loads their own day. Neither
   // pays for the other's queries.
@@ -107,7 +62,6 @@ export default async function DashboardPage(props: PageProps<"/">) {
     week,
     overview,
     catalogue,
-    report,
     tasks,
     alerts,
     totalInstitutes,
@@ -126,14 +80,6 @@ export default async function DashboardPage(props: PageProps<"/">) {
     // The status vocabulary. Cheap, and needed by the plan picker to say when an
     // institute is being re-opened after a closed loop.
     settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "dashboard:statuses"),
-    admin && !activityRangeError
-      ? settled(
-          getInstituteActivityModel({ range: activityRange, sort: activitySort, page: first(searchParams.page),
-            search:first(searchParams.q),member:first(searchParams.member),campus:first(searchParams.campus) }),
-          null,
-          "dashboard:report",
-        )
-      : Promise.resolve(null),
     /*
      * A3/A1 — today's follow-ups, from `follow_up_tasks`.
      *
@@ -241,68 +187,14 @@ export default async function DashboardPage(props: PageProps<"/">) {
             <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />
           )}
 
-          {/* A1 — the institute-wise Activity Report, in the place the old
-              rep-wise "Pipeline by rep" / "Activity this month" grid used to
-              sit. One table, not a compact preview with a link elsewhere:
-              the date filter, the column sorting and the Excel download are
-              all live right here, reusing the exact model and table
-              `/institutes/report` renders — `basePath="/"` is the only thing
-              that differs, so a sort click stays on the dashboard. */}
-          <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
-            <SectionTitle className="mb-0">Activity report</SectionTitle>
-            {report?.ok && (
-              <Button asChild variant="outline" className="h-11">
-                <a
-                  href={instituteActivityExportHref({
-                    range: report.model.range,
-                    sortKey: report.model.sort.key,
-                    sortDir: report.model.sort.dir,
-                    search: first(searchParams.q),member:first(searchParams.member),campus:first(searchParams.campus),
-                  })}
-                  download
-                >
-                  <FileSpreadsheetIcon className="size-4" aria-hidden />
-                  Download Excel
-                </a>
-              </Button>
-            )}
-          </div>
-
-          <ActivityFilters params={activityParams} />
-          <RangeControls
-            start={activityRange.from ?? ""}
-            end={activityRange.to ?? ""}
-            basePath="/"
-            optional
-            extraParams={
-              report?.ok &&
-              (report.model.sort.key !== DEFAULT_INSTITUTE_ACTIVITY_SORT.key ||
-                report.model.sort.dir !== DEFAULT_INSTITUTE_ACTIVITY_SORT.dir)
-                ? { ...activityParams, page:'1',sort: report.model.sort.key, dir: report.model.sort.dir }
-                : {...activityParams,page:'1'}
-            }
-            hint="Filters by the date the work was logged. Leave both blank for all time."
-          />
-
-          {activityRangeError ? (
-            <ErrorState message={activityRangeError} />
-          ) : report?.ok ? (
-            <div className="mt-3">
-              <ActivityPages model={report.model} basePath="/" params={Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'))} />
-              <InstituteActivityTable
-                rows={report.model.rows}
-                totals={report.model.totals.byActivity}
-                sort={report.model.sort}
-                range={report.model.range}
-                basePath="/"
-                caption="Institute-wise activity, Open and Closed by type"
-                extraParams={{q:activityParams.q ?? '',member:activityParams.member ?? '',campus:activityParams.campus ?? ''}}
-              />
-              <p className="text-muted-foreground mt-2 text-xs">Open and Closed count logged visit activities by their own recorded status category and activity type, not institutes&apos; current statuses. Total sums every matching institute; Excel exports every matching row. Held meetings and saved plan visits are different units from logged activities. Open loops above counts all-time unclosed Set visits, not these date-filtered status events.</p>
-            </div>
-          ) : (
-            <ErrorState message="We could not load the activity report just now. Please try again in a moment." />
-          )}
+          {/*
+            THE INSTITUTE-WISE TABLE IS NOT HERE ANY MORE. The client asked for
+            it to move behind the "Institute Activity" button on the Institutes
+            tab, so this page keeps only the aef8213 sections — Today and this
+            week, Latest from the team, Out today, Still checked in, Open loops,
+            Go to. There was no rep-wise report on this page at aef8213 to keep;
+            the old "Pipeline by rep" grid it replaced is gone, not hidden.
+          */}
         </>
       ) : (
         <>

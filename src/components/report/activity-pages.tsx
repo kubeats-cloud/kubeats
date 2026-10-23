@@ -1,8 +1,14 @@
 import Link from 'next/link';
-import type { InstituteActivityModel } from '@/lib/institute-activity-report';
+
+interface PagedActivity {
+  totalInstitutes: number;
+  rows: readonly unknown[];
+  page: number;
+  pages: number;
+}
 
 export function ActivityPages({model,basePath,params}: {
-  model: InstituteActivityModel; basePath: string; params: Record<string,string>;
+  model: PagedActivity; basePath: string; params: Record<string,string>;
 }) {
   const href = (page: number) => `${basePath}?${new URLSearchParams({...params,page:String(page)})}`;
   return <nav aria-label="Activity report pages" className="my-3 flex flex-wrap items-center justify-between gap-3 text-sm">

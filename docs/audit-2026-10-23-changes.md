@@ -291,20 +291,150 @@ lead's own reps (`supabase/migrations/0041_team_leads.sql:519-527`).
 | `/log` | `src/app/(app)/log/page.tsx:57` | Explicit own id on the plan loader; remaining reads use caller RLS | Today's own plan and status catalogue |
 | RSC payloads | `src/lib/supabase/server.ts:12-20` | Caller session + RLS; only rendered props are serialised | Same columns as the screen |
 | `/api/export/activity` | `src/app/api/export/activity/route.ts:32` | `requireAdmin()`; RLS underneath; no service key | Admin export only |
-| `/api/export/institute-activity` | `src/app/api/export/institute-activity/route.ts:30-64` | Staff gate, or rep only with `view=rep|presence`; a rep's `member` is overwritten with `user.id` | Same nine columns as the table |
+| `/api/export/institute-activity` | `src/app/api/export/institute-activity/route.ts:30-64` | Staff gate for the admin view; rep role only for `view=rep|presence`. The rep RPC takes no member parameter and derives `auth.uid()`; the admin RPC checks the role in SQL | Visit-level admin export or the rep's own institute rows |
 | `/api/health` | `src/app/api/health/route.ts:70,144` | Public by design; purposes count and cron metadata only | No personal rows |
 | `/api/pincode`, `/api/place` | `[code]/route.ts:123`; `place/route.ts:175` | Public cache lookups | Postal/place labels only |
 
 No route returning another rep's rows or an admin's rows was found. No
-`security:` commit was needed. This is a code/policy review, **not** an
-authenticated response-body capture: real session, RSC payload and live RLS
-behaviour remain unverified. Existing RLS policies and auth were not changed.
+`security:` commit was needed for a new finding. Existing RLS policies and auth
+were not changed.
+
+## Client-change round — 24 October 2026
+
+This round implements the client's later clarifications on top of the audit
+branch. It changes the answer to checklist items 1 and 6 below; those two items
+are superseded by the checklist in this section.
+
+### Overview, redirect and the Institute Activity entry (A)
+
+At `aef8213` the admin Overview contained: **Today and this week**, **Latest
+from the team**, **Out today**, **Still checked in**, **Open loops**, **Go to**
+and an institute-wise **Activity report** table. The rep Overview contained
+**Today** and **This week**. There was no rep-wise report section on Overview at
+`aef8213`, so none was invented.
+
+The institute-wise report was removed from Overview. Everything else at
+`aef8213` remains, including the whole **Go to** block. It now lives behind an
+**Institute Activity** button on the Institutes tab (`/institutes?view=activity`)
+for admins and team leads; a rep never sees that branch. The old
+`/institutes/report` route now redirects to `/institutes?view=activity` and
+keeps every query parameter (`from`, `to`, sort, filters, page).
+
+### Rep Institutes tab restored (B)
+
+The rep UI was restored to `aef8213` byte-for-byte in these files:
+
+- `src/components/report/rep-institute-search.tsx`
+- `src/components/report/rep-institute-table.tsx`
+
+`git diff aef8213 --` on both is empty. The rep branch of
+`src/app/(app)/institutes/page.tsx` was restored to the same view: its own
+report model, optional range, `RepInstituteSearch` and the institute table, with
+no export, no paging and no `q` parameter. Shared, non-UI fixes were kept: the
+Total Visits definition counts logged visit rows, and the SQL functions from
+0055 onwards (including 0060) remain. The admin/team-lead activity branch,
+filters, export and redirect are additive and do not touch the rep branch.
+
+### Institute Activity table and Excel (C)
+
+On screen: one row per institute with Total visits, one column per **active
+status** from `public.institute_statuses` (`sort_order, status`), Follow-ups
+owned, Follow-ups pending and Meetings completed. The footer is computed by SQL
+over every matching institute, not only the visible page. A status with no
+visits still gets a column and a zero.
+
+Excel: built server-side by `src/lib/xlsx.ts` (the repo's store-only writer), one
+row per **visit** in the chosen range, with the section-C columns and one 1/0
+column per status, then a final **Total** row that sums the per-status columns
+and the Follow-up Created column. It covers every matching row, never a page.
+From/To are mandatory for an export and the inclusive maximum is **31 days**;
+the route refuses longer ranges with 400 and the screens replace the link with
+"Choose a date range of 31 days or fewer…". The limit is enforced in the route
+and again inside the SQL RPC for `p_page = 0`.
+
+Column sources:
+
+| Column / figure | Source |
+| --- | --- |
+| Visit date, Activity, recorded Status | `visits.date`, `visits.activity`, `visits.status_set_to` |
+| Check-in/out date and time (IST) | `daily_plans.checkin_at` / `checkout_at`, rendered in Asia/Kolkata; blank when never recorded |
+| Location | latest check-in/out coordinates resolved to an area |
+| Total visits | count of logged `visits` rows in range |
+| Each status column | count of `visits.status_set_to` for that status |
+| Follow-ups owned | `follow_up_tasks` rows with `done_at is null` |
+| Follow-ups pending | `follow_up_tasks` rows with `done_at is null` and `due_date <= app_today()` |
+| Meetings completed | `daily_plans.meetings_actual = 1` |
+| Follow-up Date / Time (Excel) | `visits.follow_up_date` / `visits.follow_up_time` (IST time, blank when absent) |
+| Follow-up Created (Excel) | whether a `follow_up_tasks` row names the visit in `from_visit_id` |
+
+### Security behaviour and evidence
+
+- `public.audit_institute_activity(...)` checks `is_admin()` or `is_team_lead()`
+  inside SQL and raises SQLSTATE `42501` otherwise.
+- `public.audit_rep_institute_activity(...)` has **no rep-id parameter**. It
+  derives the caller from `auth.uid()`, refuses a non-rep with `42501`, and
+  returns only that rep's rows.
+- The export route requires staff for the admin view and rep role for
+  `view=rep|presence`; it never forwards a browser-supplied member id to the rep
+  RPC.
+
+Rehearsal (`kubeats_rehearsal`, 0060 applied) evidence, counts only:
+
+- Admin status RPC, October 2026, export mode `p_page=0`: 717 institutes, 534
+  visits, 18 statuses, status-column sum 534, 357 meetings, payload 646,052
+  bytes. Runtimes observed: 2,626.9 ms cold (first call after restore) and
+  808.5 ms warm. Page mode `p_page=1`: 50 rows, 0 visit payload, 32,796 bytes,
+  425.2 ms.
+- Parity: 0 mismatched status columns out of 18; Follow-up Created 84.
+- Rep RPC, same range: 82 institutes (the rep's own), 44 visits, 51.997 ms,
+  84,516 bytes.
+- Rep calling the admin RPC: denied, SQLSTATE 42501. Admin calling the rep RPC:
+  denied, SQLSTATE 42501. Rep export through the route: 403. Rep's own export:
+  200, 82 institute rows (SQL count 82), never 717.
+- Excel downloaded through the real route for the same filter: 534 data rows
+  plus the Total row; every one of the 18 status totals equals the on-screen
+  footer (e.g. 199, 37, 88 … 22, summing to 534); Follow-up Created 84.
+- 0060 DOWN → UP round-trip applied; the DOWN restores the 0055-era function and
+  removes the rep RPC.
+
+The app's own follow-up automation inserted 45 tasks during the live UI pass, so
+the owned/pending figures moved from 83/40 to 128/85. Status-column parity is
+unaffected: it is visit-based, and the two figures matched the table at each
+measurement.
+
+### Section E assessment — target statuses
+
+No code change was needed; no separate E commit exists.
+
+- The Add form is visible to admins only. `/targets` renders it only on the
+  admin's own view (`isAdmin(user) && !viewingOther`); reps and team leads get
+  the list with `canAdd={false}`. The server action calls `requireAdmin()` and
+  the RLS insert policy is `public.is_admin()`, so hiding the form is not the
+  boundary.
+- The placement matches the client spec: `docs/client_changes.md` Admin §8 puts
+  it "in the Target section", and Rep-side §2 says "Admin should have access to
+  the complete Target tab". The admin nav already contains Targets.
+- Rehearsal previously confirmed an added status persists and empty/case-
+  variant duplicates are rejected. Live check: an admin sees the Add form and
+  status-name input; a rep sees the status list with no Add button.
+
+### Verification of this round
+
+- Lint, typecheck, build and unit/integration tests as recorded at the end of
+  this branch.
+- Authenticated browser pass against the local dev server: admin Overview
+  sections; Institutes → Institute Activity; 50-row table with 18 status
+  columns; export message at 32+ days; real `.xlsx` parity; `/institutes/report`
+  redirect; rep Institutes restore; rep yearly report cap message; admin and rep
+  Targets views.
+- No production access, no production database, no Cloudflare change and no
+  push. The 31-day limit is a product limit for exports, not a worker setting.
 
 ## Manual test checklist (owner, staging then production)
 
-1. Admin Overview: apply rep, campus and From/To; sort a header; confirm the
-   page shows at most 50 rows, the Total row equals the sum of those rows, and
-   Download Excel has the same row count and column sums as the page.
+1. ~~Admin Overview activity table~~ — superseded: Overview no longer carries
+   the institute-wise table. Use the Institutes → Institute Activity checklist
+   in the client-change round above.
 2. `/institutes` and `/pending` as admin: each renders at most 50 rows/cards,
    the stated total matches SQL `count`, and paging preserves filters.
 3. `/pending/follow-ups`: Owned/Missed/Closed card counts equal the total shown
@@ -315,9 +445,9 @@ behaviour remain unverified. Existing RLS policies and auth were not changed.
    another institute's history.
 5. Targets: Targets appears in the admin nav; adding an empty or case/whitespace
    duplicate status is rejected; a new status appears in the rep target flow.
-6. Rep Institutes: "My Activity Report", matching Excel and Total row; header
-   sort arrows change order; at 400 px the first column stays visible while the
-   table scrolls horizontally.
+6. ~~Rep Institutes: "My Activity Report", matching Excel and Total row~~ —
+   superseded: the rep tab is restored to `aef8213` and has no export or
+   "My Activity Report". Check the restored search and date filter instead.
 7. Admin header has no bell and no link to `/notifications`; opening
    `/notifications` is not advertised anywhere.
 8. Board filter: NA / na / Not applicable collapse to one value; NIOS / Nios /
@@ -346,12 +476,14 @@ behaviour remain unverified. Existing RLS policies and auth were not changed.
    `supabase/rollbacks/0058_audit_reassignment_history_down.sql`
 5. `supabase/migrations/0059_target_status_case_unique.sql` — DOWN:
    `supabase/rollbacks/0059_target_status_case_unique_down.sql`
+6. `supabase/migrations/0060_audit_status_activity.sql` — DOWN:
+   `supabase/rollbacks/0060_audit_status_activity_down.sql`
 
-Nothing has been applied to Supabase or production. 0047-0054 are untouched.
+Nothing has been applied to production. 0047-0054 are untouched.
 
 ## Deploy order and rollback
 
-Order: backup → apply 0055-0059 in order → push `client/main` → run the manual
+Order: backup → apply 0055-0060 in order → push `client/main` → run the manual
 checklist. Rollback: apply the DOWN files in reverse order, then redeploy the
 previous commit.
 
@@ -361,10 +493,11 @@ previous commit.
   client has not defined the fields/data and instructs not to design or
   implement it. This overrides the audit prompt's request; no metric, migration
   or lock rule was invented.
-- Authenticated browser checks, 400 px layout, live Excel parity, real RLS/RSC
-  isolation and DOWN/reapply against a real Supabase project were **not
-  verified**. The earlier local database attempt failed and no production
-  credentials were used.
-- Production before/after latency and CPU were **not measured**. The query-path
-  numbers above are static counts from the code, not telemetry.
+- Authenticated browser checks, live Excel parity and the 0060 DOWN/reapply were
+  verified on the local Supabase stack and `kubeats_rehearsal` in the
+  client-change round above. A 400 px layout pass was **not** run this round.
+  RLS/RSC isolation was verified with role-scoped SQL calls, not by capturing
+  another user's response body.
+- Production before/after latency and CPU were **not measured**. The rehearsal
+  timings are a local Postgres measurement, not production telemetry.
 - The 583/592/9 counts in the audit were not re-read from production.

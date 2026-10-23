@@ -509,20 +509,27 @@ describe("the remaining screen caller opts out", () => {
 });
 
 /**
- * A1 correction — the admin Overview (`/`) no longer renders the rep-wise
- * `ActivityGridTable` at all (it used to, with `showActivities: false`,
- * which is the assertion this replaces). It renders the institute-wise
- * Activity Report in that same place instead — see `page.tsx`'s own comment.
+ * A1 correction — the institute-wise report moved from Overview to the
+ * Institutes tab, behind its own "Institute Activity" button. Overview keeps
+ * the aef8213 supervision sections and no longer renders either table.
  */
-describe("A1: the admin Overview shows the institute-wise report, not the rep grid", () => {
-  const page = () =>
+describe("the institute-wise report lives on the Institutes tab", () => {
+  const page = (path: string) =>
     readFileSync(
-      fileURLToPath(new URL("../../src/app/(app)/page.tsx", import.meta.url)),
+      fileURLToPath(new URL(`../../src/app/${path}`, import.meta.url)),
       "utf8",
     );
 
-  it("renders InstituteActivityTable and not ActivityGridTable", () => {
-    expect(page()).toContain("<InstituteActivityTable");
-    expect(page()).not.toContain("ActivityGridTable");
+  it("no longer renders the institute-wise or rep-wise table on Overview", () => {
+    const overview = page("(app)/page.tsx");
+    expect(overview).not.toContain("InstituteActivityTable");
+    expect(overview).not.toContain("ActivityGridTable");
+  });
+
+  it("renders InstituteStatusActivityTable behind the Institute Activity button", () => {
+    const institutes = page("(app)/institutes/page.tsx");
+    expect(institutes).toContain("Institute Activity");
+    expect(institutes).toContain("view=activity");
+    expect(institutes).toContain("<InstituteStatusActivityTable");
   });
 });

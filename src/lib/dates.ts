@@ -155,6 +155,20 @@ export function formatTime(value: string | Date | null | undefined): string {
 }
 
 /**
+ * A Postgres `time` column ("14:15:00") or an instant, as "14:15".
+ *
+ * `formatTime` reads an instant; a bare time has no date to parse, and
+ * `new Date("14:15:00")` is invalid. The time is already IST as stored, so it
+ * needs no zone conversion — only the seconds trimmed.
+ */
+export function formatClockTime(value: string | null | undefined): string {
+  if (!value) return "";
+  const clock = /^(\d{2}):(\d{2})/.exec(value);
+  if (clock) return `${clock[1]}:${clock[2]}`;
+  return formatTime(value);
+}
+
+/**
  * What this app means by "today": the calendar day in Asia/Kolkata.
  *
  * THIS DEFINITION IS SHARED WITH THE DATABASE. `public.app_today()` (migration

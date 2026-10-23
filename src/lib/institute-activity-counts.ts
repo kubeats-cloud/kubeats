@@ -42,6 +42,82 @@ export type ActivityOpenClosed = {
   closed: number;
 };
 
+/** One active status, in the order the app lists it. */
+export interface StatusColumn {
+  status: string;
+  category: StatusCategory;
+  sortOrder: number;
+}
+
+/** Admin report row: one institute, one count per status. */
+export interface InstituteStatusActivityRow {
+  id: string;
+  name: string;
+  type: InstituteType;
+  city: string | null;
+  area: string | null;
+  state: string | null;
+  status: string | null;
+  byStatus: Record<string, number>;
+  totalVisits: number;
+  meetingsCompleted: number;
+  followUpsOwned: number;
+  followUpsPending: number;
+  lastCheckinAt: string | null;
+  lastCheckoutAt: string | null;
+  lastCheckinArea: string | null;
+  lastCheckoutArea: string | null;
+}
+
+/** One visit for the admin Excel export. */
+export interface StatusActivityVisit {
+  institute: string;
+  member: string | null;
+  activity: string;
+  date: string;
+  status: string | null;
+  checkinAt: string | null;
+  checkoutAt: string | null;
+  location: string | null;
+  followUpDate: string | null;
+  followUpTime: string | null;
+  followUpCreated: boolean;
+}
+
+export const STATUS_SORT_PREFIX = "status:";
+
+/** Sort keys the status report accepts: fixed columns, or `status:<name>`. */
+export function isStatusActivitySortKey(
+  value: string | undefined,
+): value is string {
+  if (!value) return false;
+  if (value.startsWith(STATUS_SORT_PREFIX)) {
+    return value.length > STATUS_SORT_PREFIX.length && value.length <= 160;
+  }
+  return (
+    value === "institute" ||
+    value === "total_visits" ||
+    value === "follow_ups_owned" ||
+    value === "follow_ups_pending" ||
+    value === "meetings_completed"
+  );
+}
+
+export function statusSortValue(
+  row: InstituteStatusActivityRow,
+  key: string,
+): string | number {
+  if (key === "institute") return row.name.toLocaleLowerCase("en");
+  if (key === "total_visits") return row.totalVisits;
+  if (key === "follow_ups_owned") return row.followUpsOwned;
+  if (key === "follow_ups_pending") return row.followUpsPending;
+  if (key === "meetings_completed") return row.meetingsCompleted;
+  if (key.startsWith(STATUS_SORT_PREFIX)) {
+    return row.byStatus[key.slice(STATUS_SORT_PREFIX.length)] ?? 0;
+  }
+  return 0;
+}
+
 export type InstituteActivityCounts = {
   byActivity: Record<ActivityType, ActivityOpenClosed>;
   /** Visit rows that reconcile into the six activity buckets. */
