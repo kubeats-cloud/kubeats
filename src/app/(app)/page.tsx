@@ -257,7 +257,6 @@ export default async function DashboardPage(props: PageProps<"/">) {
                     range: report.model.range,
                     sortKey: report.model.sort.key,
                     sortDir: report.model.sort.dir,
-                    page: String(report.model.page),
                     search: first(searchParams.q),member:first(searchParams.member),campus:first(searchParams.campus),
                   })}
                   download
@@ -292,13 +291,14 @@ export default async function DashboardPage(props: PageProps<"/">) {
               <ActivityPages model={report.model} basePath="/" params={Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'))} />
               <InstituteActivityTable
                 rows={report.model.rows}
+                totals={report.model.totals.byActivity}
                 sort={report.model.sort}
                 range={report.model.range}
                 basePath="/"
                 caption="Institute-wise activity, Open and Closed by type"
                 extraParams={{q:activityParams.q ?? '',member:activityParams.member ?? '',campus:activityParams.campus ?? ''}}
               />
-              <p className="text-muted-foreground mt-2 text-xs">Open and Closed count logged visit activities by their own recorded status category and activity type, not institutes&apos; current statuses. Total sums the displayed page; Excel exports that same page. Held meetings and saved plan visits are different units from logged activities. Open loops above counts all-time unclosed Set visits, not these date-filtered status events.</p>
+              <p className="text-muted-foreground mt-2 text-xs">Open and Closed count logged visit activities by their own recorded status category and activity type, not institutes&apos; current statuses. Total sums every matching institute; Excel exports every matching row. Held meetings and saved plan visits are different units from logged activities. Open loops above counts all-time unclosed Set visits, not these date-filtered status events.</p>
             </div>
           ) : (
             <ErrorState message="We could not load the activity report just now. Please try again in a moment." />

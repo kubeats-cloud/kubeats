@@ -3,11 +3,20 @@ import { createClient } from '@/lib/supabase/server';
 import { logError } from '@/lib/errors';
 import { areasFor } from '@/lib/place-cache';
 import { cellFor } from '@/lib/places';
-import { isInstituteActivitySortKey, type InstituteActivityRow, type InstituteActivitySortKey } from '@/lib/institute-activity-counts';
+import { isInstituteActivitySortKey, type ActivityOpenClosed, type InstituteActivityRow, type InstituteActivitySortKey } from '@/lib/institute-activity-counts';
 import { pipelineRangeSchema, rangeIsActive, type PipelineRange, type SortDirection } from '@/lib/validation/pipeline-report';
+import type { ActivityType } from '@/lib/validation/weekly';
 
 export interface InstituteActivitySort { key: InstituteActivitySortKey; dir: SortDirection }
 export const DEFAULT_INSTITUTE_ACTIVITY_SORT: InstituteActivitySort = {key: 'institute', dir: 'asc'};
+export interface InstituteActivityTotals {
+  byActivity: Record<ActivityType, ActivityOpenClosed>;
+  totalActivities: number;
+  meetingsCompleted: number;
+  followUpsOwned: number;
+  followUpsPending: number;
+  totalVisits: number;
+}
 export interface InstituteActivityModel {
   rows: InstituteActivityRow[];
   range: PipelineRange;
@@ -15,6 +24,8 @@ export interface InstituteActivityModel {
   sort: InstituteActivitySort;
   totalInstitutes: number;
   reconciliationFailed: boolean;
+  /** SQL sum over EVERY matching institute, not just the displayed page. */
+  totals: InstituteActivityTotals;
   page: number;
   pages: number;
 }
@@ -22,6 +33,8 @@ export interface InstituteActivityQuery {
   range?: PipelineRange;
   sort?: {key?: string; dir?: string};
   page?: string;
+  /** Ask the RPC for every matching row (`p_page = 0`) instead of one page. */
+  allRows?: boolean;
   search?: string;
   member?: string;
   campus?: string;
@@ -29,6 +42,13 @@ export interface InstituteActivityQuery {
 interface SqlRow extends InstituteActivityRow {
   checkinLat: number | null; checkinLng: number | null;
   checkoutLat: number | null; checkoutLng: number | null;
+}
+interface SqlTotals {
+  meeting: ActivityOpenClosed; session: ActivityOpenClosed;
+  campus_visit: ActivityOpenClosed; olympiad: ActivityOpenClosed;
+  application: ActivityOpenClosed; admission: ActivityOpenClosed;
+  totalActivities: number; meetingsCompleted: number;
+  followUpsOwned: number; followUpsPending: number; totalVisits: number;
 }
 
 /** Same count model, SQL-aggregated before sort/LIMIT. Existing caller RLS applies. */
@@ -47,19 +67,25 @@ export async function getInstituteActivityModel(query: InstituteActivityQuery = 
   };
   const rawPage = Number(query.page);
   const page = Number.isSafeInteger(rawPage) && rawPage > 0 && rawPage <= 2147483647 ? rawPage : 1;
+  const allRows = query.allRows === true;
   const client = await createClient();
   const {data,error} = await client.rpc('audit_institute_activity', {
     p_from: range.from ?? null, p_to: range.to ?? null,
     p_search: (query.search ?? '').trim().slice(0,120), p_member: query.member || null,
-    p_campus: query.campus || null, p_sort: sort.key, p_desc: sort.dir === 'desc', p_page: page,
+    p_campus: query.campus || null, p_sort: sort.key, p_desc: sort.dir === 'desc',
+    // `0` is the RPC's all-rows mode; it ignores the page window and still
+    // returns the same SQL totals either way.
+    p_page: allRows ? 0 : page,
   });
   if (error || !data) {
     logError('institute-activity:sql', error ?? 'Missing aggregate');
     return {ok: false, error: 'We could not load activity. Check the audit query migration is installed.'};
   }
-  const result = data as {rows: SqlRow[]; total: number; page: number; pages: number; reconciliationFailed: boolean};
+  const result = data as {rows: SqlRow[]; total: number; page: number; pages: number;
+    reconciliationFailed: boolean; totals: SqlTotals};
   // Decoration is bounded to <=100 points on a 50-institute page, not the log.
-  const areas = await areasFor(result.rows.flatMap((row) => [
+  // An all-rows export never reads the area columns, so it skips the lookup.
+  const areas = allRows ? new Map<string,string>() : await areasFor(result.rows.flatMap((row) => [
     {latitude: row.checkinLat, longitude: row.checkinLng},
     {latitude: row.checkoutLat, longitude: row.checkoutLng},
   ]));
@@ -68,7 +94,11 @@ export async function getInstituteActivityModel(query: InstituteActivityQuery = 
   const rows = result.rows.map(({checkinLat,checkinLng,checkoutLat,checkoutLng,...row}) => ({
     ...row, lastCheckinArea: areaAt(checkinLat,checkinLng), lastCheckoutArea: areaAt(checkoutLat,checkoutLng),
   }));
+  const {meeting,session,campus_visit,olympiad,application,admission,
+    totalActivities,meetingsCompleted,followUpsOwned,followUpsPending,totalVisits} = result.totals;
   return {ok: true, model: {rows,range,sort,rangeActive: rangeIsActive(range),
+    totals: {byActivity: {meeting,session,campus_visit,olympiad,application,admission},
+      totalActivities,meetingsCompleted,followUpsOwned,followUpsPending,totalVisits},
     totalInstitutes: result.total, page: result.page, pages: result.pages, reconciliationFailed: result.reconciliationFailed}};
 }
 export {pipelineRangeSchema,rangeIsActive};

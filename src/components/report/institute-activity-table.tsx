@@ -8,6 +8,7 @@ import {
 } from "@/lib/validation/weekly";
 import { INSTITUTE_ACTIVITY_LABELS } from "@/lib/institute-activity-counts";
 import type {
+  ActivityOpenClosed,
   InstituteActivityRow,
   InstituteActivitySortKey,
 } from "@/lib/institute-activity-counts";
@@ -95,6 +96,7 @@ function SortHeader({
 
 export function InstituteActivityTable({
   rows,
+  totals,
   sort,
   range,
   caption,
@@ -102,6 +104,8 @@ export function InstituteActivityTable({
   extraParams,
 }: {
   rows: readonly InstituteActivityRow[];
+  /** Totals over every matching institute, not only the displayed page. */
+  totals: Record<ActivityType, ActivityOpenClosed>;
   sort: SortState;
   range: PipelineRange;
   caption: string;
@@ -217,7 +221,7 @@ export function InstituteActivityTable({
           )}
         </tbody>
         <tfoot><tr className="bg-muted/60 border-t font-semibold"><th className="bg-card sticky left-0 px-3 py-2 text-left">Total</th>
-          {ACTIVITY_TYPES.flatMap(activity => (['open','closed'] as const).map(category => <td key={`${activity}-${category}`} className="px-3 py-2 text-right tabular-nums">{rows.reduce((sum,row) => sum + row.byActivity[activity][category],0)}</td>))}
+          {ACTIVITY_TYPES.flatMap(activity => (['open','closed'] as const).map(category => <td key={`${activity}-${category}`} className="px-3 py-2 text-right tabular-nums">{totals[activity][category]}</td>))}
         </tr></tfoot>
       </table>
     </div>

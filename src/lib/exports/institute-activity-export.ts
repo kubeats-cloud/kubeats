@@ -34,6 +34,8 @@ const ACTIVITY_HEADERS: { key: ActivityType; open: string; closed: string }[] =
 
 export function instituteActivitySheetRows(
   rows: readonly InstituteActivityRow[],
+  /** SQL totals over all matching rows; falls back to the passed rows. */
+  totals?: Record<ActivityType, {open: number; closed: number}>,
 ): CellValue[][] {
   // No "Total" column: Admin #1/#2 name only the six activity types' Open/
   // Closed counts, and "the downloaded Excel file must contain the same
@@ -54,7 +56,8 @@ export function instituteActivitySheetRows(
   });
 
   const total: CellValue[] = ['Total',...ACTIVITY_TYPES.flatMap(key => (['open','closed'] as const)
-    .map(category => rows.reduce((sum,row) => sum + row.byActivity[key][category],0)))];
+    .map(category => totals ? totals[key][category]
+      : rows.reduce((sum,row) => sum + row.byActivity[key][category],0)))];
   return [header, ...body,total];
 }
 
@@ -86,11 +89,16 @@ export function presenceSheetRows(rows: readonly InstituteActivityRow[]): CellVa
 export async function buildInstituteActivityExport(
   query: InstituteActivityQuery & {view?: 'rep' | 'presence'} = {},
 ): Promise<InstituteActivityExportResult> {
-  const result = await getInstituteActivityModel(query);
+  // The admin download is the whole filtered report, not the page on screen:
+  // `p_page = 0` returns every matching institute, and the Total row uses the
+  // RPC's sum over those same rows.
+  const allRows = query.view === undefined;
+  const result = await getInstituteActivityModel({...query, allRows, page: allRows ? undefined : query.page});
   if (!result.ok) return { ok: false, error: result.error };
 
   const dataRows = query.view === 'rep' ? repInstituteSheetRows(result.model.rows)
-    : query.view === 'presence' ? presenceSheetRows(result.model.rows) : instituteActivitySheetRows(result.model.rows);
+    : query.view === 'presence' ? presenceSheetRows(result.model.rows)
+      : instituteActivitySheetRows(result.model.rows, result.model.totals.byActivity);
   const colCount = dataRows[0]?.length ?? 1;
   const sheet: SheetSpec = {
     name: "Institute activity",

@@ -60,7 +60,9 @@ export async function GET(request: NextRequest) {
   const result = await buildInstituteActivityExport({
     range: parsedRange.data,
     sort: { key: sortKey, dir },
-    page: params.get('page') ?? undefined,
+    // The admin download is the full filtered report, so `page` is not
+    // forwarded; rep/presence exports keep their page parameter.
+    ...(view ? { page: params.get('page') ?? undefined } : {}),
     search: params.get('q') ?? undefined,
     member: user?.role === 'rep' ? user.id : params.get('member') ?? undefined,
     campus: params.get('campus') ?? undefined,

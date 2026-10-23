@@ -31,10 +31,11 @@ describe('institute export authorization and filter forwarding',() => {
     expect(mocks.build).toHaveBeenCalledWith(expect.objectContaining({view,member:own,page:'2',search:'Synthetic',
       range:{from:'2026-10-01',to:'2026-10-23'}}));
   });
-  it('forwards the admin screen page, rep, campus, search and sort unchanged',async () => {
+  it('drops the admin screen page but forwards rep, campus, search and sort',async () => {
     mocks.gate.mockResolvedValue({ok:true,user:{id:own,role:'admin'}});
     await GET(request(`member=${other}&campus=${own}&page=3&q=Synthetic&sort=meeting_open&dir=desc`));
-    expect(mocks.build).toHaveBeenCalledWith(expect.objectContaining({member:other,campus:own,page:'3',search:'Synthetic',sort:{key:'meeting_open',dir:'desc'}}));
+    expect(mocks.build).toHaveBeenCalledWith(expect.objectContaining({member:other,campus:own,search:'Synthetic',sort:{key:'meeting_open',dir:'desc'}}));
+    expect(mocks.build.mock.calls[0][0]).not.toHaveProperty('page');
   });
   it('rejects invalid dates before workbook work',async () => {
     mocks.gate.mockResolvedValue({ok:true,user:{id:own,role:'admin'}});

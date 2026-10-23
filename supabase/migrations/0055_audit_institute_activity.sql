@@ -97,14 +97,48 @@ language sql stable security invoker set search_path = public as $$
     ) position from packed
   ), counts as (
     select count(*) total,greatest(1,ceil(count(*)/50.0)::integer) pages from registry
+  ), totals as (
+    select
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.meeting_open,0) end),0)::bigint meeting_open,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.meeting_closed,0) end),0)::bigint meeting_closed,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.session_open,0) end),0)::bigint session_open,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.session_closed,0) end),0)::bigint session_closed,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.campus_visit_open,0) end),0)::bigint campus_visit_open,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.campus_visit_closed,0) end),0)::bigint campus_visit_closed,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.olympiad_open,0) end),0)::bigint olympiad_open,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.olympiad_closed,0) end),0)::bigint olympiad_closed,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.application_open,0) end),0)::bigint application_open,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.application_closed,0) end),0)::bigint application_closed,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.admission_open,0) end),0)::bigint admission_open,
+      coalesce(sum(case when v.invalid then 0 else coalesce(v.admission_closed,0) end),0)::bigint admission_closed,
+      coalesce(sum(coalesce(v.total,0)),0)::bigint total_activities,
+      coalesce(sum(coalesce(d.meetings,0)),0)::bigint meetings_completed,
+      coalesce(sum(coalesce(t.owned,0)),0)::bigint follow_ups_owned,
+      coalesce(sum(coalesce(t.pending,0)),0)::bigint follow_ups_pending,
+      coalesce(sum(coalesce(v.total,0)),0)::bigint total_visits
+    from registry r left join visit_counts v on v.institute_id = r.id
+      left join plan_counts d on d.institute_id = r.id left join tasks t on t.institute_id = r.id
   ), windowed as (
-    select total,pages,least(pages,greatest(1,coalesce(p_page,1))) page from counts
+    select total,pages,
+      case when coalesce(p_page,1) < 1 then 1 else least(pages,greatest(1,p_page)) end page,
+      coalesce(p_page,1) < 1 all_rows
+    from counts
   )
   select jsonb_build_object('total',w.total,'pages',w.pages,'page',w.page,
     'reconciliationFailed',exists(select 1 from visit_counts where invalid),
+    'totals',jsonb_build_object(
+      'meeting',jsonb_build_object('open',tot.meeting_open,'closed',tot.meeting_closed),
+      'session',jsonb_build_object('open',tot.session_open,'closed',tot.session_closed),
+      'campus_visit',jsonb_build_object('open',tot.campus_visit_open,'closed',tot.campus_visit_closed),
+      'olympiad',jsonb_build_object('open',tot.olympiad_open,'closed',tot.olympiad_closed),
+      'application',jsonb_build_object('open',tot.application_open,'closed',tot.application_closed),
+      'admission',jsonb_build_object('open',tot.admission_open,'closed',tot.admission_closed),
+      'totalActivities',tot.total_activities,'meetingsCompleted',tot.meetings_completed,
+      'followUpsOwned',tot.follow_ups_owned,'followUpsPending',tot.follow_ups_pending,
+      'totalVisits',tot.total_visits),
     'rows',coalesce((select jsonb_agg(n.payload order by n.position) from numbered n
-      where n.position > (w.page-1)*50 and n.position <= w.page*50),'[]'::jsonb))
-  from windowed w;
+      where w.all_rows or (n.position > (w.page-1)*50 and n.position <= w.page*50)),'[]'::jsonb))
+  from windowed w,totals tot;
 $$;
 revoke all on function public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer) from public,anon;
 grant execute on function public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer) to authenticated;
