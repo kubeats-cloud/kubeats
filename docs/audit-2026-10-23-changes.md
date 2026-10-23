@@ -241,3 +241,15 @@ Existing Dashboard link/check-in rule retained. Added up to 50 own planned,
 not-yet-checked-in entries below the gate, using the already-loaded own plan;
 no extra query and no bypass. Lint/typecheck exit 0. Local `/log` redirects
 signed-out users to login. Authenticated gate/actions **not verified in browser**.
+
+## D9 — existing field-visit export integrity
+
+`cc3fffd` already exports missing checkout as blank consistently, with exactly
+the five specified columns. Kept that behavior, rather than invent a time or
+add an unrequested column. Added copy distinguishing check-in record exports
+from status-event counts, and blank checkout from a fabricated completion.
+The audit's 583/592/9 counts were not re-read from production.
+
+Lint/typecheck exit 0; field-checkout/notification tests 2 files / 40 passed,
+including new missing-checkout/failure tests. Authenticated export UI and actual
+download **not verified in browser**. No new spreadsheet artifacts were written.

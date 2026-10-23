@@ -98,6 +98,7 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
           </a>
         </Button>
       )}
+      <p className="text-muted-foreground mb-3 text-xs">Field Visit Report exports check-in records in range, including arrivals without a logged status. A blank Check-Out Time means still open or not recorded; no time is invented. Status-event counts below exclude logged visits with no recorded status and are not the field-visit row count.</p>
 
       {!result.ok ? (
         <ErrorState message={result.error} />
