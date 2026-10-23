@@ -1,5 +1,6 @@
 import {
   METRICS,
+  type ActivityType,
   type MetricCounts,
 } from "@/lib/validation/weekly";
 import type { StatusCatalogue, StatusRow } from "@/lib/validation/institute";
@@ -60,6 +61,31 @@ export const ACTIVITY_COLUMNS = [
   label: string;
   from: readonly (keyof MetricCounts)[];
 }[];
+
+/**
+ * The six activity types, in the labels the client uses for each.
+ *
+ * THESE BECOME A BAND TITLE EACH on the Overview's Open/Closed grid, with
+ * "Open" and "Closed" underneath — the same two-row arrangement the
+ * institute-wise report uses. The labels are deliberately the same six as
+ * `ACTIVITY_COLUMNS`, and a test asserts that, because the two lists are
+ * written separately (this one cannot import the institute report's map
+ * without a cycle) and a reworded one must not drift.
+ */
+export const ACTIVITY_STATUS_BANDS = [
+  { activity: "meeting", label: "Meetings" },
+  { activity: "session", label: "Sessions" },
+  { activity: "campus_visit", label: "Campus Visits" },
+  { activity: "olympiad", label: "Olympiad Registrations" },
+  { activity: "application", label: "Applications" },
+  { activity: "admission", label: "Admissions" },
+] as const satisfies readonly { activity: ActivityType; label: string }[];
+
+/** One activity's Open/Closed split — visit-sourced, like the institute grid. */
+export type RepActivityStatus = Record<
+  ActivityType,
+  { open: number; closed: number }
+>;
 
 /**
  * Every metric feeds exactly one column, checked here rather than trusted.
@@ -256,11 +282,26 @@ export interface RepRow {
   activities: MetricCounts;
   /** Visits in range by `status_set_to`. Absent key means zero. */
   statuses: Record<string, number>;
+  /**
+   * VISIT-SOURCED Open/Closed by activity, for the Overview's 12 columns.
+   *
+   * A different axis from `activities`, not a finer split of it: Meetings here
+   * counts `visits.activity = 'meeting'`, while the Meetings activity column
+   * counts `daily_plans.meetings_actual` (Rule 7's split). That is exactly the
+   * arithmetic the institute-wise report already uses, and the two grids are
+   * never shown together, so no reader is asked to reconcile them.
+   *
+   * Optional because the Team report and the client-template workbook do not
+   * render this band; a grid that asks for it and gets nothing draws zeroes.
+   */
+  activityStatuses?: RepActivityStatus;
 }
 
 export interface GridInput {
   reps: RepRow[];
   columns: StatusColumns;
+  /** Full filtered rows used by a paginated screen's totals footer. */
+  totalsFrom?: readonly RepRow[];
   /**
    * Whether to draw the DASHBOARD ACTIVITIES band. Defaults to TRUE, and the
    * default is the load-bearing part.
@@ -282,6 +323,19 @@ export interface GridInput {
    * client's spreadsheet.
    */
   showActivities?: boolean;
+  /**
+   * Whether to draw OPEN and CLOSED under each of the six activity types.
+   *
+   * DEFAULTS TO FALSE, and only the Overview asks for it. The 12 columns are
+   * counted from the same visits the status bands count, split by
+   * `activityBucketFor()` and the catalogue's `category` — the institute-wise
+   * report's arithmetic, reused rather than reimplemented.
+   *
+   * The Team report and the client-template workbook keep the default, so
+   * neither gains a band. The Overview's own workbook passes it explicitly:
+   * its download has to show the columns its table shows.
+   */
+  showActivityStatuses?: boolean;
   /**
    * Columns the READER has folded away (change-doc item 7). Keys are the ones
    * this builder returns in `columns`.
@@ -324,6 +378,8 @@ export interface GridInput {
    * promise rather than a drill-down.
    */
   hrefFor?: (rep: RepRow, status: string) => string | null;
+  /** Turns a rep's name into a link when a screen supplies a destination. */
+  repHrefFor?: (rep: RepRow) => string | null;
   /**
    * Whether to compute the TOTAL column, the total row and the grand total.
    *
@@ -377,15 +433,20 @@ export const TOTAL_ROW_LABEL = "All reps";
  */
 export interface GridTotals {
   /**
-   * Each rep's row total — THE STATUS COLUMNS ONLY.
+   * Each rep's row total — ONE breakdown of the visit rows, never both.
    *
-   * The six activity columns are deliberately excluded, and this is the single
-   * most important line of arithmetic in the file. Meetings comes from
+   * The six DASHBOARD ACTIVITIES columns are always excluded, and that is the
+   * single most important line of arithmetic in the file. Meetings comes from
    * `daily_plans where meetings_actual = 1`; the other five activity columns
    * fold eight metrics counted from `visits`. The status columns count those
    * same visits again, by where they left the institute. So a row total
    * spanning both bands would count every visit twice AND add a figure from a
    * different table to it — a number that looks like a sum and means nothing.
+   *
+   * The 12 ACTIVITY STATUS columns are visit-sourced too, so they must not be
+   * added to the 18 per-status columns either. When they are present they ARE
+   * the total's basis (they are the Overview's default view); otherwise the
+   * per-status cells remain the basis, exactly as before.
    */
   perRow: number[];
   /**
@@ -486,6 +547,7 @@ export function buildActivityGrid(input: GridInput): {
     reps,
     columns,
     showActivities = true,
+    showActivityStatuses = false,
     unsetColumn,
     hrefFor,
     showTotals = true,
@@ -526,6 +588,29 @@ export function buildActivityGrid(input: GridInput): {
   const unset =
     unsetColumn && keep(`status:${unsetColumn.status}`) ? unsetColumn : undefined;
 
+  /*
+   * The 12 activity × category columns, narrowed by the same `keep()`.
+   *
+   * One list again, read by the bands, the body cells, the totals and the
+   * column descriptors. They sit AFTER the vocabulary and BEFORE TOTAL, so
+   * every column the client's template already has keeps its letter and the
+   * workbook that does not ask for this band is unchanged.
+   */
+  const activityStatusColumns = showActivityStatuses
+    ? ACTIVITY_STATUS_BANDS.flatMap((band) =>
+        (["open", "closed"] as const)
+          .filter((category) =>
+            keep(`activity-status:${band.activity}:${category}`),
+          )
+          .map((category) => ({
+            activity: band.activity,
+            category,
+            label: category === "open" ? "Open" : "Closed",
+            band: band.label,
+          })),
+      )
+    : [];
+
   const bands: { title: string; labels: string[] }[] = [
     {
       title: GROUP_HEADERS.activities,
@@ -535,6 +620,14 @@ export function buildActivityGrid(input: GridInput): {
     { title: GROUP_HEADERS.open, labels: openColumns.map((c) => c.label) },
     // Last, so the template's bands keep the positions they already have.
     { title: GROUP_HEADERS.unset, labels: unset ? [unset.label] : [] },
+    // The Overview's 12, one two-column band per activity — the institute
+    // report's arrangement. Omitted entirely unless the caller asks.
+    ...ACTIVITY_STATUS_BANDS.map((band) => ({
+      title: band.label,
+      labels: activityStatusColumns
+        .filter((column) => column.activity === band.activity)
+        .map((column) => column.label),
+    })),
     // ...and TOTAL after even that, for the same reason one more time over.
     { title: GROUP_HEADERS.total, labels: showTotals ? [TOTAL_COLUMN_LABEL] : [] },
   ].filter((band) => band.labels.length > 0);
@@ -577,18 +670,43 @@ export function buildActivityGrid(input: GridInput): {
       hrefRow.push(null);
     }
 
-    // Accumulated as the status cells are written rather than re-derived
-    // afterwards, so the figure in the TOTAL column is arithmetically the same
-    // cells the reader can see to its left. A second pass over `row` would be
-    // a second chance to pick the wrong slice.
-    let rowTotal = 0;
+    // Accumulated as the cells are written rather than re-derived afterwards,
+    // so the figure in the TOTAL column is arithmetically the same cells the
+    // reader can see to its left. A second pass over `row` would be a second
+    // chance to pick the wrong slice.
+    let statusTotal = 0;
     for (const column of statusColumns) {
       const count = rep.statuses[column.status] ?? 0;
       row.push(count);
-      rowTotal += count;
+      statusTotal += count;
       // Zero is real data and is not a door. See `hrefFor`.
       hrefRow.push(count > 0 && hrefFor ? hrefFor(rep, column.status) : null);
     }
+
+    let activityStatusTotal = 0;
+    for (const column of activityStatusColumns) {
+      const count =
+        rep.activityStatuses?.[column.activity]?.[column.category] ?? 0;
+      row.push(count);
+      activityStatusTotal += count;
+      // No destination corresponds to "open sessions for this rep" in Review:
+      // its filter takes one status, and this cell spans several. A link would
+      // promise a cohort page that cannot exist.
+      hrefRow.push(null);
+    }
+
+    /*
+     * TOTAL FOLLOWS THE BREAKDOWN THAT IS ON SCREEN.
+     *
+     * The status bands and the activity-status bands are two views of the same
+     * visits, so adding both would count every visit twice. When the Overview
+     * asks for the 12, they are the default view and the total summarises
+     * them; the per-status columns remain a picker option, not a second sum.
+     * If the reader folds all 12 away, the total falls back to whatever status
+     * columns remain, so it never reads zero beside visible rows.
+     */
+    const rowTotal =
+      activityStatusColumns.length > 0 ? activityStatusTotal : statusTotal;
     perRow.push(rowTotal);
 
     if (showTotals) {
@@ -625,9 +743,50 @@ export function buildActivityGrid(input: GridInput): {
   let totals: GridTotals | null = null;
   if (showTotals) {
     const width = labelRow.length;
+    const totalsFrom = input.totalsFrom ?? reps;
+    /*
+     * THE ROWS THE COLUMN SUMS COVER.
+     *
+     * Normally the rendered body itself, and then this is the same reduction
+     * it has always been. The Overview pages its body, so it passes the full
+     * filtered set separately: a "All reps" footer must sum all reps rather
+     * than whichever fifty are on screen.
+     *
+     * Built from the SAME `activityColumns` / `statusColumns` lists the body
+     * was built from, so a totals row cannot put a count under the wrong
+     * header even when the visible page is narrower than the report.
+     */
+    const totalRows =
+      totalsFrom === reps
+        ? bodyRows
+        : totalsFrom.map((rep) => {
+            const row: CellValue[] = [rep.name];
+            for (const column of activityColumns) {
+              row.push(activityCount(rep.activities, column));
+            }
+            let statusTotal = 0;
+            for (const column of statusColumns) {
+              const count = rep.statuses[column.status] ?? 0;
+              row.push(count);
+              statusTotal += count;
+            }
+            let activityStatusTotal = 0;
+            for (const column of activityStatusColumns) {
+              const count =
+                rep.activityStatuses?.[column.activity]?.[column.category] ?? 0;
+              row.push(count);
+              activityStatusTotal += count;
+            }
+            row.push(
+              activityStatusColumns.length > 0
+                ? activityStatusTotal
+                : statusTotal,
+            );
+            return row;
+          });
     const perColumn: (number | null)[] = Array.from({ length: width }, (_, c) => {
       if (c === 0) return null;
-      return bodyRows.reduce<number>(
+      return totalRows.reduce<number>(
         (sum, row) => sum + (typeof row[c] === "number" ? (row[c] as number) : 0),
         0,
       );
@@ -638,7 +797,14 @@ export function buildActivityGrid(input: GridInput): {
       // The sum of the row totals. The test asserts this also equals the sum of
       // `perColumn`'s status half — two routes, one number, which is what makes
       // it reconcile with the pipeline report's own header.
-      grand: perRow.reduce((sum, n) => sum + n, 0),
+      grand: totalRows.reduce(
+        (sum, row) =>
+          sum +
+          (typeof row[width - 1] === "number"
+            ? (row[width - 1] as number)
+            : 0),
+        0,
+      ),
     };
   }
 
@@ -647,6 +813,9 @@ export function buildActivityGrid(input: GridInput): {
     SORT_BY_REP,
     ...activityColumns.map(() => null),
     ...statusColumns.map((column) => column.status),
+    // The 12 are folds of visits by status category, not a single status, so
+    // sorting by one would answer no question the status columns do not.
+    ...activityStatusColumns.map(() => null),
     ...(showTotals ? [SORT_BY_TOTAL] : []),
   ];
 
@@ -693,6 +862,13 @@ export function buildActivityGrid(input: GridInput): {
           },
         ]
       : []),
+    // Keyed on activity AND category: "Open" appears six times, so the label
+    // cannot identify a column, and a stored preference must survive a relabel.
+    ...activityStatusColumns.map((column) => ({
+      key: `activity-status:${column.activity}:${column.category}`,
+      label: column.label,
+      band: column.band,
+    })),
     ...(showTotals
       ? [{ key: SORT_BY_TOTAL, label: TOTAL_COLUMN_LABEL, band: null }]
       : []),
@@ -713,6 +889,54 @@ export const SORT_BY_REP = "rep";
 
 /** Sorting by the TOTAL column. Not a status, so it needs its own key. */
 export const SORT_BY_TOTAL = "total";
+
+/** Bound the Overview report's rendered rows without changing export totals. */
+export const ACTIVITY_PAGE_SIZE = 50;
+
+export function pageReps<T>(
+  reps: readonly T[],
+  requestedPage: number,
+): { reps: T[]; page: number; pageCount: number } {
+  const pageCount = Math.max(1, Math.ceil(reps.length / ACTIVITY_PAGE_SIZE));
+  const page =
+    Number.isFinite(requestedPage) && requestedPage >= 1
+      ? Math.min(Math.floor(requestedPage), pageCount)
+      : 1;
+  const from = (page - 1) * ACTIVITY_PAGE_SIZE;
+  return { reps: reps.slice(from, from + ACTIVITY_PAGE_SIZE), page, pageCount };
+}
+
+export function activitySortKeys(columns: StatusColumns): string[] {
+  return [
+    SORT_BY_REP,
+    ...columns.closed.map((column) => column.status),
+    ...columns.open.map((column) => column.status),
+    SORT_BY_TOTAL,
+  ];
+}
+
+function rowTotal(rep: RepRow): number {
+  return Object.values(rep.statuses).reduce((sum, count) => sum + count, 0);
+}
+
+export function sortRepRows(
+  reps: readonly RepRow[],
+  sort: { key: string; dir: "asc" | "desc" },
+): RepRow[] {
+  const direction = sort.dir === "asc" ? 1 : -1;
+  const byName = (a: RepRow, b: RepRow) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+  return [...reps].sort((a, b) => {
+    if (sort.key === SORT_BY_REP) return direction * byName(a, b);
+    const left =
+      sort.key === SORT_BY_TOTAL ? rowTotal(a) : (a.statuses[sort.key] ?? 0);
+    const right =
+      sort.key === SORT_BY_TOTAL ? rowTotal(b) : (b.statuses[sort.key] ?? 0);
+    if (left === right) return byName(a, b);
+    return direction * (left - right);
+  });
+}
 
 /** Column A wide enough for a name; the count columns sized for their header. */
 function widthsFor(rows: CellValue[][]): number[] {

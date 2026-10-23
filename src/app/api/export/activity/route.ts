@@ -56,9 +56,32 @@ export async function GET(request: NextRequest) {
   if (report !== null && report !== "field-visits") {
     return NextResponse.json({ error: "Unknown report." }, { status: 400 });
   }
+  /*
+   * The Overview's sort rides along so the file is ordered like the table it
+   * was downloaded from. Parsed leniently by the model: a stale status name
+   * falls back to the name order rather than turning a download into an error.
+   */
+  const sort = {
+    key: params.get("sort") ?? undefined,
+    dir: params.get("dir") ?? undefined,
+  };
+  /*
+   * The Overview's table shows Open/Closed per activity rather than the 18
+   * status columns, so its file asks for that layout explicitly. Absent is the
+   * client template `/team/report` downloads, unchanged.
+   */
+  const layout = params.get("layout");
+  if (layout !== null && layout !== "activity-status") {
+    return NextResponse.json({ error: "Unknown layout." }, { status: 400 });
+  }
   const result = report === "field-visits"
     ? await buildFieldVisitExport({ start, end })
-    : await buildActivityExport({ start, end }, member ?? null);
+    : await buildActivityExport(
+        { start, end },
+        member ?? null,
+        sort,
+        layout === "activity-status" ? { layout } : {},
+      );
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 422 });

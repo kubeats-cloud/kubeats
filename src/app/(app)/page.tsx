@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,9 @@ import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
 import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
+import { CustomisableGrid } from "@/components/report/customisable-grid";
+import { ExportExcel } from "@/components/report/export-excel";
+import { RangeControls } from "@/components/report/range-controls";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { countMyInstitutes } from "@/lib/institutes";
 import { listStatusCatalogue } from "@/lib/statuses";
@@ -25,16 +29,57 @@ import { getWeekSummary } from "@/lib/week-summary";
 import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
 import { todayISO } from "@/lib/dates";
 import { getOverview } from "@/lib/admin-workspace";
+import { getActivityReportModel } from "@/lib/exports/activity-export";
+import { activitySortKeys, pageReps } from "@/lib/exports/activity-grid";
+import { exportRangeSchema } from "@/lib/validation/export";
+import {
+  DEFAULT_PIPELINE_SORT,
+  nextSortDirection,
+  parsePipelineSort,
+} from "@/lib/validation/pipeline-report";
 
 export const metadata = { title: "Dashboard" };
 
-export default async function DashboardPage() {
+const first = (value: string | string[] | undefined) =>
+  typeof value === "string" && value !== "" ? value : undefined;
+
+export default async function DashboardPage(props: PageProps<"/">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.role === "team_lead") redirect("/team");
 
   const admin = isAdmin(user);
   const weekStart = mondayOf();
+  const searchParams = await props.searchParams;
+  const parsedRepRange = admin
+    ? exportRangeSchema.safeParse({
+        start: first(searchParams.start),
+        end: first(searchParams.end),
+      })
+    : null;
+  const repRangeError =
+    parsedRepRange && !parsedRepRange.success
+      ? (parsedRepRange.error.issues[0]?.message ??
+        "That date range is not one we can report on.")
+      : null;
+  const repRange = parsedRepRange?.success
+    ? { start: parsedRepRange.data.start, end: parsedRepRange.data.end }
+    : null;
+
+  const otherParams = (omit: readonly string[]) => {
+    const kept: Record<string, string> = {};
+    for (const [key, value] of Object.entries(searchParams)) {
+      if (typeof value !== "string" || value === "" || omit.includes(key)) continue;
+      kept[key] = value;
+    }
+    return Object.keys(kept).length > 0 ? kept : undefined;
+  };
+  const repRangeExtra = otherParams(["start", "end", "repPage"]);
+  const resetRepRangeHref = (() => {
+    const params = new URLSearchParams(otherParams(["start", "end", "repPage"]));
+    const query = params.toString();
+    return query ? `/?${query}` : "/";
+  })();
 
   // An admin loads the supervision view; a rep loads their own day. Neither
   // pays for the other's queries.
@@ -55,6 +100,12 @@ export default async function DashboardPage() {
    * falls back to. Nothing downstream can tell the two routes apart, which is
    * why this needed no change to how the page reads any of it.
    */
+  const catalogueRead = settled(
+    listStatusCatalogue(),
+    SEED_STATUS_CATALOGUE,
+    "dashboard:statuses",
+  );
+
   const [
     plan,
     institutes,
@@ -62,6 +113,7 @@ export default async function DashboardPage() {
     week,
     overview,
     catalogue,
+    activityReport,
     tasks,
     alerts,
     totalInstitutes,
@@ -79,7 +131,23 @@ export default async function DashboardPage() {
     admin ? settled(getOverview(), null, "dashboard:overview") : Promise.resolve(null),
     // The status vocabulary. Cheap, and needed by the plan picker to say when an
     // institute is being re-opened after a closed loop.
-    settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "dashboard:statuses"),
+    catalogueRead,
+    admin && repRange
+      ? (async () => {
+          const loaded = await catalogueRead;
+          return settled(
+            getActivityReportModel(repRange, null, {
+              sort: {
+                key: first(searchParams.repSort),
+                dir: first(searchParams.repDir),
+              },
+              catalogue: loaded,
+            }),
+            null,
+            "dashboard:activity-report",
+          );
+        })()
+      : Promise.resolve(null),
     /*
      * A3/A1 — today's follow-ups, from `follow_up_tasks`.
      *
@@ -125,6 +193,62 @@ export default async function DashboardPage() {
 
   const entries = plan.ok ? plan.entries : [];
   const held = entries.filter((entry) => entry.meetings_actual !== null).length;
+
+  const repActivitySort = activityReport?.ok
+    ? parsePipelineSort(
+        first(searchParams.repSort),
+        first(searchParams.repDir),
+        activitySortKeys(activityReport.model.columns),
+      )
+    : DEFAULT_PIPELINE_SORT;
+  const repPageRequested = Number.parseInt(first(searchParams.repPage) ?? "1", 10);
+  const repPage = activityReport?.ok
+    ? pageReps(activityReport.model.reps, repPageRequested)
+    : { reps: [], page: 1, pageCount: 1 };
+  const repPageHref = (page: number) => {
+    const params = new URLSearchParams();
+    for (const [name, value] of Object.entries(searchParams)) {
+      if (typeof value !== "string" || value === "" || name === "repPage") continue;
+      params.set(name, value);
+    }
+    if (repRange) {
+      params.set("start", repRange.start);
+      params.set("end", repRange.end);
+    }
+    if (page > 1) params.set("repPage", String(page));
+    return `/?${params.toString()}`;
+  };
+  const repSortHrefs: Record<string, string> | undefined =
+    activityReport?.ok && repRange
+      ? Object.fromEntries(
+          activitySortKeys(activityReport.model.columns).map((key) => {
+            const dir = nextSortDirection(key, repActivitySort);
+            const params = new URLSearchParams();
+            for (const [name, value] of Object.entries(searchParams)) {
+              if (
+                typeof value !== "string" ||
+                value === "" ||
+                name === "repSort" ||
+                name === "repDir" ||
+                name === "repPage"
+              ) {
+                continue;
+              }
+              params.set(name, value);
+            }
+            params.set("start", repRange.start);
+            params.set("end", repRange.end);
+            if (
+              key !== DEFAULT_PIPELINE_SORT.key ||
+              dir !== DEFAULT_PIPELINE_SORT.dir
+            ) {
+              params.set("repSort", key);
+              params.set("repDir", dir);
+            }
+            return [key, `/?${params.toString()}`] as const;
+          }),
+        )
+      : undefined;
 
   return (
     <>
@@ -195,6 +319,134 @@ export default async function DashboardPage() {
             Go to. There was no rep-wise report on this page at aef8213 to keep;
             the old "Pipeline by rep" grid it replaced is gone, not hidden.
           */}
+          <div className="mt-8">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <SectionTitle className="mb-0">Rep activity report</SectionTitle>
+              {activityReport?.ok && repRange && (
+                <ExportExcel
+                  start={repRange.start}
+                  end={repRange.end}
+                  sort={repActivitySort}
+                  showActivityStatuses
+                  label="Export to Excel"
+                />
+              )}
+            </div>
+            <p className="text-muted-foreground mt-1 text-xs">
+              What each rep did over the period, open and closed by activity.
+              The individual statuses are in Columns.
+            </p>
+
+            {repRangeError ? (
+              <>
+                <ErrorState message={repRangeError} />
+                <Button asChild variant="outline" className="mt-4 h-11">
+                  <Link href={resetRepRangeHref}>Back to this month</Link>
+                </Button>
+              </>
+            ) : repRange ? (
+              <>
+                <RangeControls
+                  start={repRange.start}
+                  end={repRange.end}
+                  basePath="/"
+                  idPrefix="rep-activity"
+                  extraParams={repRangeExtra}
+                  hint="Filters this report by the date the work was logged."
+                />
+                {activityReport?.ok ? (
+                  <>
+                    <div className="mt-3">
+                      <CustomisableGrid
+                        viewKey="overview-activity-report"
+                        reps={repPage.reps}
+                        /*
+                          The footer says "All reps", so it is given all of
+                          them even though the body is one page.
+                        */
+                        totalsReps={activityReport.model.reps}
+                        columns={activityReport.model.columns}
+                        showActivities={false}
+                        showActivityStatuses
+                        linkReps
+                        reviewRange={repRange}
+                        sort={repActivitySort}
+                        sortHrefs={repSortHrefs}
+                        caption={`Activity by rep from ${repRange.start} to ${repRange.end}`}
+                      />
+                    </div>
+
+                    {/*
+                      Links, not buttons, for the reason Review's pager gives:
+                      the page lives in the URL, so a pager navigates. Every
+                      filter and the sort are preserved, and the pager is
+                      hidden on a single page — it would be furniture.
+                    */}
+                    {repPage.pageCount > 1 && (
+                      <nav
+                        className="mt-3 flex flex-wrap items-center justify-between gap-3"
+                        aria-label="Rep activity report pages"
+                      >
+                        <Button
+                          asChild={repPage.page > 1}
+                          variant="outline"
+                          className="h-11"
+                          disabled={repPage.page <= 1}
+                        >
+                          {repPage.page > 1 ? (
+                            <Link
+                              href={repPageHref(repPage.page - 1)}
+                              scroll={false}
+                            >
+                              <ChevronLeftIcon className="size-4" aria-hidden />
+                              Previous
+                            </Link>
+                          ) : (
+                            <span>
+                              <ChevronLeftIcon className="size-4" aria-hidden />
+                              Previous
+                            </span>
+                          )}
+                        </Button>
+
+                        <p
+                          className="text-muted-foreground text-xs tabular-nums"
+                          aria-live="polite"
+                        >
+                          Page {repPage.page} of {repPage.pageCount} ·{" "}
+                          {activityReport.model.reps.length} reps
+                        </p>
+
+                        <Button
+                          asChild={repPage.page < repPage.pageCount}
+                          variant="outline"
+                          className="h-11"
+                          disabled={repPage.page >= repPage.pageCount}
+                        >
+                          {repPage.page < repPage.pageCount ? (
+                            <Link
+                              href={repPageHref(repPage.page + 1)}
+                              scroll={false}
+                            >
+                              Next
+                              <ChevronRightIcon className="size-4" aria-hidden />
+                            </Link>
+                          ) : (
+                            <span>
+                              Next
+                              <ChevronRightIcon className="size-4" aria-hidden />
+                            </span>
+                          )}
+                        </Button>
+                      </nav>
+                    )}
+                  </>
+                ) : (
+                  <ErrorState message="We could not load the activity report just now. Please try again in a moment." />
+                )}
+              </>
+            ) : null}
+          </div>
         </>
       ) : (
         <>

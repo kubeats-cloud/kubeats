@@ -107,7 +107,7 @@ export function ViewPicker({
             size="sm"
             className="h-8 gap-1 text-xs"
             onClick={view.showAll}
-            disabled={hidden === 0}
+            disabled={!view.changed}
           >
             <RotateCcwIcon className="size-3.5" aria-hidden />
             Reset

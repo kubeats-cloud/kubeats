@@ -253,19 +253,39 @@ describe("the .xlsx, and the one deliberate re-baseline", () => {
   });
 
   /**
-   * The export path must never pass EITHER flag, or the defaults stop
-   * protecting it. `showActivities` would silently delete six columns from the
-   * client's spreadsheet; `showTotals` would silently delete the new ones.
+   * The DEFAULT export branch keeps the client template's flags untouched:
+   * it is exactly the model's reps and columns. `showActivities` would
+   * silently delete six columns from the client's spreadsheet; `showTotals`
+   * would silently delete the new ones.
    */
-  it("is never handed showActivities or showTotals by the export path", () => {
+  it("leaves the client-template export on the defaults", () => {
     const text = readFileSync(
       fileURLToPath(
         new URL("../../src/lib/exports/activity-export.ts", import.meta.url),
       ),
       "utf8",
     );
-    expect(text).not.toContain("showActivities");
+    expect(text).toContain(": { reps, columns };");
     expect(text).not.toContain("showTotals");
+    // And a reader's column preference still never reaches the workbook.
+    expect(text).not.toContain("hiddenColumns");
+  });
+
+  /**
+   * The OVERVIEW's file is the one deliberate exception, because its table is
+   * deliberately different: Open/Closed per activity, with the 18 status
+   * columns folded away. The layout is opt-in, by name.
+   */
+  it("lays the Overview's workbook out like the Overview's table", () => {
+    const text = readFileSync(
+      fileURLToPath(
+        new URL("../../src/lib/exports/activity-export.ts", import.meta.url),
+      ),
+      "utf8",
+    );
+    expect(text).toContain('options.layout === "activity-status"');
+    expect(text).toContain("showActivities: false");
+    expect(text).toContain("showActivityStatuses: true");
   });
 
   /** The sheet carries the total row, bold, as its last row. */

@@ -180,20 +180,23 @@ export function pipelineHref(state: {
  * taps a count column to ask, and making them tap twice to get it would be a
  * worse answer to the obvious one.
  */
+export function nextSortDirection(
+  sortKey: string,
+  current: PipelineSort,
+): SortDirection {
+  if (current.key === sortKey) return current.dir === "asc" ? "desc" : "asc";
+  return sortKey === SORT_BY_REP ? "asc" : "desc";
+}
+
 export function sortHref(
   sortKey: string,
   current: PipelineSort,
   range: PipelineRange,
 ): string {
-  const dir: SortDirection =
-    current.key === sortKey
-      ? current.dir === "asc"
-        ? "desc"
-        : "asc"
-      : sortKey === SORT_BY_REP
-        ? "asc"
-        : "desc";
-  return pipelineHref({ range, sort: { key: sortKey, dir } });
+  return pipelineHref({
+    range,
+    sort: { key: sortKey, dir: nextSortDirection(sortKey, current) },
+  });
 }
 
 /**

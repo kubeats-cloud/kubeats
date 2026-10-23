@@ -11,6 +11,7 @@ import {
 } from "@/lib/exports/activity-grid";
 import { ZERO_COUNTS } from "@/lib/validation/weekly";
 import { cohortHref } from "@/lib/validation/pipeline-report";
+import { hiddenKeys, parseViewPreference } from "@/lib/table-view";
 
 /**
  * The "customise this table" picker (change-doc item 7).
@@ -182,6 +183,63 @@ describe("hiding a column narrows the whole grid, not just the cells", () => {
       input({ hiddenColumns: ["status:Nonexistent", "nonsense"] }),
     );
     expect(JSON.stringify(narrowed)).toBe(JSON.stringify(buildActivityGrid(input())));
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+describe("a table's default-hidden columns", () => {
+  const DEFAULTS = ["status:Admitted", "status:Subject line"];
+
+  it("reads the legacy bare array as hidden keys", () => {
+    expect(parseViewPreference('["status:Admitted"]')).toEqual({
+      hidden: ["status:Admitted"],
+      shown: [],
+    });
+  });
+
+  it("reads the object shape, ignoring anything that is not a string", () => {
+    expect(
+      parseViewPreference('{"hidden":["a",1],"shown":["b",null]}'),
+    ).toEqual({ hidden: ["a"], shown: ["b"] });
+    expect(parseViewPreference("{")).toEqual({ hidden: [], shown: [] });
+    expect(parseViewPreference('"nope"')).toEqual({ hidden: [], shown: [] });
+  });
+
+  /** The Overview's 18 status columns: in the picker, not on the screen. */
+  it("hides the defaults and reveals only what was explicitly shown", () => {
+    expect(hiddenKeys(parseViewPreference(""), DEFAULTS)).toEqual(
+      new Set(DEFAULTS),
+    );
+    expect(
+      hiddenKeys({ hidden: [], shown: ["status:Admitted"] }, DEFAULTS),
+    ).toEqual(new Set(["status:Subject line"]));
+  });
+
+  /** The rule that makes a status added tomorrow visible, not stranded. */
+  it("keeps a column nobody hid visible, including one added later", () => {
+    expect(hiddenKeys({ hidden: [], shown: [] }, DEFAULTS).has("status:New")).toBe(
+      false,
+    );
+  });
+
+  it("lets an explicit reveal win over a stored hide", () => {
+    expect(
+      hiddenKeys({ hidden: ["status:Future"], shown: ["status:Future"] }, []),
+    ).toEqual(new Set());
+  });
+
+  /** The Overview opts in; the Team report must keep every status visible. */
+  it("is applied by the grid only when the Overview asks for it", () => {
+    const grid = readFileSync(
+      fileURLToPath(
+        new URL("../../src/components/report/customisable-grid.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+    expect(grid).toContain("showActivityStatuses");
+    expect(grid).toContain("defaultHidden");
+    expect(grid).toContain("useTableView(");
   });
 });
 

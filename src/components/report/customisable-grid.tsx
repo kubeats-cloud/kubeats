@@ -18,6 +18,10 @@ import {
   sortHref,
   type PipelineRange,
 } from "@/lib/validation/pipeline-report";
+import {
+  repActivityHref,
+  repStatusReviewHref,
+} from "@/lib/rep-activity-links";
 
 /**
  * The grid report, with its columns and categories foldable (change-doc item 7).
@@ -50,10 +54,15 @@ export function CustomisableGrid({
   columns,
   caption,
   showActivities,
+  showActivityStatuses,
   unsetColumn,
   linkCohorts = false,
+  linkReps = false,
+  reviewRange,
+  totalsReps,
   sort,
   range,
+  sortHrefs,
   heading,
 }: {
   /** Storage key. One per SCREEN, not one per grid — see below. */
@@ -62,13 +71,28 @@ export function CustomisableGrid({
   columns: StatusColumns;
   caption: string;
   showActivities?: boolean;
+  /**
+   * The Overview's default layout: Open/Closed per activity. When set, the 18
+   * per-status columns start folded away but stay in the picker — the 12 are
+   * the reading the client asked for, and the statuses are the detail behind
+   * it.
+   */
+  showActivityStatuses?: boolean;
   unsetColumn?: StatusColumn;
   /** Pipeline report only: every non-zero cell opens the institutes behind it. */
   linkCohorts?: boolean;
+  /** A rep's name opens their existing team hub. */
+  linkReps?: boolean;
+  /** Date range applied to linked status-count drill-downs. */
+  reviewRange?: { start: string; end: string };
+  /** Full filtered rows used when the visible body is paginated. */
+  totalsReps?: RepRow[];
   /** Pipeline report only: the current sort, so headers can reverse it. */
   sort?: GridSortState;
   /** Pipeline report only: carried through every sort link. */
   range?: PipelineRange;
+  /** Prebuilt links for screens whose query keys differ from the pipeline. */
+  sortHrefs?: Record<string, string>;
   /** Rendered beside the picker, so the control sits in the table's own header. */
   heading?: string;
 }) {
@@ -83,8 +107,15 @@ export function CustomisableGrid({
    * per data change rather than one per toggle.
    */
   const all = useMemo(
-    () => buildActivityGrid({ reps, columns, showActivities, unsetColumn }),
-    [reps, columns, showActivities, unsetColumn],
+    () =>
+      buildActivityGrid({
+        reps,
+        columns,
+        showActivities,
+        showActivityStatuses,
+        unsetColumn,
+      }),
+    [reps, columns, showActivities, showActivityStatuses, unsetColumn],
   );
 
   /*
@@ -100,9 +131,28 @@ export function CustomisableGrid({
    */
   const foldable = all.columns.filter((c) => c.band !== null);
 
+  /*
+   * The status columns start folded away on the Overview, but only there.
+   * Derived from the same `columns` the grid is built from, so a status added
+   * to the catalogue is default-hidden with its peers rather than appearing
+   * uninvited.
+   */
+  const defaultHidden = useMemo(
+    () =>
+      showActivityStatuses
+        ? [
+            ...columns.closed.map((c) => `status:${c.status}`),
+            ...columns.open.map((c) => `status:${c.status}`),
+            ...(unsetColumn ? [`status:${unsetColumn.status}`] : []),
+          ]
+        : [],
+    [columns, unsetColumn, showActivityStatuses],
+  );
+
   const view = useTableView(
     viewKey,
     foldable.map((c) => c.key),
+    defaultHidden,
   );
 
   /*
@@ -143,17 +193,33 @@ export function CustomisableGrid({
           reps,
           columns,
           showActivities,
+          showActivityStatuses,
           unsetColumn,
           hiddenColumns: hidden,
+          totalsFrom: totalsReps,
+          repHrefFor: linkReps
+            ? (rep) => (rep.id ? repActivityHref(rep.id) : null)
+            : undefined,
           hrefFor: linkCohorts
             ? (rep, status) => (rep.id ? cohortHref(rep.id, status) : null)
-            : undefined,
+            : reviewRange
+              ? (rep, status) =>
+                  rep.id
+                    ? repStatusReviewHref({
+                        memberId: rep.id,
+                        status,
+                        range: reviewRange,
+                      })
+                    : null
+              : undefined,
         }}
         caption={caption}
         sortHrefFor={
           sort && range
             ? (sortKey) => sortHref(sortKey, sort, range)
-            : undefined
+            : sortHrefs
+              ? (sortKey) => sortHrefs[sortKey] ?? null
+              : undefined
         }
         sortState={sort}
       />

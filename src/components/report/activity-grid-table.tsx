@@ -218,6 +218,8 @@ export function ActivityGridTable({
             >
               {row.map((value, c) => {
                 const href = bodyHrefs[r]?.[c] ?? null;
+                const repHref =
+                  c === 0 ? (data.repHrefFor?.(data.reps[r]) ?? null) : null;
                 return (
                   <td
                     key={c}
@@ -234,7 +236,14 @@ export function ActivityGridTable({
                       c > 0 && value === 0 && COUNT_ZERO_CLASS,
                     )}
                   >
-                    {href ? (
+                    {repHref ? (
+                      <Link
+                        href={repHref}
+                        className="focus-visible:ring-ring rounded-sm underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        {String(value ?? "")}
+                      </Link>
+                    ) : href ? (
                       /*
                         A COUNT THAT IS A DOOR.
                         Dotted underline at rest and solid on hover: in a grid

@@ -30,6 +30,8 @@ export function ExportExcel({
   start: initialStart,
   end: initialEnd,
   member,
+  sort,
+  showActivityStatuses = false,
   label = "Export to Excel",
 }: {
   /** The range the picker mounts with. Both call sites pass a {start,end}. */
@@ -37,6 +39,17 @@ export function ExportExcel({
   end: string;
   /** Omitted for the all-reps export; a member id for one rep. */
   member?: string;
+  /**
+   * The report's current sort. `/team/report` passes none and keeps its
+   * alphabetical file; the Overview passes its own state so the download's
+   * rows are in the same order as the table it sits above.
+   */
+  sort?: { key: string; dir: "asc" | "desc" };
+  /**
+   * The Overview's layout: Open/Closed per activity instead of the 18 status
+   * columns. The file then carries the columns that table shows by default.
+   */
+  showActivityStatuses?: boolean;
   label?: string;
 }) {
   const [start, setStart] = useState(initialStart);
@@ -45,6 +58,11 @@ export function ExportExcel({
 
   const params = new URLSearchParams({ start, end });
   if (member) params.set("member", member);
+  if (sort) {
+    params.set("sort", sort.key);
+    params.set("dir", sort.dir);
+  }
+  if (showActivityStatuses) params.set("layout", "activity-status");
   const href = `/api/export/activity?${params.toString()}`;
 
   const valid = start !== "" && end !== "" && start <= end;

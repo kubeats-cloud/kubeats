@@ -285,6 +285,33 @@ function categoryOf(
 }
 
 /**
+ * The Open/Closed split of one set of visits, by activity bucket.
+ *
+ * THE ONE COUNTING PATH for both grids that show activity × category: the
+ * institute-wise report and the rep-wise Overview table. A visit's bucket comes
+ * from `activityBucketFor()` and its category from the catalogue's own
+ * `category` — the same two steps the institute rows have always taken, so the
+ * two reports cannot disagree about what "closed sessions" means.
+ *
+ * A visit that reconciles into no bucket, or whose status has no category, is
+ * skipped rather than guessed at. Those rows still count in the status bands,
+ * which is the existing behaviour and why the two totals can differ.
+ */
+export function countActivityOpenClosed(
+  visits: readonly CountableVisit[],
+  catalogue: StatusCatalogue,
+): Record<ActivityType, ActivityOpenClosed> {
+  const byActivity = emptyByActivity();
+  for (const visit of visits) {
+    const bucket = activityBucketFor(visit);
+    const category = categoryOf(catalogue, visit.status_set_to);
+    if (!bucket || !category) continue;
+    byActivity[bucket][category] += 1;
+  }
+  return byActivity;
+}
+
+/**
  * Build one row per institute seed. Institutes with no visits still appear
  * (zeros), so an empty pipeline is visible rather than absent.
  */
@@ -315,19 +342,13 @@ export function buildInstituteActivityRows(input: {
   }
 
   const rows: InstituteActivityRow[] = input.institutes.map((institute) => {
-    const byActivity = emptyByActivity();
     const visits = visitsByInstitute.get(institute.id) ?? [];
     // Drift: still emit the row, but do not invent Open/Closed splits that
     // would disagree with the reconciler. Totals stay the visit length so the
     // screen can show something went wrong rather than a quiet zero.
-    if (!failed.has(institute.id)) {
-      for (const visit of visits) {
-        const bucket = activityBucketFor(visit);
-        const category = categoryOf(input.catalogue, visit.status_set_to);
-        if (!bucket || !category) continue;
-        byActivity[bucket][category] += 1;
-      }
-    }
+    const byActivity = failed.has(institute.id)
+      ? emptyByActivity()
+      : countActivityOpenClosed(visits, input.catalogue);
 
     const presence = input.presenceByInstitute.get(institute.id) ?? EMPTY_PRESENCE;
 

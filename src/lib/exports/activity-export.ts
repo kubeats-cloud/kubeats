@@ -6,15 +6,23 @@ import { listStatusCatalogue } from "@/lib/statuses";
 import {
   tallyVisitMetrics,
   type MetricCounts,
-  type TallyableVisit,
 } from "@/lib/validation/weekly";
 import {
+  countActivityOpenClosed,
+  type CountableVisit,
+} from "@/lib/institute-activity-counts";
+import {
   activitySheet,
+  activitySortKeys,
+  sortRepRows,
   statusColumnsFor,
   statusesWithoutColumns,
+  type GridInput,
   type RepRow,
   type StatusColumns,
 } from "@/lib/exports/activity-grid";
+import type { StatusCatalogue } from "@/lib/validation/institute";
+import { parsePipelineSort } from "@/lib/validation/pipeline-report";
 import { buildWorkbook } from "@/lib/xlsx";
 import type { SheetSpec } from "@/lib/xlsx";
 
@@ -79,7 +87,18 @@ async function readRows(
   range: ExportRange,
   memberId: string | null,
 ): Promise<
-  | { ok: true; reps: RepRow[]; statusesSeen: Set<string> }
+  | {
+      ok: true;
+      reps: RepRow[];
+      statusesSeen: Set<string>;
+      /**
+       * The same visit rows, kept per rep so the caller can split them by
+       * activity once the status catalogue has arrived. Re-reading them there
+       * would be a second query (and a second chance to disagree); deriving
+       * them here would need the catalogue before the parallel reads start.
+       */
+      visitsByMember: Map<string, CountableVisit[]>;
+    }
   | { ok: false; error: string }
 > {
   const supabase = await createClient();
@@ -101,7 +120,7 @@ async function readRows(
 
   let visitsQuery = supabase
     .from("visits")
-    .select("member, activity, lifecycle_status, status_set_to")
+    .select("institute_id, member, activity, lifecycle_status, status_set_to")
     .gte("date", range.start)
     .lte("date", range.end);
   if (memberId) visitsQuery = visitsQuery.eq("member", memberId);
@@ -139,13 +158,12 @@ async function readRows(
     meetings.set(row.member, (meetings.get(row.member) ?? 0) + 1);
   }
 
-  const visitsByMember = new Map<string, TallyableVisit[]>();
+  const visitsByMember = new Map<string, CountableVisit[]>();
   const statusesByMember = new Map<string, Record<string, number>>();
   const statusesSeen = new Set<string>();
 
-  for (const row of (visits.data ?? []) as (TallyableVisit & {
+  for (const row of (visits.data ?? []) as (CountableVisit & {
     member: string;
-    status_set_to: string | null;
   })[]) {
     const list = visitsByMember.get(row.member);
     if (list) list.push(row);
@@ -168,13 +186,14 @@ async function readRows(
     activities.meetings = meetings.get(person.id) ?? 0;
 
     return {
+      id: person.id,
       name: person.name || "Unnamed rep",
       activities,
       statuses: statusesByMember.get(person.id) ?? {},
     };
   });
 
-  return { ok: true, reps, statusesSeen };
+  return { ok: true, reps, statusesSeen, visitsByMember };
 }
 
 /** A filename a person can find again: what it is, who, and over what. */
@@ -229,13 +248,19 @@ export interface ActivityReportModel {
   counts: ActivityReportCounts;
 }
 
+export interface ActivityReportOptions {
+  sort?: { key?: string; dir?: string };
+  catalogue?: StatusCatalogue;
+}
+
 export async function getActivityReportModel(
   range: ExportRange,
   memberId: string | null,
+  options: ActivityReportOptions = {},
 ): Promise<{ ok: true; model: ActivityReportModel } | { ok: false; error: string }> {
   const [data, catalogue] = await Promise.all([
     readRows(range, memberId),
-    listStatusCatalogue(),
+    options.catalogue ? Promise.resolve(options.catalogue) : listStatusCatalogue(),
   ]);
 
   if (!data.ok) return data;
@@ -267,20 +292,44 @@ export async function getActivityReportModel(
     };
   }
 
+  /*
+   * THE 12 ACTIVITY × CATEGORY CELLS, derived from the visit rows already in
+   * memory. `countActivityOpenClosed()` is the institute report's own
+   * arithmetic, so "closed sessions" means the same thing on both screens.
+   * It needs the catalogue, which is why it happens here rather than in
+   * `readRows` — the three reads above stay parallel.
+   */
+  const withActivityStatuses: RepRow[] = data.reps.map((rep) => ({
+    ...rep,
+    activityStatuses: countActivityOpenClosed(
+      rep.id ? (data.visitsByMember.get(rep.id) ?? []) : [],
+      catalogue,
+    ),
+  }));
+
+  const sort = options.sort
+    ? parsePipelineSort(
+        options.sort.key,
+        options.sort.dir,
+        activitySortKeys(columns),
+      )
+    : null;
+  const reps = sort ? sortRepRows(withActivityStatuses, sort) : withActivityStatuses;
+
   return {
     ok: true,
     model: {
-      reps: data.reps,
+      reps,
       columns,
       range,
       repName: memberId ? (data.reps[0]?.name ?? null) : null,
       counts: {
-        reps: data.reps.length,
+        reps: reps.length,
         statuses: columns.closed.length + columns.open.length,
         // Summed from the same per-rep status tallies the grid will draw, so
         // the line and the grand total cannot disagree. A visit with a null
         // status contributed to neither.
-        visitsWithStatus: data.reps.reduce(
+        visitsWithStatus: reps.reduce(
           (sum, rep) =>
             sum + Object.values(rep.statuses).reduce((n, count) => n + count, 0),
           0,
@@ -297,16 +346,41 @@ export async function getActivityReportModel(
  * differ by a `.eq()` on three queries and nothing else — same counting, same
  * columns, same layout — so the two buttons cannot drift apart.
  */
+export interface ActivityExportOptions {
+  /**
+   * Which of the report's two layouts the workbook carries.
+   *
+   * DEFAULT IS THE CLIENT'S TEMPLATE: six activity columns and every status
+   * column, which is what `/team/report` has always downloaded. The Overview
+   * shows the other view — Open/Closed per activity, status columns folded
+   * away — and asks for `activity-status` so its file matches its table.
+   * Neither layout reads the reader's picker; a preference is screen-only.
+   */
+  layout?: "status" | "activity-status";
+}
+
 export async function buildActivityExport(
   range: ExportRange,
   memberId: string | null,
+  sort?: ActivityReportOptions["sort"],
+  options: ActivityExportOptions = {},
 ): Promise<ExportResult> {
-  const result = await getActivityReportModel(range, memberId);
+  const result = await getActivityReportModel(range, memberId, { sort });
   if (!result.ok) return result;
 
   const { reps, columns, repName } = result.model;
+  const input: GridInput =
+    options.layout === "activity-status"
+      ? {
+          reps,
+          // The 18 are hidden on that screen by default; the file matches it.
+          columns: { closed: [], open: [] },
+          showActivities: false,
+          showActivityStatuses: true,
+        }
+      : { reps, columns };
   const sheet: SheetSpec = activitySheet(
-    { reps, columns },
+    input,
     repName ? "Activity" : "All reps",
   );
 

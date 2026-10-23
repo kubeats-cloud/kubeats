@@ -28,11 +28,13 @@ export function RangeControls({
   optional = false,
   extraParams,
   hint,
+  idPrefix = "range",
 }: {
   start: string;
   end: string;
   basePath: string;
   member?: string;
+  idPrefix?: string;
   /**
    * Both ends may be blank, and blank means "no bound".
    *
@@ -99,11 +101,11 @@ export function RangeControls({
   return (
     <div className="border-border bg-card mb-4 flex flex-wrap items-end gap-3 rounded-lg border p-3">
       <div className="min-w-[8.5rem] flex-1 space-y-1.5">
-        <Label htmlFor="range-start" className="text-xs">
+        <Label htmlFor={`${idPrefix}-start`} className="text-xs">
           From
         </Label>
         <Input
-          id="range-start"
+          id={`${idPrefix}-start`}
           type="date"
           className="h-11"
           value={start}
@@ -111,11 +113,11 @@ export function RangeControls({
         />
       </div>
       <div className="min-w-[8.5rem] flex-1 space-y-1.5">
-        <Label htmlFor="range-end" className="text-xs">
+        <Label htmlFor={`${idPrefix}-end`} className="text-xs">
           To
         </Label>
         <Input
-          id="range-end"
+          id={`${idPrefix}-end`}
           type="date"
           className="h-11"
           value={end}
