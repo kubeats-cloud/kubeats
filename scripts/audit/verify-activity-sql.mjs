@@ -68,7 +68,8 @@ try {
     select '${institute(2)}','${repA}','2026-10-20','meeting','Synthetic Open' from generate_series(1,12);
     insert into daily_plans(institute_id,member,date,meetings_actual,checkin_at,checkout_at) values
       ('${institute(1)}','${repA}','2026-10-20',1,'2026-10-20 10:00+05:30','2026-10-20 11:00+05:30'),
-      ('${institute(1)}','${repA}','2026-10-21',null,'2026-10-21 10:00+05:30',null);
+      ('${institute(1)}','${repA}','2026-10-21',null,'2026-10-21 10:00+05:30',null),
+      ('${institute(1)}','${repA}','2026-11-01',null,null,null);
     insert into follow_up_tasks values
       ('${institute(1)}','${repA}','2026-10-20',null),
       ('${institute(1)}','${repA}','2026-10-25',null),
@@ -112,7 +113,8 @@ try {
   const row = first.rows[0];
   check(row.byActivity.meeting,{open:2,closed:1});
   check(row.byActivity.session,{open:1,closed:1});
-  check([row.totalActivities,row.totalVisits,row.meetingsCompleted,row.followUpsOwned,row.followUpsPending],[5,2,1,2,1]);
+  check([row.totalActivities,row.totalVisits,row.meetingsCompleted,row.followUpsOwned,row.followUpsPending],[5,5,1,2,1]);
+  check(row.lastCheckinAt !== null,true); // Future unstarted plans cannot hide the latest arrival.
   check(row.lastCheckoutAt,null); // No fabricated check-out on latest arrival.
   const ids = [...first.rows,...(await model({page:2})).rows,...(await model({page:3})).rows].map(r=>r.id);
   check([ids.length,new Set(ids).size],[120,120]);

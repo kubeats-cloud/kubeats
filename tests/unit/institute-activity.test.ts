@@ -246,7 +246,7 @@ describe("buildInstituteActivityRows", () => {
       catalogue,
     });
     const a = rows.find((r) => r.id === "a")!;
-    expect(a.totalVisits).toBe(2);
+    expect(a.totalVisits).toBe(0); // Presence/plan rows without logged visits do not count.
     expect(a.lastCheckinAt).toBe("2026-02-03T05:00:00.000Z");
     expect(a.lastCheckinArea).toBe("Gandhinagar");
     expect(a.lastCheckoutAt).toBe("2026-02-03T06:00:00.000Z");
@@ -322,7 +322,7 @@ describe("sumInstituteActivityRows — R7's overall totals footer", () => {
       open: 1,
       closed: 1,
       totalActivities: 2,
-      totalVisits: 4,
+      totalVisits: 2,
       meetingsCompleted: 3,
     });
   });

@@ -253,3 +253,19 @@ The audit's 583/592/9 counts were not re-read from production.
 Lint/typecheck exit 0; field-checkout/notification tests 2 files / 40 passed,
 including new missing-checkout/failure tests. Authenticated export UI and actual
 download **not verified in browser**. No new spreadsheet artifacts were written.
+
+## D2/D3 — confirmed visit-count regression in the deployed model
+
+Source comparison found a real cause of conflicting visit totals: the Activity
+model counted every saved daily_plan row (including future/unstarted plans),
+whereas the report summary and institute history count saved visits. Corrected
+the shared model's Total Visits to logged visit rows, with the same scope/date
+filters. Held Meetings still comes from meetings_actual=1; it is not redefined.
+Latest check-in/out now ignores unstarted plans, so a future plan cannot erase
+the latest actual arrival's presence. No date/time is invented.
+
+The pure count helper and SQL agree on the new visit definition, with regression
+fixtures containing more plans than visits and a future unstarted plan. Earlier
+sections describe the initial preservation of the old definition; this correction
+supersedes it. Updated 0055 in place, since it has never been applied on Supabase.
+Summary versus current-owned table coverage remains explicitly labelled.

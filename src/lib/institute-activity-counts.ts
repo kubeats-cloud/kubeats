@@ -50,11 +50,8 @@ export type InstituteActivityCounts = {
   followUpsOwned: number;
   followUpsPending: number;
   /**
-   * `daily_plans` arrivals for this institute in range — a different count
-   * from `totalActivities` on purpose. One checked-in arrival can carry no
-   * logged visit yet (unreported, or swept as `checkout_missing`), and a
-   * handful of pre-0033 visits carry no linked arrival at all, so the two
-   * numbers are allowed to disagree rather than being forced to match.
+   * Logged visit rows in range, matching the summary and institute history.
+   * Plan rows are not visits: unstarted/future plans must not inflate this.
    */
   totalVisits: number;
   /** The most recent arrival's record in range, or all nulls if there is none. */
@@ -269,7 +266,7 @@ export function buildInstituteActivityRows(input: {
       meetingsCompleted: input.meetingsCompletedByInstitute.get(institute.id) ?? 0,
       followUpsOwned: input.followUpsOwnedByInstitute.get(institute.id) ?? 0,
       followUpsPending: input.followUpsPendingByInstitute.get(institute.id) ?? 0,
-      totalVisits: presence.totalVisits,
+      totalVisits: visits.length,
       lastCheckinAt: presence.lastCheckinAt,
       lastCheckinArea: presence.lastCheckinArea,
       lastCheckoutAt: presence.lastCheckoutAt,

@@ -34,16 +34,19 @@ language sql stable security invoker set search_path = public as $$
       and (p_member is null or v.member = p_member)
     group by v.institute_id
   ), ranged_plans as materialized (
-    select d.* from daily_plans d join registry r on r.id = d.institute_id
+    select d.id,d.institute_id,d.date,d.meetings_actual,d.checkin_at,d.checkout_at,
+      d.checkin_lat,d.checkin_lng,d.checkout_lat,d.checkout_lng
+    from daily_plans d join registry r on r.id = d.institute_id
     where (p_from is null or d.date >= p_from) and (p_to is null or d.date <= p_to)
       and (p_member is null or d.member = p_member)
   ), plan_counts as (
-    select institute_id,count(*) total,count(*) filter (where meetings_actual = 1) meetings
+    select institute_id,count(*) filter (where meetings_actual = 1) meetings
     from ranged_plans group by institute_id
   ), latest as (
     select distinct on (institute_id) institute_id,checkin_at,checkout_at,
       checkin_lat,checkin_lng,checkout_lat,checkout_lng
-    from ranged_plans order by institute_id,date desc,checkin_at desc nulls last,id
+    from ranged_plans where checkin_at is not null
+    order by institute_id,date desc,checkin_at desc,id
   ), tasks as (
     select t.institute_id,count(*) owned,
       count(*) filter (where t.due_date <= public.app_today()) pending
@@ -61,7 +64,7 @@ language sql stable security invoker set search_path = public as $$
           'admission', jsonb_build_object('open', (case when v.invalid then 0 else coalesce(v.admission_open,0) end), 'closed', (case when v.invalid then 0 else coalesce(v.admission_closed,0) end))),
       'totalActivities',coalesce(v.total,0),'meetingsCompleted',coalesce(d.meetings,0),
       'followUpsOwned',coalesce(t.owned,0),'followUpsPending',coalesce(t.pending,0),
-      'totalVisits',coalesce(d.total,0),'lastCheckinAt',l.checkin_at,'lastCheckoutAt',l.checkout_at,
+      'totalVisits',coalesce(v.total,0),'lastCheckinAt',l.checkin_at,'lastCheckoutAt',l.checkout_at,
       'lastCheckinArea',null,'lastCheckoutArea',null,
       'checkinLat',l.checkin_lat,'checkinLng',l.checkin_lng,
       'checkoutLat',l.checkout_lat,'checkoutLng',l.checkout_lng
@@ -82,7 +85,7 @@ language sql stable security invoker set search_path = public as $$
           'admission_closed', (case when v.invalid then 0 else coalesce(v.admission_closed,0) end),
         'total',coalesce(v.total,0),'meetings_completed',coalesce(d.meetings,0),
         'follow_ups_owned',coalesce(t.owned,0),'follow_ups_pending',coalesce(t.pending,0),
-        'open_total',(case when v.invalid then 0 else coalesce(v.meeting_open,0) end)+(case when v.invalid then 0 else coalesce(v.session_open,0) end)+(case when v.invalid then 0 else coalesce(v.campus_visit_open,0) end)+(case when v.invalid then 0 else coalesce(v.olympiad_open,0) end)+(case when v.invalid then 0 else coalesce(v.application_open,0) end)+(case when v.invalid then 0 else coalesce(v.admission_open,0) end),'closed_total',(case when v.invalid then 0 else coalesce(v.meeting_closed,0) end)+(case when v.invalid then 0 else coalesce(v.session_closed,0) end)+(case when v.invalid then 0 else coalesce(v.campus_visit_closed,0) end)+(case when v.invalid then 0 else coalesce(v.olympiad_closed,0) end)+(case when v.invalid then 0 else coalesce(v.application_closed,0) end)+(case when v.invalid then 0 else coalesce(v.admission_closed,0) end),'total_visits',coalesce(d.total,0)
+        'open_total',(case when v.invalid then 0 else coalesce(v.meeting_open,0) end)+(case when v.invalid then 0 else coalesce(v.session_open,0) end)+(case when v.invalid then 0 else coalesce(v.campus_visit_open,0) end)+(case when v.invalid then 0 else coalesce(v.olympiad_open,0) end)+(case when v.invalid then 0 else coalesce(v.application_open,0) end)+(case when v.invalid then 0 else coalesce(v.admission_open,0) end),'closed_total',(case when v.invalid then 0 else coalesce(v.meeting_closed,0) end)+(case when v.invalid then 0 else coalesce(v.session_closed,0) end)+(case when v.invalid then 0 else coalesce(v.campus_visit_closed,0) end)+(case when v.invalid then 0 else coalesce(v.olympiad_closed,0) end)+(case when v.invalid then 0 else coalesce(v.application_closed,0) end)+(case when v.invalid then 0 else coalesce(v.admission_closed,0) end),'total_visits',coalesce(v.total,0)
       )->p_sort,to_jsonb(lower(r.name))) end sort_value
     from registry r left join visit_counts v on v.institute_id = r.id
       left join plan_counts d on d.institute_id = r.id left join latest l on l.institute_id = r.id
