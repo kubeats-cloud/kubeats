@@ -12,7 +12,7 @@ import { logError, settled } from "@/lib/errors";
 import { missedFollowUpRecord, missedDaysFor } from "@/lib/alerts";
 import { formatDate, todayISO } from "@/lib/dates";
 
-export const metadata = { title: "Missed follow-ups" };
+export const metadata = { title: "Missed in the last 30 days" };
 
 /**
  * The missed-follow-up record (Phase E1).
@@ -129,7 +129,7 @@ export default async function MissedPage(props: PageProps<"/missed">) {
   return (
     <>
       <PageHeader
-        title="Missed follow-ups"
+        title="Missed in the last 30 days"
         description={
           staff
             ? "Days that ended with follow-ups still open, per rep."

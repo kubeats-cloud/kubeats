@@ -244,7 +244,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
         <Button asChild variant="outline" className="h-11">
           <Link href="/missed">
             <HistoryIcon className="size-4" aria-hidden />
-            Missed follow-ups
+            Missed in the last 30 days
           </Link>
         </Button>
       </div>

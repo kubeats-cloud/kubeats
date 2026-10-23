@@ -161,7 +161,8 @@ export function TargetsForm({
                 />
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="text-muted-foreground text-xs">
-                    Achieved: {done} · Remaining: {remaining(done, target)}
+                    Achieved: {done} · Remaining:{" "}
+                    {target > 0 ? remaining(done, target) : "—"}
                   </span>
                   <span className="text-xs font-semibold tabular-nums">
                     {target > 0 ? `${percentOf(done, target)}%` : "—"}

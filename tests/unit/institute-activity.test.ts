@@ -256,6 +256,28 @@ describe("buildInstituteActivityRows", () => {
     expect(b.lastCheckinAt).toBeNull();
     expect(b.lastCheckinArea).toBeNull();
   });
+
+  it("counts Total Visits from logged visit rows, not plan arrivals", () => {
+    // The reported bug: a summary said 45 visits while the institute table
+    // totalled 34 because it counted daily_plans rows. Both now count the
+    // same logged visits, whatever the plan count says.
+    const { rows } = buildInstituteActivityRows({
+      institutes,
+      visits: [
+        visit({ institute_id: "a", activity: "meeting", status_set_to: "First meeting done" }),
+        visit({ institute_id: "a", activity: "session", status_set_to: "Session done" }),
+        visit({ institute_id: "a", activity: "campus_visit", status_set_to: "Campus visit done" }),
+      ],
+      meetingsCompletedByInstitute: new Map([["a", 8]]),
+      followUpsOwnedByInstitute: new Map(),
+      followUpsPendingByInstitute: new Map(),
+      presenceByInstitute: new Map([
+        ["a", { totalVisits: 8, lastCheckinAt: null, lastCheckinArea: null, lastCheckoutAt: null, lastCheckoutArea: null }],
+      ]),
+      catalogue,
+    });
+    expect(rows.find((r) => r.id === "a")!.totalVisits).toBe(3);
+  });
 });
 
 describe("openClosedTotals — R1's two aggregate columns", () => {
