@@ -18,6 +18,7 @@ import {
 } from "@/lib/institute-activity-report";
 import { isInstituteActivitySortKey } from "@/lib/institute-activity-counts";
 import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
+import { ActivityPages } from '@/components/report/activity-pages';
 
 export const metadata = { title: "Institutes" };
 
@@ -104,6 +105,8 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
       ? await getInstituteActivityModel({
           range: instituteActivityRange,
           sort: instituteActivitySort,
+          page: first(searchParams.page),
+          search: first(searchParams.q),
         })
       : null;
   return (
@@ -188,6 +191,8 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
               }
             />
           ) : (
+            <>
+            <ActivityPages model={instituteActivityResult.model} basePath="/institutes" params={Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'))} />
             <RepInstituteSearch
               rows={instituteActivityResult.model.rows}
               sort={instituteActivityResult.model.sort}
@@ -195,7 +200,9 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
               caption="Your institutes: details, follow-ups and activity"
               basePath="/institutes"
               catalogue={catalogue}
+              extraParams={{q: first(searchParams.q) ?? ''}}
             />
+            </>
           )}
         </>
       )}

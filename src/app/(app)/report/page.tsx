@@ -9,6 +9,7 @@ import { ExportExcel } from "@/components/report/export-excel";
 import { getActivityReport } from "@/lib/activity-report";
 import { getInstituteActivityModel } from "@/lib/institute-activity-report";
 import { sumInstituteActivityRows } from "@/lib/institute-activity-counts";
+import { ActivityPages } from '@/components/report/activity-pages';
 import {
   REPORT_PERIODS,
   isReportPeriod,
@@ -102,7 +103,7 @@ export default async function ReportPage(props: PageProps<"/report">) {
     // R7's institute-wise table, same model A1 and R1 read. No member filter
     // to pass: this page only ever runs as the signed-in rep, and RLS is what
     // narrows `getInstituteActivityModel()` to their own institutes.
-    getInstituteActivityModel({ range: { from: range.start, to: range.end } }),
+    getInstituteActivityModel({ range: { from: range.start, to: range.end }, page: first(searchParams.page) }),
   ]);
   const displayName = user.name;
 
@@ -149,6 +150,7 @@ export default async function ReportPage(props: PageProps<"/report">) {
       )}
 
 
+      {instituteActivityResult.ok && <ActivityPages model={instituteActivityResult.model} basePath="/report" params={{period,start:periodStart}} />}
       {!result.ok ? (
         <ErrorState message="We could not load this activity report. Please try again in a moment." />
       ) : (

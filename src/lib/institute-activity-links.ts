@@ -60,11 +60,13 @@ export function instituteActivityExportHref(input: {
   range: PipelineRange;
   sortKey: InstituteActivitySortKey;
   sortDir: "asc" | "desc";
+  page?: string;
 }): string {
   const params = new URLSearchParams();
   if (input.range.from) params.set("from", input.range.from);
   if (input.range.to) params.set("to", input.range.to);
   params.set("sort", input.sortKey);
   params.set("dir", input.sortDir);
+  if (input.page) params.set('page', input.page);
   return `/api/export/institute-activity?${params.toString()}`;
 }

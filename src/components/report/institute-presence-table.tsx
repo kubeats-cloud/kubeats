@@ -97,7 +97,7 @@ export function InstitutePresenceTable({
                     scope="row"
                     className="bg-card sticky left-0 px-3 py-2 text-left font-medium whitespace-nowrap"
                   >
-                    <Link href={`/institutes/${row.id}`} className="hover:underline">
+                    <Link prefetch={false} href={`/institutes/${row.id}`} className="hover:underline">
                       {row.name}
                     </Link>
                   </th>

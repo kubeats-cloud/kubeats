@@ -76,7 +76,7 @@ export function BottomNav({ items }: { items: NavItem[] }) {
             // this the bar is as wide as its longest word times the tab count
             // and the fixed nav pushes the page sideways on a narrow phone.
             <li key={item.href} className="min-w-0 flex-1">
-              <Link
+              <Link prefetch={false}
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(

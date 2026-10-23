@@ -57,3 +57,39 @@ The tracked reconciliation seed script defines synthetic accounts under
 existing binary artifact contains only synthetic data. No artifact has been
 altered or added; any identified potentially personal-data filenames will be
 listed without their contents. No real names/phones/emails belong in this report.
+
+## P0 — shared Activity data path
+
+Added 0055 `audit_institute_activity` SECURITY INVOKER RPC and matching DOWN
+under `supabase/rollbacks`. Existing RLS and FO033 are untouched. Counts,
+per-activity Open/Closed, live tasks, latest plan, search, numeric/text sort,
+exact institute count and page clamp execute in SQL before a maximum 50-row
+JSON result is returned. Preserves six activity buckets, meeting source,
+legacy reconciliation failure handling, and existing planned-record definition
+of Total Visits (to be labelled explicitly, not silently redefined).
+
+Existing model/component names remain. `/`, rep `/institutes` and `/report`
+receive pages; export uses the same page/model. Rep search now submits to SQL,
+not a filter over the current page. Cache decoration reads at most 100 points.
+Automatic prefetch disabled on heavy report/Overview/count/bottom-nav links.
+No full-table raw visits/plans/tasks are sent to the Worker by this model.
+
+Static query path: up to 7 data reads (registry/owner/catalogue/visits/plans/tasks/
+cache) → 1 aggregate RPC + optional 1 cache read. This excludes route auth and
+other panels; it is not measured production telemetry. Activity table rows:
+all accessible institutes → <=50. Admin registry and Pending optimization are
+still separate work, not claimed done by this change.
+
+Checks: lint exit 0; typecheck exit 0; 69 unit files / 1,277 tests pass.
+`node scripts/audit/verify-activity-sql.mjs <temporary PGlite prefix>`:
+20 checks pass on an ephemeral PostgreSQL fixture, including 120 institutes,
+page traversal/unique IDs, numeric 12-vs-5 sort, search beyond page one, empty
+range, date scope, source counts, legacy drift, caller-RLS narrowing and
+UP/DOWN/UP. The harness takes no URL/env credentials, persists no data and
+adds no binary artifacts or package dependencies to the repository.
+This does NOT verify full Supabase authentication, actual existing policies,
+FO033, team-lead scoping or authenticated RSC/browser behavior.
+
+Local dev server ready at loopback 3104; `/?page=2` returns 307 signed-out.
+Authenticated table/count/400px browser checks: **not verified in browser**.
+0055 has run only in the ephemeral fixture, never on Supabase/production.

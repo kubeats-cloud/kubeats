@@ -128,7 +128,7 @@ export function AdminOverview({
           <SectionTitle
             action={
               <Button asChild variant="outline" className="h-9">
-                <Link href="/review">Open Review</Link>
+                <Link prefetch={false} href="/review">Open Review</Link>
               </Button>
             }
           >
@@ -154,14 +154,14 @@ export function AdminOverview({
                     <div className="border-border mt-2 size-16 shrink-0 rounded-md border border-dashed" />
                   )}
                   <div className="min-w-0 flex-1">
-                    <Link
+                    <Link prefetch={false}
                       href={`/review/${visit.id}`}
                       className="truncate font-medium hover:underline"
                     >
                       {visit.instituteName}
                     </Link>
                     <p className="text-muted-foreground mt-0.5 truncate text-xs">
-                      <Link
+                      <Link prefetch={false}
                         href={`/team/${visit.memberId}`}
                         className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
                       >
@@ -199,7 +199,7 @@ export function AdminOverview({
                     key={rep.id}
                     className="flex items-center justify-between gap-3 px-4 py-2.5"
                   >
-                    <Link
+                    <Link prefetch={false}
                       href={`/team/${rep.id}`}
                       className="focus-visible:ring-ring truncate rounded-sm text-sm font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
                     >
@@ -344,7 +344,7 @@ function Stat({
    */
   return (
     <Card className="gap-0 p-0">
-      <Link
+      <Link prefetch={false}
         href={href}
         className="hover:bg-accent/40 focus-visible:ring-ring block rounded-xl p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
       >
@@ -365,7 +365,7 @@ function Shortcut({
 }) {
   return (
     <Button asChild variant="outline" className="h-11 justify-start">
-      <Link href={href}>
+      <Link prefetch={false} href={href}>
         <Icon className="size-4" aria-hidden />
         {label}
       </Link>

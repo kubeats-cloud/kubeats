@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
   const result = await buildInstituteActivityExport({
     range: parsedRange.data,
     sort: { key: sortKey, dir },
+    page: params.get('page') ?? undefined,
   });
 
   if (!result.ok) {

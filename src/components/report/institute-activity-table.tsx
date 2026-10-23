@@ -38,7 +38,7 @@ function CountCell({
     return <span className={COUNT_ZERO_CLASS}>{value}</span>;
   }
   return (
-    <Link href={href} className={COUNT_LINK_CLASS}>
+    <Link prefetch={false} href={href} className={COUNT_LINK_CLASS}>
       {value}
     </Link>
   );
@@ -79,7 +79,7 @@ function SortHeader({
       }
       className="bg-muted/60 text-muted-foreground sticky top-0 z-20 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
     >
-      <Link
+      <Link prefetch={false}
         href={href}
         className="inline-flex items-center gap-1 hover:text-foreground"
       >
@@ -169,7 +169,7 @@ export function InstituteActivityTable({
                   scope="row"
                   className="bg-card sticky left-0 z-10 px-3 py-2 text-left font-medium whitespace-nowrap"
                 >
-                  <Link
+                  <Link prefetch={false}
                     href={`/institutes/${row.id}`}
                     className="hover:underline"
                   >

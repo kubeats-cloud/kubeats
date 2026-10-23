@@ -74,7 +74,7 @@ function SortHeader({
       }
       className="bg-muted/60 text-muted-foreground sticky top-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
     >
-      <Link
+      <Link prefetch={false}
         href={href}
         className="inline-flex items-center gap-1 hover:text-foreground"
       >
@@ -208,7 +208,7 @@ export function RepInstituteTable({
                     scope="row"
                     className="bg-card sticky left-0 px-3 py-2 text-left font-medium whitespace-nowrap"
                   >
-                    <Link href={`/institutes/${row.id}`} className="hover:underline">
+                    <Link prefetch={false} href={`/institutes/${row.id}`} className="hover:underline">
                       {row.name}
                     </Link>
                   </th>

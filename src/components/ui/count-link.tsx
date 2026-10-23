@@ -69,7 +69,7 @@ export function CountLink({
             removes the link from the tab order and the accessibility tree
             below md, rather than merely hiding it from sight. */}
         <span className={cn("md:hidden", className)}>{value}</span>
-        <Link
+        <Link prefetch={false}
           href={href}
           aria-label={label}
           className={cn("hidden md:inline", COUNT_LINK_CLASS, className)}
@@ -81,7 +81,7 @@ export function CountLink({
   }
 
   return (
-    <Link href={href} aria-label={label} className={cn(COUNT_LINK_CLASS, className)}>
+    <Link prefetch={false} href={href} aria-label={label} className={cn(COUNT_LINK_CLASS, className)}>
       {value}
     </Link>
   );

@@ -34,6 +34,7 @@ import {
 } from "@/lib/institute-activity-report";
 import { isInstituteActivitySortKey } from "@/lib/institute-activity-counts";
 import { instituteActivityExportHref } from "@/lib/institute-activity-links";
+import { ActivityPages } from '@/components/report/activity-pages';
 import { pipelineRangeSchema, type PipelineRange } from "@/lib/validation/pipeline-report";
 
 export const metadata = { title: "Dashboard" };
@@ -125,7 +126,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
     settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "dashboard:statuses"),
     admin && !activityRangeError
       ? settled(
-          getInstituteActivityModel({ range: activityRange, sort: activitySort }),
+          getInstituteActivityModel({ range: activityRange, sort: activitySort, page: first(searchParams.page) }),
           null,
           "dashboard:report",
         )
@@ -253,6 +254,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
                     range: report.model.range,
                     sortKey: report.model.sort.key,
                     sortDir: report.model.sort.dir,
+                    page: String(report.model.page),
                   })}
                   download
                 >
@@ -282,6 +284,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
             <ErrorState message={activityRangeError} />
           ) : report?.ok ? (
             <div className="mt-3">
+              <ActivityPages model={report.model} basePath="/" params={Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'))} />
               <InstituteActivityTable
                 rows={report.model.rows}
                 sort={report.model.sort}
@@ -311,12 +314,12 @@ export default async function DashboardPage(props: PageProps<"/">) {
                 emptyDescription="Set the eight numbers on the Targets tab, and the bars fill in as you log visits."
                 emptyAction={
                   <Button asChild className="h-11">
-                    <Link href="/targets">Set this week&rsquo;s targets</Link>
+                    <Link prefetch={false} href="/targets">Set this week&rsquo;s targets</Link>
                   </Button>
                 }
               />
               <Button asChild variant="outline" className="mt-3 h-11 w-full">
-                <Link href="/targets">Open Targets</Link>
+                <Link prefetch={false} href="/targets">Open Targets</Link>
               </Button>
             </>
           ) : (
