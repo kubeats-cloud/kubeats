@@ -18,6 +18,8 @@ const up = await readFile(new URL('../../supabase/migrations/0055_audit_institut
 const down = await readFile(new URL('../../supabase/rollbacks/0055_audit_institute_activity_down.sql',import.meta.url),'utf8');
 const registryUp = await readFile(new URL('../../supabase/migrations/0056_audit_registry.sql',import.meta.url),'utf8');
 const registryDown = await readFile(new URL('../../supabase/rollbacks/0056_audit_registry_down.sql',import.meta.url),'utf8');
+const pendingUp = await readFile(new URL('../../supabase/migrations/0057_audit_open_follow_ups.sql',import.meta.url),'utf8');
+const pendingDown = await readFile(new URL('../../supabase/rollbacks/0057_audit_open_follow_ups_down.sql',import.meta.url),'utf8');
 try {
   // Minimal actual-column fixture, not a claim that the full Supabase schema/RLS was replayed.
   await db.exec(`
@@ -79,6 +81,23 @@ try {
   await db.exec(registryUp);
   check((await db.query('select normalized_boards from audit_registry limit 1')).rows[0].normalized_boards.sort(),['NIOS','Not applicable']);
   check((await db.query('select audit_registry_facets() facets')).rows[0].facets.boards,['NIOS','Not applicable']);
+  await db.exec(`alter table visits add column created_at timestamptz default '2026-10-20 10:00Z';
+    alter table visits add column follow_up_date date;
+    alter table visits add column expected_date date;
+    alter table visits add column notes text;
+    alter table follow_up_tasks add column id uuid default gen_random_uuid();
+    alter table follow_up_tasks add column status_set_to text;
+    alter table follow_up_tasks add column follow_up_date date;
+    alter table follow_up_tasks add column expected_date date;
+    alter table follow_up_tasks add column call_notes text;
+    alter table follow_up_tasks add column reported_at timestamptz;
+    alter table follow_up_tasks add column kind text default 'meeting';
+    update institutes set status = 'Synthetic Open' where id = '${institute(1)}';
+    update follow_up_tasks set kind = 'call',status_set_to = 'Synthetic Open',follow_up_date = '2026-10-27',
+      reported_at = '2026-10-21 20:00Z' where due_date = '2026-10-25';`);
+  await db.exec(pendingUp);
+  const attributed = (await db.query('select attribution_source,follow_up_date::text,set_on::text from audit_open_follow_ups where institute_id = $1',[institute(1)])).rows[0];
+  check(attributed,{attribution_source:'call',follow_up_date:'2026-10-27',set_on:'2026-10-22'});
   const model = async (over={}) => {
     const args = {from:null,to:null,search:'',member:null,campus:null,sort:'institute',desc:false,page:1,...over};
     const result = await db.query('select audit_institute_activity($1,$2,$3,$4,$5,$6,$7,$8) model',Object.values(args));
@@ -107,6 +126,9 @@ try {
   await db.exec(`set audit.member = '${repB}';`);
   check((await model()).total,10);
   await db.exec('reset role');
+  await db.exec(pendingDown);
+  check((await db.query("select to_regclass('audit_open_follow_ups') v")).rows[0].v,null);
+  await db.exec(pendingUp);
   await db.exec(registryDown);
   check((await db.query("select to_regclass('audit_registry') v")).rows[0].v,null);
   await db.exec(registryUp);

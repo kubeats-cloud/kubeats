@@ -219,7 +219,7 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
     .map((row) => row.status);
 
   const followUps = await settled(
-    getOpenFollowUps(openStatuses, gate.user.id),
+    getOpenFollowUps(openStatuses, gate.user.id, undefined, {owner:memberId}),
     { ok: false as const },
     "team-hub:follow-ups",
   );
@@ -364,11 +364,12 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
         Follow-ups owed
         {theirFollowUps.length > 0 && (
           <Badge variant="warning" className="ml-2">
-            {theirFollowUps.length}
+            {followUps.ok ? followUps.total : theirFollowUps.length}
           </Badge>
         )}
       </SectionTitle>
       {followUps.ok ? (
+        <>
         <FollowUpList
           items={theirFollowUps}
           /* Empty, and `readOnly`: an admin cannot start a field visit, and
@@ -378,6 +379,8 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
           readOnly
           preview={FOLLOW_UPS_SHOWN}
         />
+        {followUps.total > theirFollowUps.length && <Link prefetch={false} className="inline-flex min-h-11 items-center underline" href={`/pending?owner=${memberId}`}>View all {followUps.total} open institutes</Link>}
+        </>
       ) : (
         <ErrorState message="We could not load what is still owed. Please try again in a moment." />
       )}

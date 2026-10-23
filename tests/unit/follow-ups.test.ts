@@ -336,8 +336,13 @@ describe("getOpenFollowUps also reads logged calls", () => {
   const body = source.slice(start, source.indexOf("/* Lookups kept separate"));
 
   it("queries follow_up_tasks for a call that set the current open status", () => {
-    expect(body).toContain('.from("follow_up_tasks")');
-    expect(body).toContain("call_notes");
-    expect(body).toContain("reported_at");
+    // Attribution now executes before SQL pagination, not over raw JS lists.
+    expect(body).toContain(".from('audit_open_follow_ups')");
+    const sql = readFileSync(fileURLToPath(new URL('../../supabase/migrations/0057_audit_open_follow_ups.sql',import.meta.url)),'utf8');
+    expect(sql).toContain('from follow_up_tasks t');
+    expect(sql).toContain('t.status_set_to = i.status');
+    expect(sql).toContain('t.call_notes');
+    expect(sql).toContain('t.reported_at');
+    expect(sql).toContain('security_invoker = true');
   });
 });

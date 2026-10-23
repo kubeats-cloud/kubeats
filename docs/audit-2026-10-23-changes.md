@@ -119,3 +119,29 @@ new pagination tests 1 file / 2 passed. SQL fixture now 26 checks passing,
 including normalized boards, owner facets respecting fixture RLS, and 0056
 DOWN/UP. Local filtered page returns 307 signed-out; authenticated interactions
 and 400px layout remain **not verified in browser**. Nothing applied to Supabase.
+
+## P0 / A4 / R6 — preserve card location and semantics, bound lists
+
+Admin cards remain on `/pending/follow-ups` (Admin 4's required page), rep
+Owned/Missed cards remain on Pending (Rep 6 asks for exactly two). No third
+rep card invented. Counts are now 3 exact SQL HEAD reads, no task rows for
+cards; selected list adds one sorted max-50 query using the same filter builder.
+Owned still means all unfinished, Missed the overdue subset, Closed completed.
+Every page shows exact matching total and paging controls. No count uses page
+length; Missed history's different 30-day unit is labelled.
+
+0057 invoker view performs current-status attribution over saved visit AND
+reported call rows before date sort/LIMIT; call reports and recovery behavior
+are preserved. `/pending` open-institute list now uses HEAD count + max-50 page
+instead of whole institutes/visits/calls/member reads. Dependent institute detail
+and rep hub apply institute/owner filters before paging, not afterwards; hub
+badge uses exact total and links to further pages. Existing assignment/start,
+due-call prompts, automatic follow-up plan and unfinished-report recovery remain.
+
+Lint/typecheck exit 0. First focused run failed one old source-shape assertion
+expecting the call query in TypeScript; updated it to assert the actual SQL view
+and current-status predicate, retaining the behavioral attribution tests. Rerun:
+3 test files / 51 tests pass. SQL fixture: 28 checks pass, including later-call
+attribution, IST call day, 0057 DOWN/UP. Signed-out closed-list page returns 307;
+authenticated card/list/action and RLS checks **not verified in browser**.
+0057 has not run on Supabase or production.

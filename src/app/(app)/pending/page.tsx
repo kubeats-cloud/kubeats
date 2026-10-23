@@ -22,6 +22,7 @@ import { listStatusCatalogue } from "@/lib/statuses";
 import { activityLabelFor, listedFollowUpCount } from "@/lib/validation/visit";
 import { formatDate, todayISO } from "@/lib/dates";
 import { getFollowUpCardModel } from "@/lib/follow-up-cards";
+import { auditHref } from '@/lib/audit-pagination';
 
 export const metadata = { title: "Pending" };
 
@@ -83,7 +84,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
     .map((row) => row.status);
 
   const [result, unreported, purposes, tasks, plan, followUpCards] = await Promise.all([
-    getOpenFollowUps(openStatuses, user.id),
+    getOpenFollowUps(openStatuses, user.id, first(searchParams.page), {owner:first(searchParams.owner)}),
     // An admin has no half-finished visits of their own: they do not log any.
     admin ? Promise.resolve([]) : getUnreportedVisits(user.id),
     listPurposes(),
@@ -236,7 +237,14 @@ export default async function PendingPage(props: PageProps<"/pending">) {
       </div>
 
       {result.ok ? (
+        <>
+        <nav aria-label="Open institute pages" className="my-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <p>{result.total} open institutes · page {result.page} of {result.pages}</p>
+          {result.page > 1 && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/pending',{owner:first(searchParams.owner) ?? ''},result.page-1)}>Previous</Link>}
+          {result.page < result.pages && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/pending',{owner:first(searchParams.owner) ?? ''},result.page+1)}>Next</Link>}
+        </nav>
         <FollowUpList
+          key={result.page}
           items={result.items}
           purposes={purposes}
           catalogue={catalogue}
@@ -245,6 +253,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
           // action refuses them too rather than trusting this prop.
           readOnly={admin}
         />
+        </>
       ) : (
         <ErrorState message="We could not load what is still open. Please try again in a moment." />
       )}

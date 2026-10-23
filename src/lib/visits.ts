@@ -1,3 +1,4 @@
+import { auditWindow } from "@/lib/audit-pagination";
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
@@ -395,164 +396,34 @@ export function attributeToCurrentStatus<
  * because somebody else touched it last would be a gap nobody could see.
  */
 export async function getOpenFollowUps(
-  openStatuses: readonly string[],
-  viewerId: string,
-): Promise<{ ok: true; items: FollowUp[] } | { ok: false }> {
-  // A vocabulary with nothing open is a real answer, not an error — and `.in()`
-  // with an empty list is a query worth not sending.
-  if (openStatuses.length === 0) return { ok: true, items: [] };
-
+  openStatuses: readonly string[], viewerId: string, requestedPage?: string,
+  filters: {instituteId?: string; owner?: string} = {},
+): Promise<{ok:true;items:FollowUp[];total:number;page:number;pages:number} | {ok:false}> {
+  if (!openStatuses.length) return {ok:true,items:[],total:0,page:1,pages:1};
   const supabase = await createClient();
-  const { data: institutes, error } = await supabase
-    .from("institutes")
-    .select("id, name, city, status, registered_by")
-    .is("deleted_at", null)
-    .in("status", openStatuses)
-    .order("name");
-
-  if (error) {
-    logError("visits:open-follow-ups", error);
-    return { ok: false };
-  }
-
-  const rows = institutes ?? [];
-  if (rows.length === 0) return { ok: true, items: [] };
-
-  // The visits that could explain any of them, newest first. `date` then
-  // `created_at`, so two visits on one day still resolve in the order they
-  // happened rather than arbitrarily.
-  const { data: visits, error: visitError } = await supabase
-    .from("visits")
-    .select(
-      "id, institute_id, member, date, status_set_to, follow_up_date, expected_date, notes, created_at",
-    )
-    .in("institute_id", rows.map((r) => r.id))
-    .in("status_set_to", openStatuses)
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false });
-
-  if (visitError) {
-    logError("visits:open-follow-ups-attribution", visitError);
-    return { ok: false };
-  }
-
-  // Logged calls that left an institute at an open status. Same attribution
-  // rule as visits — matched on the CURRENT status, not recency alone — then
-  // merged so a later call's follow-up date is what Pending shows.
-  const { data: calls, error: callError } = await supabase
-    .from("follow_up_tasks")
-    .select(
-      "id, institute_id, member, status_set_to, follow_up_date, expected_date, call_notes, reported_at",
-    )
-    .in("institute_id", rows.map((r) => r.id))
-    .in("status_set_to", openStatuses)
-    .not("reported_at", "is", null)
-    .eq("kind", "call")
-    .order("reported_at", { ascending: false });
-
-  if (callError) {
-    logError("visits:open-follow-ups-calls", callError);
-    return { ok: false };
-  }
-
-  type AttributionRow = {
-    institute_id: string;
-    status_set_to: string | null;
-    id: string;
-    member: string;
-    date: string;
-    follow_up_date: string | null;
-    expected_date: string | null;
-    notes: string | null;
-    source: "visit" | "call";
-    at: string;
+  const build = (head: boolean) => {
+    let q = supabase.from('audit_open_follow_ups').select(
+      'institute_id,institute_name,city,status,owner,owner_name,attribution_id,attribution_source,member,member_name,set_on,follow_up_date,expected_date,notes',
+      {count:'exact',head}).in('status',openStatuses);
+    if (filters.instituteId) q = q.eq('institute_id',filters.instituteId);
+    if (filters.owner) q = q.eq('owner',filters.owner);
+    return q;
   };
-
-  const visitRows: AttributionRow[] = (visits ?? []).map((visit) => ({
-    institute_id: visit.institute_id,
-    status_set_to: visit.status_set_to,
-    id: visit.id,
-    member: visit.member,
-    date: visit.date,
-    follow_up_date: visit.follow_up_date,
-    expected_date: visit.expected_date,
-    notes: visit.notes,
-    source: "visit",
-    at: visit.created_at,
+  const counted = await build(true);
+  if (counted.error) {logError('visits:open-follow-ups-count',counted.error); return {ok:false};}
+  const total = counted.count ?? 0;
+  const window = auditWindow(requestedPage,total);
+  const result = total ? await build(false).order('follow_up_date',{nullsFirst:false})
+    .order('institute_name').order('institute_id').range(window.from,window.to) : {data:[],error:null};
+  if (result.error) {logError('visits:open-follow-ups-page',result.error); return {ok:false};}
+  const items: FollowUp[] = (result.data ?? []).map(row => ({
+    instituteId:row.institute_id,instituteName:row.institute_name,city:row.city,status:row.status,
+    visitId:row.attribution_source === 'visit' ? row.attribution_id : null,
+    member:row.member,memberName:row.member_name,setOn:row.set_on,followUpDate:row.follow_up_date,
+    expectedDate:row.expected_date,notes:row.notes,mine:row.member === viewerId,
+    owner:row.owner,ownerName:row.owner_name,
   }));
-  const callRows: AttributionRow[] = (calls ?? []).map((call) => ({
-    institute_id: call.institute_id,
-    status_set_to: call.status_set_to,
-    id: call.id,
-    member: call.member,
-    date: call.reported_at ? todayISO(new Date(call.reported_at)) : "",
-    follow_up_date: call.follow_up_date,
-    expected_date: call.expected_date,
-    notes: call.call_notes,
-    source: "call",
-    at: call.reported_at ?? "",
-  }));
-  const combined = [...visitRows, ...callRows].sort((a, b) =>
-    b.at.localeCompare(a.at),
-  );
-
-  // The visit OR call that left each institute where it is. See the helper's
-  // own note for why it is matched on the CURRENT status rather than on recency
-  // alone; the sort above is what makes a later call win over an earlier visit
-  // at the same status.
-  const attribution = attributeToCurrentStatus(
-    combined,
-    new Map(rows.map((row) => [row.id, row.status])),
-  );
-
-  // Both sets of names in one lookup: whoever logged the visit, and whoever
-  // owns the institute now. Usually the same person, occasionally not.
-  const memberIds = [
-    ...[...attribution.values()].map((v) => v.member),
-    ...rows.map((r) => r.registered_by).filter((id): id is string => Boolean(id)),
-  ];
-  const members = await memberNames(memberIds);
-
-  const items: FollowUp[] = rows.map((institute) => {
-    const visit = attribution.get(institute.id) ?? null;
-    return {
-      instituteId: institute.id,
-      instituteName: institute.name,
-      city: institute.city,
-      status: institute.status as string,
-      visitId: visit?.source === "visit" ? visit.id : null,
-      member: visit?.member ?? null,
-      memberName: visit ? (members.get(visit.member) ?? null) : null,
-      setOn: visit?.date || null,
-      followUpDate: visit?.follow_up_date ?? null,
-      expectedDate: visit?.expected_date ?? null,
-      notes: visit?.notes ?? null,
-      mine: visit?.member === viewerId,
-      owner: institute.registered_by ?? null,
-      ownerName: institute.registered_by
-        ? (members.get(institute.registered_by) ?? null)
-        : null,
-    };
-  });
-
-  /**
-   * Soonest first, and anything with no date at the end.
-   *
-   * A row with no follow-up date is either a visit logged before Rule 5 started
-   * demanding one, or an institute whose status was set without a visit this
-   * viewer can see. Neither is urgent in the way an overdue chase is, and
-   * sorting them to the top would bury the dates that do mean something.
-   */
-  items.sort((a, b) => {
-    if (a.followUpDate && b.followUpDate) {
-      return a.followUpDate.localeCompare(b.followUpDate);
-    }
-    if (a.followUpDate) return -1;
-    if (b.followUpDate) return 1;
-    return a.instituteName.localeCompare(b.instituteName);
-  });
-
-  return { ok: true, items };
+  return {ok:true,items,total,page:window.page,pages:window.pages};
 }
 
 /* Lookups kept separate rather than embedded, so nothing depends on PostgREST

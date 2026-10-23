@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import Link from 'next/link';
+import { auditHref } from '@/lib/audit-pagination';
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -46,13 +48,19 @@ export default async function FollowUpsPage(props: PageProps<"/pending/follow-up
     : searchParams.status;
   const status: FollowUpCardStatus = isStatus(statusParam) ? statusParam : "owned";
 
-  const result = await getFollowUpCardModel();
+  const result = await getFollowUpCardModel(status, typeof searchParams.page === 'string' ? searchParams.page : undefined);
 
   return (
     <>
       <PageHeader title={TITLES[status]} />
 
       {admin && result.ok && <AdminFollowUpCards counts={result.model.counts} />}
+      <p className="text-muted-foreground mb-3 text-xs">Owned means unfinished tasks, including Missed; Missed means unfinished and overdue before today; Closed means completed. Missed history records days in the last 30 days, not currently overdue tasks.</p>
+      {result.ok && <nav aria-label="Follow-up pages" className="my-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+        <p>{result.model.counts[status]} matching tasks · page {result.page} of {result.pages}</p>
+        {result.page > 1 && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/pending/follow-ups',{status},result.page-1)}>Previous</Link>}
+        {result.page < result.pages && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/pending/follow-ups',{status},result.page+1)}>Next</Link>}
+      </nav>}
 
       {!result.ok ? (
         <ErrorState message={result.error} />

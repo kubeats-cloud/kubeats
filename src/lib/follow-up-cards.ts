@@ -1,4 +1,5 @@
 import "server-only";
+import { auditWindow } from "@/lib/audit-pagination";
 
 import { createClient } from "@/lib/supabase/server";
 import { todayISO } from "@/lib/dates";
@@ -7,10 +8,8 @@ import { logError } from "@/lib/errors";
 /**
  * Admin #4 / Rep #6 — the Owned / Missed / Closed follow-up cards.
  *
- * ONE QUERY, ONE CLASSIFIER, so there is exactly one definition of each
- * bucket anywhere in the app: `classifyFollowUpTask()` below. The cards'
- * counts and "the complete list" each card opens both read this same model,
- * so a count and the rows behind it cannot disagree.
+ * Three SQL HEAD counts and one optional 50-row page. Count and list use
+ * the same filter builder; the pure classifier below supplies row labels.
  *
  * SCOPED BY RLS ONLY — no `.eq("member", ...)` here. `follow_up_tasks_select`
  * (migration 0038, rewritten by 0042 to `supervises(i.registered_by)`) is
@@ -54,7 +53,7 @@ export interface FollowUpCardItem {
 
 export interface FollowUpCardModel {
   counts: FollowUpCardCounts;
-  /** Every row visible under RLS, in every bucket — callers filter by `.status`. */
+  /** Only the selected max-50 page; counts always cover the entire matching set. */
   items: FollowUpCardItem[];
 }
 
@@ -72,52 +71,40 @@ const STATUS_LABEL: Record<FollowUpCardStatus, FollowUpCardItem["status"]> = {
   closed: "Closed",
 };
 
-export async function getFollowUpCardModel(): Promise<
-  { ok: true; model: FollowUpCardModel } | { ok: false; error: string }
+export async function getFollowUpCardModel(status?: FollowUpCardStatus, requestedPage?: string): Promise<
+  {ok: true; model: FollowUpCardModel; page: number; pages: number} | {ok: false; error: string}
 > {
   const supabase = await createClient();
   const today = todayISO();
-
-  const { data, error } = await supabase
-    .from("follow_up_tasks")
-    .select(
-      "id, due_date, done_at, institutes(name), profiles!follow_up_tasks_member_fkey(name)",
-    )
-    .order("due_date", { ascending: true });
-
-  if (error) {
-    logError("follow-up-cards:list", error);
-    return {
-      ok: false,
-      error: "We could not load follow-ups just now. Please try again in a moment.",
-    };
+  const build = (state: FollowUpCardStatus,head: boolean) => {
+    let q = supabase.from('follow_up_tasks').select(
+      'id,due_date,done_at,institutes(name),profiles!follow_up_tasks_member_fkey(name)',
+      {count:'exact',head});
+    if (state === 'closed') q = q.not('done_at','is',null);
+    else q = q.is('done_at',null);
+    if (state === 'missed') q = q.lt('due_date',today);
+    return q;
+  };
+  const states = ['owned','missed','closed'] as const;
+  const counted = await Promise.all(states.map(state => build(state,true)));
+  if (counted.some(result => result.error)) {
+    logError('follow-up-cards:counts',counted.find(result => result.error)?.error);
+    return {ok:false,error:'We could not load follow-up counts.'};
   }
-
-  const rows = (data ?? []) as unknown as RawTask[];
-
-  const counts: FollowUpCardCounts = { owned: 0, missed: 0, closed: 0 };
-  const items: FollowUpCardItem[] = rows.map((row) => {
-    const bucket = classifyFollowUpTask(
-      { dueDate: row.due_date, doneAt: row.done_at },
-      today,
-    );
-    if (bucket === "closed") {
-      counts.closed += 1;
-    } else {
-      // Owned counts every unclosed row; Missed is the overdue subset of it.
-      counts.owned += 1;
-      if (bucket === "missed") counts.missed += 1;
-    }
-    return {
-      id: row.id,
-      repName: row.profiles?.name ?? "Unknown",
-      instituteName: row.institutes?.name ?? "Unknown",
-      dueDate: row.due_date,
-      status: STATUS_LABEL[bucket],
-    };
-  });
-
-  return { ok: true, model: { counts, items } };
+  const counts = Object.fromEntries(states.map((state,index) => [state,counted[index].count ?? 0])) as unknown as FollowUpCardCounts;
+  const window = auditWindow(requestedPage,status ? counts[status] : 0);
+  const result = status && counts[status]
+    ? await build(status,false).order('due_date').order('id').range(window.from,window.to)
+    : {data:[],error:null};
+  if (result.error) {
+    logError('follow-up-cards:page',result.error);
+    return {ok:false,error:'We could not load follow-ups.'};
+  }
+  const items = ((result.data ?? []) as unknown as RawTask[]).map(row => ({
+    id:row.id,repName:row.profiles?.name ?? 'Unknown',instituteName:row.institutes?.name ?? 'Unknown',
+    dueDate:row.due_date,status:STATUS_LABEL[classifyFollowUpTask({dueDate:row.due_date,doneAt:row.done_at},today)],
+  }));
+  return {ok:true,model:{counts,items},page:window.page,pages:window.pages};
 }
 
 /** The rows one card's "complete list" shows — Owned includes Missed. */

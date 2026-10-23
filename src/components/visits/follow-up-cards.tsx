@@ -19,7 +19,7 @@ function FollowUpCard({
   href: string;
 }) {
   return (
-    <Link href={href} className="block">
+    <Link prefetch={false} href={href} className="block min-h-11">
       <Card className="h-full gap-0 p-4 transition-colors hover:bg-muted/40">
         <p className="text-[26px] leading-none font-semibold tracking-tight tabular-nums">
           {value}

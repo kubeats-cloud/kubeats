@@ -190,7 +190,7 @@ export default async function InstituteDetailPage(
 
   const followUps =
     statusIsOpen && user
-      ? await getOpenFollowUps(openStatuses, user.id)
+      ? await getOpenFollowUps(openStatuses, user.id, undefined, {instituteId:id})
       : ({ ok: true, items: [] } as const);
   const owed = followUps.ok
     ? (followUps.items.find((item) => item.instituteId === id) ?? null)
