@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   classifyFollowUpTask,
@@ -65,5 +67,47 @@ describe("followUpCardItemsFor", () => {
   it("closed's list is exactly the Closed-labelled rows", () => {
     const closed = followUpCardItemsFor(items, "closed");
     expect(closed.map((i) => i.id)).toEqual(["3"]);
+  });
+});
+
+/**
+ * Admin #4 names /pending as the screen with the three cards. The counts and
+ * the lists are the SAME model, so this pins the wiring rather than recounts
+ * anything: `getFollowUpCardModel()` is called once, its `counts` are what the
+ * cards print, and `/pending/follow-ups` filters its `items` with
+ * `followUpCardItemsFor()`.
+ */
+describe("the cards are on Pending, and the lists read the same model", () => {
+  const read = (path: string) =>
+    readFileSync(fileURLToPath(new URL(`../../src/app/(app)/${path}`, import.meta.url)), "utf8");
+
+  const pending = () => read("pending/page.tsx");
+  const lists = () => read("pending/follow-ups/page.tsx");
+
+  it("gives an admin the three cards at the top", () => {
+    const page = pending();
+    expect(page).toContain("AdminFollowUpCards");
+    // The admin branch is the one that renders it; a rep keeps the two cards.
+    expect(page).toMatch(/admin \? \(\s*<AdminFollowUpCards/);
+    expect(page).toContain("RepFollowUpCards");
+  });
+
+  it("prints the counts from the one model the lists filter", () => {
+    expect(pending()).toContain("getFollowUpCardModel()");
+    expect(pending()).toContain("counts={followUpCards.model.counts}");
+    expect(lists()).toContain("getFollowUpCardModel()");
+    expect(lists()).toContain("followUpCardItemsFor(result.model.items, status)");
+  });
+
+  it("links each card at its own filtered list", () => {
+    const cards = readFileSync(
+      fileURLToPath(
+        new URL("../../src/components/visits/follow-up-cards.tsx", import.meta.url),
+      ),
+      "utf8",
+    );
+    for (const status of ["owned", "missed", "closed"]) {
+      expect(cards).toContain(`href="/pending/follow-ups?status=${status}"`);
+    }
   });
 });
