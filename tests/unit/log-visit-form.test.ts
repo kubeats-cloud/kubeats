@@ -128,6 +128,9 @@ describe("the other forms a Radix revert could corrupt", () => {
   const FIXED = [
     "src/components/institutes/institute-form.tsx",
     "src/components/settings/team-panel.tsx",
+    // The member editor moved here so the Team tab can share it; the form and
+    // its two Radix Selects moved with it, so the invariant must follow.
+    "src/components/settings/member-edit-dialog.tsx",
     "src/components/materials/material-upload-form.tsx",
     "src/components/settings/photo-flush-panel.tsx",
     // The two Settings panels, moved here from LEFT — see the note above.

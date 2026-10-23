@@ -8,7 +8,10 @@ import { AdminTeamWeek } from "@/components/dashboard/team-rep-search";
 import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { ExportExcel } from "@/components/report/export-excel";
-import { requireStaff } from "@/lib/admin";
+import { listTeamMembers, requireStaff, type TeamMember } from "@/lib/admin";
+import { listCampuses } from "@/lib/campuses";
+import { settled } from "@/lib/errors";
+import type { Campus } from "@/lib/campus-display";
 import { defaultExportRange } from "@/lib/validation/export";
 import { getTeamWeek } from "@/lib/week-summary";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
@@ -46,8 +49,20 @@ export default async function TeamPage(props: PageProps<"/team">) {
   const searchParams = await props.searchParams;
   const weekStart = normaliseWeekParam(first(searchParams.week));
 
-  const [team] = await Promise.all([
+  const [team, editableMembers, campuses] = await Promise.all([
     getTeamWeek(weekStart),
+    /*
+     * The row editor's data, fetched only for an admin — the role that may
+     * open it. `getTeamWeek` carries the week; this carries the account facts
+     * (campus to preselect, institutes a campus change would move) that its
+     * reps-only rows do not.
+     */
+    gate.isAdmin
+      ? settled<TeamMember[]>(listTeamMembers(), [], "team:members")
+      : Promise.resolve<TeamMember[]>([]),
+    gate.isAdmin
+      ? settled<Campus[]>(listCampuses(), [], "team:campuses")
+      : Promise.resolve<Campus[]>([]),
   ]);
 
   const controls = (
@@ -97,7 +112,12 @@ export default async function TeamPage(props: PageProps<"/team">) {
       {/* Admin #5. The flag is the one requireStaff already returns. A team
           lead keeps the list exactly as it was, with no search bar. */}
       {gate.isAdmin && team.ok ? (
-        <AdminTeamWeek members={team.members} weekStart={weekStart}>
+        <AdminTeamWeek
+          members={team.members}
+          weekStart={weekStart}
+          editableMembers={editableMembers}
+          campuses={campuses}
+        >
           {controls}
         </AdminTeamWeek>
       ) : (

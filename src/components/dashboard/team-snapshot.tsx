@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { ChevronRightIcon, UsersIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -104,9 +105,18 @@ function rowsFrom(
 export function TeamSnapshot({
   members,
   weekStart,
+  renderAction,
 }: {
   members: TeamMemberWeek[];
   weekStart: string;
+  /**
+   * An optional per-row control — the admin Team tab's Edit button.
+   *
+   * OMITTED BY THE TEAM LEAD, who sees this same table but must not be offered
+   * an account editor. Kept as a render prop rather than a boolean so this
+   * component holds no dialog state and stays usable from the server page.
+   */
+  renderAction?: (memberId: string) => ReactNode;
 }) {
   const rows = rowsFrom(members, weekStart);
 
@@ -128,47 +138,53 @@ export function TeamSnapshot({
       <div className="space-y-2 md:hidden">
         {rows.map((row) => (
           <Card key={row.id} className="p-0">
-            <Link
-              href={row.href}
-              className="focus-visible:ring-ring flex items-center gap-3 px-4 py-3 focus-visible:ring-2 focus-visible:outline-none"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="truncate font-medium">{row.name}</p>
-                  {row.role === "admin" && (
-                    <Badge variant="neutral" className="shrink-0">
-                      Admin
+            {/* The row, not the card, is the flex line — Card itself is a
+                column, and the Edit trigger has to sit BESIDE the link rather
+                than under it. */}
+            <div className="flex items-center gap-1 pr-2">
+              <Link
+                href={row.href}
+                className="focus-visible:ring-ring flex min-w-0 flex-1 items-center gap-3 px-4 py-3 focus-visible:ring-2 focus-visible:outline-none"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate font-medium">{row.name}</p>
+                    {row.role === "admin" && (
+                      <Badge variant="neutral" className="shrink-0">
+                        Admin
+                      </Badge>
+                    )}
+                  </div>
+
+                  <p className="text-muted-foreground mt-0.5 truncate text-xs">
+                    {row.status}
+                  </p>
+
+                  <Progress
+                    value={row.percent ?? 0}
+                    indicatorClassName={TONE_BAR[row.tone]}
+                    className="mt-2"
+                    aria-label={`${row.name}: ${row.percent ?? 0}% of commitment`}
+                  />
+                </div>
+
+                <div className="shrink-0 text-right">
+                  {row.percent === null ? (
+                    <span className="text-muted-foreground text-lg">—</span>
+                  ) : (
+                    <Badge variant={TONE_BADGE[row.tone]} className="tabular-nums">
+                      {row.percent}%
                     </Badge>
                   )}
                 </div>
 
-                <p className="text-muted-foreground mt-0.5 truncate text-xs">
-                  {row.status}
-                </p>
-
-                <Progress
-                  value={row.percent ?? 0}
-                  indicatorClassName={TONE_BAR[row.tone]}
-                  className="mt-2"
-                  aria-label={`${row.name}: ${row.percent ?? 0}% of commitment`}
+                <ChevronRightIcon
+                  className="text-muted-foreground size-4 shrink-0"
+                  aria-hidden
                 />
-              </div>
-
-              <div className="shrink-0 text-right">
-                {row.percent === null ? (
-                  <span className="text-muted-foreground text-lg">—</span>
-                ) : (
-                  <Badge variant={TONE_BADGE[row.tone]} className="tabular-nums">
-                    {row.percent}%
-                  </Badge>
-                )}
-              </div>
-
-              <ChevronRightIcon
-                className="text-muted-foreground size-4 shrink-0"
-                aria-hidden
-              />
-            </Link>
+              </Link>
+              {renderAction?.(row.id)}
+            </div>
           </Card>
         ))}
       </div>
@@ -197,6 +213,11 @@ export function TeamSnapshot({
                 <th scope="col" className="px-3 py-2.5 text-xs font-medium">
                   <span className="sr-only">Report</span>
                 </th>
+                {renderAction && (
+                  <th scope="col" className="w-10 px-2 py-2.5">
+                    <span className="sr-only">Edit</span>
+                  </th>
+                )}
                 <th scope="col" className="w-10 px-2 py-2.5">
                   <span className="sr-only">Open</span>
                 </th>
@@ -246,6 +267,9 @@ export function TeamSnapshot({
                       Report
                     </Link>
                   </td>
+                  {renderAction && (
+                    <td className="px-2 py-3">{renderAction(row.id)}</td>
+                  )}
                   <td className="px-2 py-3">
                     <Link
                       href={row.href}
