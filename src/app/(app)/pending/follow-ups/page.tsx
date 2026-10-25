@@ -57,7 +57,7 @@ export default async function FollowUpsPage(props: PageProps<"/pending/follow-up
       {admin && result.ok && <AdminFollowUpCards counts={result.model.counts} />}
       <p className="text-muted-foreground mb-3 text-xs">Owned means unfinished tasks, including Missed; Missed means unfinished and overdue before today; Closed means completed. Missed history records days in the last 30 days, not currently overdue tasks.</p>
       {result.ok && <nav aria-label="Follow-up pages" className="my-3 flex flex-wrap items-center justify-between gap-3 text-sm">
-        <p>{result.model.counts[status]} matching tasks · page {result.page} of {result.pages}</p>
+        <p>{result.model.counts[status]} matching {result.model.counts[status] === 1 ? "task" : "tasks"} · page {result.page} of {result.pages}</p>
         {result.page > 1 && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/pending/follow-ups',{status},result.page-1)}>Previous</Link>}
         {result.page < result.pages && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/pending/follow-ups',{status},result.page+1)}>Next</Link>}
       </nav>}

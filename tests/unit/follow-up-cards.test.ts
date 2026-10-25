@@ -92,6 +92,12 @@ describe("the cards are on Pending, and the lists read the same model", () => {
     expect(page).toContain("RepFollowUpCards");
   });
 
+  it("says one matching task, not one matching tasks", () => {
+    expect(lists()).toContain(
+      'result.model.counts[status] === 1 ? "task" : "tasks"',
+    );
+  });
+
   it("prints the counts from the one model the lists filter", () => {
     expect(pending()).toContain("getFollowUpCardModel()");
     expect(pending()).toContain("counts={followUpCards.model.counts}");
