@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ActivityIcon,
+  Building2Icon,
   CalendarRangeIcon,
   ChartColumnIcon,
   CameraIcon,
@@ -268,6 +269,11 @@ export function AdminOverview({
               */}
               <Shortcut href="/pending" icon={ClockIcon} label="Follow-ups owed" />
               <Shortcut href="/team" icon={UsersIcon} label="Team progress" />
+              <Shortcut
+                href="/institutes/report"
+                icon={Building2Icon}
+                label="Pipeline by Rep"
+              />
               <Shortcut href="/data" icon={DatabaseIcon} label="Data and backups" />
               {/* /team/report, NOT /report. /report is a rep's own activity and
                   an admin has none — following it only to be redirected would
