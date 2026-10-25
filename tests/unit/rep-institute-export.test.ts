@@ -62,6 +62,8 @@ describe("the rep export route", () => {
 
   it("applies the route's shared complete-range and 31-day guard", () => {
     expect(route).toContain("instituteActivityExportRangeProblem");
+    expect(route).toContain("repActivityExportRangeProblem");
+    expect(route).toContain('view === "rep"');
     expect(route).toContain("pipelineRangeSchema.safeParse");
   });
 });

@@ -11,6 +11,7 @@ import {
 import {
   instituteActivityExportRangeProblem,
 } from "@/lib/institute-activity-links";
+import { repActivityExportRangeProblem } from "@/lib/validation/export";
 import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -74,7 +75,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const rangeProblem = instituteActivityExportRangeProblem(parsedRange.data);
+  // The rep's own download must refuse in the same sentence its control shows;
+  // the two views share the 31-day cap but not the surrounding admin wording.
+  const rangeProblem =
+    view === "rep"
+      ? repActivityExportRangeProblem(
+          parsedRange.data.from ?? "",
+          parsedRange.data.to ?? "",
+        )
+      : instituteActivityExportRangeProblem(parsedRange.data);
   if (rangeProblem) {
     return NextResponse.json({ error: rangeProblem }, { status: 400 });
   }
