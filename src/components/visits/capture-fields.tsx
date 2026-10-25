@@ -112,7 +112,13 @@ const GEO_MESSAGES: Record<number, string> = {
   3: "Finding your location took too long. You can still save the visit.",
 };
 
-export function CaptureFields({ userId }: { userId: string }) {
+export function CaptureFields({
+  userId,
+  onPhotoReady,
+}: {
+  userId: string;
+  onPhotoReady?: (ready: boolean) => void;
+}) {
   // Starts as "locating" because the mount effect asks immediately; setting
   // it there instead would be a synchronous setState inside an effect.
   const [geo, setGeo] = useState<GeoState>({ status: "locating" });
@@ -270,6 +276,7 @@ export function CaptureFields({ userId }: { userId: string }) {
           previewUrl: prepared.previewUrl,
           bytes: prepared.bytes,
         });
+        onPhotoReady?.(true);
       } catch (error) {
         console.error("[photo] preparation failed", error);
         setPhoto({
@@ -279,7 +286,7 @@ export function CaptureFields({ userId }: { userId: string }) {
         });
       }
     },
-    [freshFix, namePlace, userId],
+    [freshFix, namePlace, onPhotoReady, userId],
   );
 
   async function handleFile(event: React.ChangeEvent<HTMLInputElement>) {
@@ -308,6 +315,7 @@ export function CaptureFields({ userId }: { userId: string }) {
     if (previewRef.current) URL.revokeObjectURL(previewRef.current);
     previewRef.current = null;
     setPhoto({ status: "idle" });
+    onPhotoReady?.(false);
   }
 
   const busy = photo.status === "working";

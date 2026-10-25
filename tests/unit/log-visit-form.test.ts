@@ -205,6 +205,31 @@ describe.skipIf(!existsSync(radixPath))("why the fix is needed", () => {
  * R4 — Log Visit shows the selected institute's current status as a fact,
  * not only a picker of what it is about to become.
  */
+describe("F5: the photo-required message clears when a photo is ready", () => {
+  const form = read(FORM);
+  const capture = read("src/components/visits/capture-fields.tsx");
+
+  it("lets CaptureFields report a ready and a cleared photo", () => {
+    expect(capture).toContain("onPhotoReady?: (ready: boolean) => void");
+    expect(capture).toContain("onPhotoReady?.(true)");
+    expect(capture).toContain("onPhotoReady?.(false)");
+  });
+
+  it("drops the photo error and an otherwise-empty notice", () => {
+    expect(form).toContain("onPhotoReady={setPhotoReady}");
+    expect(form).toContain('if (key === "photo_path") return !photoReady;');
+    expect(form).toContain("photoReady && error === CHECK_FIELDS");
+    expect(form).toContain("{visibleError && (");
+  });
+
+  it("still gates the save on a photo", () => {
+    expect(read("src/lib/validation/visit.ts")).toContain(
+      '.min(1, "A photo is required to log this visit.")',
+    );
+    expect(capture).toContain('name="photo_path"');
+  });
+});
+
 describe("R4: the institute's current status is displayed", () => {
   it("log-visit-form.tsx renders plan.instituteStatus next to the Status picker", () => {
     const source = read("src/components/visits/log-visit-form.tsx");

@@ -27,7 +27,7 @@ import {
 import { logAndFileVisit } from "@/lib/feedback-actions";
 import { checkoutFix } from "@/lib/geolocate";
 import { appendCheckoutFix } from "@/lib/validation/checkin";
-import { EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
+import { CHECK_FIELDS, EMPTY_STATE, type FormState } from "@/lib/visit-form-state";
 import { clearDraft, logVisitDraftKey } from "@/lib/drafts";
 import { useDraft } from "@/lib/use-draft";
 import type { OpenLoop, PlanEntry } from "@/lib/visits";
@@ -148,6 +148,7 @@ export function LogVisitForm({
   statusFields?: StatusField[];
 }) {
   const [customFields, setCustomFields] = useState<Record<string, string>>({});
+  const [photoReady, setPhotoReady] = useState(false);
   const [serverState, formAction, isPending] = useActionState(
     logAndFileVisit,
     EMPTY_STATE,
@@ -270,11 +271,16 @@ export function LogVisitForm({
    */
   const fieldErrors = Object.fromEntries(
     Object.entries(rawFieldErrors).filter(([key]) => {
+      if (key === "photo_path") return !photoReady;
       if (key === "expected_date") return needsDate;
       if (key === "follow_up_date") return needsFollowUp;
       return true;
     }),
   );
+  const visibleError =
+    photoReady && error === CHECK_FIELDS && Object.keys(fieldErrors).length === 0
+      ? null
+      : error;
 
   /*
    * ONE NAME FOR ONE BOX, in the summary as well as on the control.
@@ -461,7 +467,7 @@ export function LogVisitForm({
       </FormSection>
 
       <FormSection title="Photo">
-        <CaptureFields userId={userId} />
+        <CaptureFields userId={userId} onPhotoReady={setPhotoReady} />
       </FormSection>
 
       {/*
@@ -633,9 +639,9 @@ export function LogVisitForm({
         )}
       </FormSection>
 
-      {error && (
+      {visibleError && (
         <FormNotice
-          message={error}
+          message={visibleError}
           fieldErrors={fieldErrors}
           labelFor={labelForField}
         />
