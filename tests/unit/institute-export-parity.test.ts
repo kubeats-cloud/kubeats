@@ -80,8 +80,36 @@ describe('visit-level export shape and parity',() => {
     const sheet = exportMocks.book.mock.calls[0][0] as {rows:unknown[][]};
     expect(sheet.rows).toHaveLength(visits.length+2);
     expect(sheet.rows.at(-1)).toEqual([
-      'Total',...Array(13).fill(null),3,1,1,1,null,null,1,
+      'Total',...Array(13).fill(null),3,1,1,1,0,null,null,1,
     ]);
+    expect(sheet.rows[0].slice(-6)).toEqual([
+      'First meeting done','RSVP received','Other / inactive status','Follow-up Date','Follow-up Time (IST)','Follow-up Created',
+    ]);
+  });
+  it('counts an inactive or unset status in Other for three filters, so the columns equal the visits',() => {
+    const otherVisit = {institute:'Synthetic Institute',member:'Synthetic Rep',activity:'meeting',
+      meetingPurpose:null,date:'2026-10-03',status:'Retired status',nextAction:null,
+      nextActionDate:null,totalFollowUps:0,openFollowUps:0,checkinAt:null,checkoutAt:null,location:null,
+      followUpDate:null,followUpTime:null,followUpCreated:false};
+    const all = [...visits,otherVisit];
+    const filters = {
+      fullRange: all,
+      oneRep: all.filter((visit) => visit.member === 'Synthetic Rep'),
+      oneInstitute: all.filter((visit) => visit.institute === 'Synthetic Institute'),
+    };
+    for (const filtered of Object.values(filters)) {
+      const sheet = statusActivitySheetRows(statuses,filtered);
+      const firstStatus = sheet[0].indexOf(statuses[0].status);
+      const otherIndex = sheet[0].indexOf('Other / inactive status');
+      const body = sheet.slice(1,-1);
+      const statusColumnSum = body.reduce<number>((sum,row) =>
+        sum + row.slice(firstStatus,otherIndex+1)
+          .reduce<number>((n,cell) => n + Number(cell ?? 0),0),0);
+      expect(statusColumnSum).toBe(body.length);
+      expect(sheet.at(-1)?.[otherIndex]).toBe(
+        filtered.filter((visit) => !statuses.some((status) => status.status === visit.status)).length,
+      );
+    }
   });
   it('matches the rep consolidated table columns and totals',() => {
     const sheet = repInstituteSheetRows(rows);

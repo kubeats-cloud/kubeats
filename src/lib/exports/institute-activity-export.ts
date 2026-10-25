@@ -13,6 +13,7 @@ import type {
   StatusColumn,
 } from "@/lib/institute-activity-counts";
 import { ACTIVITY_TYPES, type ActivityType } from "@/lib/validation/weekly";
+import { OTHER_INACTIVE_STATUS_LABEL } from "@/lib/exports/activity-grid";
 import { INSTITUTE_ACTIVITY_LABELS } from "@/lib/institute-activity-counts";
 import {
   openClosedTotals,
@@ -126,9 +127,13 @@ export function statusActivitySheetRows(
   statuses: readonly StatusColumn[],
   visits: readonly StatusActivityVisit[],
 ): CellValue[][] {
+  const activeStatuses = new Set(statuses.map((status) => status.status));
+  const isOther = (visit: StatusActivityVisit) =>
+    !visit.status || !activeStatuses.has(visit.status);
   const header: CellValue[] = [
     ...VISIT_HEADERS,
     ...statuses.map((status) => status.status),
+    OTHER_INACTIVE_STATUS_LABEL,
     ...FOLLOW_UP_HEADERS,
   ];
 
@@ -150,6 +155,7 @@ export function statusActivitySheetRows(
     visit.totalFollowUps ?? 0,
     visit.openFollowUps ?? 0,
     ...statuses.map((status) => (visit.status === status.status ? 1 : 0)),
+    isOther(visit) ? 1 : 0,
     visit.followUpDate ? formatDate(visit.followUpDate) : null,
     visit.followUpTime ? formatClockTime(visit.followUpTime) : null,
     visit.followUpCreated ? 1 : 0,
@@ -163,6 +169,7 @@ export function statusActivitySheetRows(
     ...statuses.map(
       (status) => visits.filter((visit) => visit.status === status.status).length,
     ),
+    visits.filter(isOther).length,
     null,
     null,
     visits.filter((visit) => visit.followUpCreated).length,
