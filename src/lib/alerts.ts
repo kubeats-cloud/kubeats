@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
+import { todayISO } from "@/lib/dates";
 import type { AlertEvent, AlertKind } from "@/lib/alert-kinds";
 
 /*
@@ -74,6 +75,19 @@ function toAlert(row: RawAlert): AlertEvent {
  * filtering: the banner runs on every dashboard load, and the dismissed rows
  * are the majority after a few weeks.
  */
+export function withoutSatisfiedEmptyPlanAlerts(
+  alerts: readonly AlertEvent[],
+  today: string,
+  planned: boolean,
+  logged: boolean,
+): AlertEvent[] {
+  return alerts.filter(
+    (alert) =>
+      alert.kind !== "day_plan_not_set" ||
+      (alert.forDate === today && !planned && !logged),
+  );
+}
+
 export async function listUnseenAlerts(
   memberId: string,
 ): Promise<{ ok: true; alerts: AlertEvent[] } | { ok: false }> {
@@ -90,7 +104,42 @@ export async function listUnseenAlerts(
     return { ok: false };
   }
 
-  return { ok: true, alerts: (data ?? []).map((row) => toAlert(row as RawAlert)) };
+  const alerts = (data ?? []).map((row) => toAlert(row as RawAlert));
+  const today = todayISO();
+  let planned = false;
+  let logged = false;
+
+  if (
+    alerts.some(
+      (alert) => alert.kind === "day_plan_not_set" && alert.forDate === today,
+    )
+  ) {
+    const [plans, visits] = await Promise.all([
+      supabase
+        .from("daily_plans")
+        .select("id", { count: "exact", head: true })
+        .eq("member", memberId)
+        .eq("date", today),
+      supabase
+        .from("visits")
+        .select("id", { count: "exact", head: true })
+        .eq("member", memberId)
+        .eq("date", today),
+    ]);
+
+    if (plans.error || visits.error) {
+      logError("alerts:empty-plan", plans.error ?? visits.error ?? "No count");
+      return { ok: false };
+    }
+
+    planned = (plans.count ?? 0) > 0;
+    logged = (visits.count ?? 0) > 0;
+  }
+
+  return {
+    ok: true,
+    alerts: withoutSatisfiedEmptyPlanAlerts(alerts, today, planned, logged),
+  };
 }
 
 /* ------------------------------------------------------------------ */

@@ -2,7 +2,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { ALERT_KINDS, describeAlert, type AlertEvent } from "@/lib/alerts";
+import {
+  ALERT_KINDS,
+  describeAlert,
+  withoutSatisfiedEmptyPlanAlerts,
+  type AlertEvent,
+} from "@/lib/alerts";
 import {
   METRICS,
   METRIC_KEYS,
@@ -99,6 +104,51 @@ describe("what each alert says", () => {
       alert({ kind: "weekly_plan_not_set", count: null, weekStart: null }),
     );
     expect(without.detail).not.toMatch(/null|undefined/);
+  });
+});
+
+describe("the empty-plan alert follows today's facts", () => {
+  const planAlert = alert({
+    kind: "day_plan_not_set",
+    forDate: "2026-10-25",
+    count: null,
+  });
+
+  it("shows only while nothing is planned and nothing is logged today", () => {
+    expect(
+      withoutSatisfiedEmptyPlanAlerts([planAlert], "2026-10-25", false, false),
+    ).toEqual([planAlert]);
+    expect(
+      withoutSatisfiedEmptyPlanAlerts([planAlert], "2026-10-25", true, false),
+    ).toEqual([]);
+    expect(
+      withoutSatisfiedEmptyPlanAlerts([planAlert], "2026-10-25", false, true),
+    ).toEqual([]);
+    expect(
+      withoutSatisfiedEmptyPlanAlerts([planAlert], "2026-10-25", true, true),
+    ).toEqual([]);
+  });
+
+  it("never presents an earlier day's alert as today's", () => {
+    expect(
+      withoutSatisfiedEmptyPlanAlerts([planAlert], "2026-10-26", false, false),
+    ).toEqual([]);
+  });
+
+  it("leaves the other alert kinds alone", () => {
+    const due = alert({ kind: "follow_ups_due", forDate: "2026-10-20" });
+    expect(
+      withoutSatisfiedEmptyPlanAlerts([due], "2026-10-25", true, true),
+    ).toEqual([due]);
+  });
+
+  it("checks today's plans and visits before showing it", () => {
+    const source = readFileSync("src/lib/alerts.ts", "utf8");
+    expect(source).toContain('.from("daily_plans")');
+    expect(source).toContain('.from("visits")');
+    expect(source).toContain(".eq(\"date\", today)");
+    expect(source).toContain("todayISO()");
+    expect(source).toContain("withoutSatisfiedEmptyPlanAlerts(alerts");
   });
 });
 
