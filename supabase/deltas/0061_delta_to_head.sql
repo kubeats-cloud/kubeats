@@ -3,6 +3,8 @@
 -- Functions only. No table, view, column, index, trigger or history row changes.
 -- Replace-safe: the known function identity is dropped before creation, so a
 -- production parameter-name or return-type difference cannot raise 42P13.
+-- The production ACL is restored explicitly after creation for both changed
+-- functions and for audit_registry_facets(), which 0061 does not redefine.
 -- This file is NOT auto-applied; the owner runs it explicitly.
 -- DOWN: supabase/deltas/0061_delta_to_head_down.sql
 begin;
@@ -185,7 +187,7 @@ begin
   );
 end $$;
 revoke all on function public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer) from public,anon;
-grant execute on function public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer) to authenticated;
+grant execute on function public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer) to authenticated, service_role;
 
 drop function if exists public.audit_rep_institute_activity(date,date,text,boolean,integer);
 create function public.audit_rep_institute_activity(
@@ -394,6 +396,10 @@ begin
   );
 end $$;
 revoke all on function public.audit_rep_institute_activity(date,date,text,boolean,integer) from public,anon;
-grant execute on function public.audit_rep_institute_activity(date,date,text,boolean,integer) to authenticated;
+grant execute on function public.audit_rep_institute_activity(date,date,text,boolean,integer) to authenticated, service_role;
+
+-- Production ACL for the unchanged facets function.
+revoke all on function public.audit_registry_facets() from public, anon;
+grant execute on function public.audit_registry_facets() to authenticated, service_role;
 
 commit;

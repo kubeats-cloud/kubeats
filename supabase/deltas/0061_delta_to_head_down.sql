@@ -3,6 +3,8 @@
 -- Functions only. Replace-safe with the same known identities. This restores
 -- the prior audit function bodies, not every production-only variant; the
 -- owner should treat it as a rehearsal rollback, not a production restore.
+-- The production ACL is restored explicitly after creation for both recreated
+-- functions and for audit_registry_facets(), which this file does not redefine.
 begin;
 
 drop function if exists public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer);
@@ -171,7 +173,7 @@ begin
   );
 end $$;
 revoke all on function public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer) from public,anon;
-grant execute on function public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer) to authenticated;
+grant execute on function public.audit_institute_activity(date,date,text,uuid,uuid,text,boolean,integer) to authenticated, service_role;
 
 drop function if exists public.audit_rep_institute_activity(date,date,text,boolean,integer);
 create function public.audit_rep_institute_activity(
@@ -341,6 +343,10 @@ begin
   );
 end $$;
 revoke all on function public.audit_rep_institute_activity(date,date,text,boolean,integer) from public,anon;
-grant execute on function public.audit_rep_institute_activity(date,date,text,boolean,integer) to authenticated;
+grant execute on function public.audit_rep_institute_activity(date,date,text,boolean,integer) to authenticated, service_role;
+
+-- Production ACL for the unchanged facets function.
+revoke all on function public.audit_registry_facets() from public, anon;
+grant execute on function public.audit_registry_facets() to authenticated, service_role;
 
 commit;
