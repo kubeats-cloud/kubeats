@@ -14,6 +14,8 @@ import {
 import {
   activitySheet,
   activitySortKeys,
+  OTHER_INACTIVE_STATUS,
+  OTHER_INACTIVE_STATUS_LABEL,
   sortRepRows,
   statusColumnsFor,
   statusesWithoutColumns,
@@ -246,11 +248,14 @@ export interface ActivityReportModel {
   /** The rep's name for a single-member report; null for all reps. */
   repName: string | null;
   counts: ActivityReportCounts;
+  otherStatusColumn?: { status: string; label: string; retired: boolean };
 }
 
 export interface ActivityReportOptions {
   sort?: { key?: string; dir?: string };
   catalogue?: StatusCatalogue;
+  /** Overview only: group null and retired-status visits into one column. */
+  groupInactiveStatuses?: boolean;
 }
 
 export async function getActivityReportModel(
@@ -265,7 +270,7 @@ export async function getActivityReportModel(
 
   if (!data.ok) return data;
 
-  const columns = statusColumnsFor(catalogue, data.statusesSeen);
+  const allColumns = statusColumnsFor(catalogue, data.statusesSeen);
 
   /**
    * REFUSE RATHER THAN SHOW A REPORT THAT DOES NOT ADD UP.
@@ -279,7 +284,7 @@ export async function getActivityReportModel(
    * other, which is worse than no report — on screen exactly as in a download,
    * which is why this guard lives here rather than in the route.
    */
-  const orphans = statusesWithoutColumns(columns, data.statusesSeen);
+  const orphans = statusesWithoutColumns(allColumns, data.statusesSeen);
   if (orphans.length > 0) {
     logError(
       "export:status-columns",
@@ -292,6 +297,16 @@ export async function getActivityReportModel(
     };
   }
 
+  const columns = options.groupInactiveStatuses
+    ? {
+        closed: allColumns.closed.filter((column) => !column.retired),
+        open: allColumns.open.filter((column) => !column.retired),
+      }
+    : allColumns;
+  const activeStatuses = new Set(
+    catalogue.filter((row) => row.isActive).map((row) => row.status),
+  );
+
   /*
    * THE 12 ACTIVITY × CATEGORY CELLS, derived from the visit rows already in
    * memory. `countActivityOpenClosed()` is the institute report's own
@@ -299,13 +314,34 @@ export async function getActivityReportModel(
    * It needs the catalogue, which is why it happens here rather than in
    * `readRows` — the three reads above stay parallel.
    */
-  const withActivityStatuses: RepRow[] = data.reps.map((rep) => ({
-    ...rep,
-    activityStatuses: countActivityOpenClosed(
-      rep.id ? (data.visitsByMember.get(rep.id) ?? []) : [],
-      catalogue,
-    ),
-  }));
+  const withActivityStatuses: RepRow[] = data.reps.map((rep) => {
+    const visits = rep.id ? (data.visitsByMember.get(rep.id) ?? []) : [];
+    const other = options.groupInactiveStatuses
+      ? visits.filter(
+          (visit) =>
+            !visit.status_set_to || !activeStatuses.has(visit.status_set_to),
+        ).length
+      : 0;
+    return {
+      ...rep,
+      statuses: options.groupInactiveStatuses
+        ? {
+            ...Object.fromEntries(
+              Object.entries(rep.statuses).filter(([status]) =>
+                activeStatuses.has(status),
+              ),
+            ),
+            [OTHER_INACTIVE_STATUS]: other,
+          }
+        : rep.statuses,
+      activityStatuses: countActivityOpenClosed(
+        visits,
+        options.groupInactiveStatuses
+          ? catalogue.filter((row) => row.isActive)
+          : catalogue,
+      ),
+    };
+  });
 
   const sort = options.sort
     ? parsePipelineSort(
@@ -335,6 +371,13 @@ export async function getActivityReportModel(
           0,
         ),
       },
+      otherStatusColumn: options.groupInactiveStatuses
+        ? {
+            status: OTHER_INACTIVE_STATUS,
+            label: OTHER_INACTIVE_STATUS_LABEL,
+            retired: false,
+          }
+        : undefined,
     },
   };
 }
@@ -365,7 +408,10 @@ export async function buildActivityExport(
   sort?: ActivityReportOptions["sort"],
   options: ActivityExportOptions = {},
 ): Promise<ExportResult> {
-  const result = await getActivityReportModel(range, memberId, { sort });
+  const result = await getActivityReportModel(range, memberId, {
+    sort,
+    groupInactiveStatuses: options.layout === "activity-status",
+  });
   if (!result.ok) return result;
 
   const { reps, columns, repName } = result.model;
@@ -375,6 +421,7 @@ export async function buildActivityExport(
           reps,
           // The 18 are hidden on that screen by default; the file matches it.
           columns: { closed: [], open: [] },
+          unsetColumn: result.model.otherStatusColumn,
           showActivities: false,
           showActivityStatuses: true,
         }

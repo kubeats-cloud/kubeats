@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVITY_COLUMNS,
   ACTIVITY_STATUS_BANDS,
+  OTHER_INACTIVE_STATUS,
+  OTHER_INACTIVE_STATUS_LABEL,
   TOTAL_COLUMN_LABEL,
   TOTAL_ROW_LABEL,
   activitySheet,
@@ -293,6 +295,78 @@ describe("the totals add the parts once", () => {
   });
 });
 
+describe("the reconciliation bucket", () => {
+  const otherColumn = {
+    status: OTHER_INACTIVE_STATUS,
+    label: OTHER_INACTIVE_STATUS_LABEL,
+    retired: false,
+  };
+  const reconciled: RepRow[] = [
+    {
+      name: "Asha",
+      activities: { ...ZERO_COUNTS },
+      statuses: {
+        "First meeting done": 6,
+        [OTHER_INACTIVE_STATUS]: 2,
+      },
+      activityStatuses: {
+        meeting: { open: 6, closed: 0 },
+        session: { open: 0, closed: 0 },
+        campus_visit: { open: 0, closed: 0 },
+        olympiad: { open: 0, closed: 0 },
+        application: { open: 0, closed: 0 },
+        admission: { open: 0, closed: 0 },
+      },
+    },
+  ];
+
+  it("makes the 12-column view plus Other equal Total visits", () => {
+    const grid = buildActivityGrid({
+      reps: reconciled,
+      columns: { closed: [], open: [] },
+      showActivities: false,
+      showActivityStatuses: true,
+      unsetColumn: otherColumn,
+    });
+    const row = grid.rows[2];
+    expect(row[1]).toBe(2);
+    expect(row[row.length - 1]).toBe(8);
+    expect((row.slice(1, -1) as number[]).reduce((a, b) => a + b, 0)).toBe(8);
+  });
+
+  it("makes the per-status view plus Other equal the same total", () => {
+    const grid = buildActivityGrid({
+      reps: reconciled,
+      columns: {
+        closed: [],
+        open: [{ status: "First meeting done", label: "First meeting done", retired: false }],
+      },
+      showActivities: false,
+      showActivityStatuses: true,
+      unsetColumn: otherColumn,
+      hiddenColumns: ACTIVITY_STATUS_BANDS.flatMap((band) => [
+        `activity-status:${band.activity}:open`,
+        `activity-status:${band.activity}:closed`,
+      ]),
+    });
+    const row = grid.rows[2];
+    expect(row.slice(1)).toEqual([6, 2, 8]);
+  });
+
+  it("carries the same Other column into the Overview workbook", () => {
+    const sheet = activitySheet({
+      reps: reconciled,
+      columns: { closed: [], open: [] },
+      showActivities: false,
+      showActivityStatuses: true,
+      unsetColumn: otherColumn,
+    }, "All reps");
+    expect(sheet.rows[0]).toContain("NO STATUS");
+    expect(sheet.rows[1]).toContain(OTHER_INACTIVE_STATUS_LABEL);
+    expect(sheet.rows[2][sheet.rows[2].length - 1]).toBe(8);
+  });
+});
+
 describe("the workbook matches the table for the same filter", () => {
   const tableInput = {
     reps,
@@ -356,6 +430,7 @@ describe("only the Overview asks for it", () => {
     expect(model).toContain('options.layout === "activity-status"');
     expect(model).toContain("showActivityStatuses: true");
     expect(model).toContain("showActivities: false");
+    expect(model).toContain("unsetColumn: result.model.otherStatusColumn");
   });
 
   it("leaves the Team report's grid and download unchanged", () => {

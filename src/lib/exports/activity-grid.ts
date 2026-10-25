@@ -297,6 +297,9 @@ export interface RepRow {
   activityStatuses?: RepActivityStatus;
 }
 
+export const OTHER_INACTIVE_STATUS = "__other_inactive_status__";
+export const OTHER_INACTIVE_STATUS_LABEL = "Other / inactive status";
+
 export interface GridInput {
   reps: RepRow[];
   columns: StatusColumns;
@@ -675,10 +678,12 @@ export function buildActivityGrid(input: GridInput): {
     // reader can see to its left. A second pass over `row` would be a second
     // chance to pick the wrong slice.
     let statusTotal = 0;
+    let otherStatusTotal = 0;
     for (const column of statusColumns) {
       const count = rep.statuses[column.status] ?? 0;
       row.push(count);
       statusTotal += count;
+      if (column.status === OTHER_INACTIVE_STATUS) otherStatusTotal = count;
       // Zero is real data and is not a door. See `hrefFor`.
       hrefRow.push(count > 0 && hrefFor ? hrefFor(rep, column.status) : null);
     }
@@ -706,7 +711,9 @@ export function buildActivityGrid(input: GridInput): {
      * columns remain, so it never reads zero beside visible rows.
      */
     const rowTotal =
-      activityStatusColumns.length > 0 ? activityStatusTotal : statusTotal;
+      activityStatusColumns.length > 0
+        ? activityStatusTotal + otherStatusTotal
+        : statusTotal;
     perRow.push(rowTotal);
 
     if (showTotals) {
@@ -765,10 +772,12 @@ export function buildActivityGrid(input: GridInput): {
               row.push(activityCount(rep.activities, column));
             }
             let statusTotal = 0;
+            let otherStatusTotal = 0;
             for (const column of statusColumns) {
               const count = rep.statuses[column.status] ?? 0;
               row.push(count);
               statusTotal += count;
+              if (column.status === OTHER_INACTIVE_STATUS) otherStatusTotal = count;
             }
             let activityStatusTotal = 0;
             for (const column of activityStatusColumns) {
@@ -779,7 +788,7 @@ export function buildActivityGrid(input: GridInput): {
             }
             row.push(
               activityStatusColumns.length > 0
-                ? activityStatusTotal
+                ? activityStatusTotal + otherStatusTotal
                 : statusTotal,
             );
             return row;

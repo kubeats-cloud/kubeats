@@ -143,7 +143,6 @@ export function CustomisableGrid({
         ? [
             ...columns.closed.map((c) => `status:${c.status}`),
             ...columns.open.map((c) => `status:${c.status}`),
-            ...(unsetColumn ? [`status:${unsetColumn.status}`] : []),
           ]
         : [],
     [columns, unsetColumn, showActivityStatuses],

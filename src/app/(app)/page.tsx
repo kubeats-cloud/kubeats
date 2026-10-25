@@ -142,6 +142,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
                 dir: first(searchParams.repDir),
               },
               catalogue: loaded,
+              groupInactiveStatuses: true,
             }),
             null,
             "dashboard:activity-report",
@@ -366,6 +367,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
                         */
                         totalsReps={activityReport.model.reps}
                         columns={activityReport.model.columns}
+                        unsetColumn={activityReport.model.otherStatusColumn}
                         showActivities={false}
                         showActivityStatuses
                         linkReps
