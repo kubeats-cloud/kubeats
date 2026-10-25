@@ -255,6 +255,7 @@ export interface TeamVisitPage {
 export async function listTeamVisits(
   filters: VisitFilters = {},
   requestedPage = 1,
+  pageSize = REVIEW_PAGE_SIZE,
 ): Promise<({ ok: true } & TeamVisitPage) | { ok: false }> {
   const supabase = await createClient();
 
@@ -284,8 +285,8 @@ export async function listTeamVisits(
    * disagree about where a page starts. `.range()` is inclusive at both ends.
    */
   const windowFor = (page: number) => {
-    const from = (page - 1) * REVIEW_PAGE_SIZE;
-    return { from, to: from + REVIEW_PAGE_SIZE - 1 };
+    const from = (page - 1) * pageSize;
+    return { from, to: from + pageSize - 1 };
   };
 
   const page = Number.isFinite(requestedPage) && requestedPage >= 1
@@ -381,7 +382,7 @@ export async function listTeamVisits(
   }
 
   const total = counted.count ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / REVIEW_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const resolvedPage = Math.min(page, pageCount);
 
   /*
@@ -394,7 +395,7 @@ export async function listTeamVisits(
       visits: [],
       total: 0,
       page: 1,
-      pageSize: REVIEW_PAGE_SIZE,
+      pageSize,
       pageCount: 1,
     };
   }
@@ -416,7 +417,7 @@ export async function listTeamVisits(
     ok: true,
     total,
     page: resolvedPage,
-    pageSize: REVIEW_PAGE_SIZE,
+    pageSize,
     pageCount,
     visits: rows.map((row) => ({
       id: row.id,

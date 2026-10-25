@@ -1,20 +1,6 @@
-import Link from "next/link";
 import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import type { CallReport } from "@/lib/call-reports";
-
-export function CallReports({reports}:{reports:CallReport[]}){
-  return <div className="mb-6 space-y-3">{reports.map(report=><Card key={report.id} className="gap-2 p-4">
-    <Badge variant="secondary">Call Report</Badge>
-    <p className="font-medium">{report.institutes?.name}</p>
-    <p className="text-muted-foreground text-sm">{report.profiles?.name} · {formatDateTime(report.reported_at)}</p>
-    <p className="text-sm">{report.status_set_to}</p>
-    {report.call_notes&&<p className="line-clamp-2 text-sm whitespace-pre-wrap">{report.call_notes}</p>}
-    <Button asChild variant="outline" className="w-fit"><Link href={`/review/${report.id}?kind=call`}>Open full Call Report</Link></Button>
-  </Card>)}</div>;
-}
 
 export function CallReportDetails({report}:{report:CallReport}){
   const entries:[string,string|number|null][]=[

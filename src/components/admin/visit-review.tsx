@@ -24,7 +24,7 @@ import {
 import { EmptyState } from "@/components/states";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import { ACTIVITIES } from "@/lib/validation/visit";
-import type { VisitRow } from "@/lib/admin-workspace";
+import type { ReviewRow } from "@/lib/review-feed";
 import { formatDate } from "@/lib/dates";
 import { useTableView } from "@/lib/table-view";
 import { ViewPicker } from "@/components/ui/view-picker";
@@ -85,6 +85,8 @@ const REVIEW_COLUMNS = [
 export function VisitReview({
   visits,
   total,
+  visitTotal,
+  callTotal,
   page,
   pageCount,
   reps,
@@ -92,8 +94,10 @@ export function VisitReview({
   statuses,
   pageSize,
 }: {
-  visits: VisitRow[];
+  visits: ReviewRow[];
   total: number;
+  visitTotal: number;
+  callTotal: number;
   /** 1-based, already clamped by the server to a page that exists. */
   page: number;
   pageCount: number;
@@ -126,6 +130,15 @@ export function VisitReview({
     startTransition(() => router.push(`/review?${search.toString()}`));
   }
 
+  function showCalls() {
+    const search = new URLSearchParams(params.toString());
+    search.delete("activity");
+    search.delete("lifecycle");
+    search.delete("page");
+    search.set("reported", "calls");
+    startTransition(() => router.push(`/review?${search.toString()}`));
+  }
+
   /** The same URL with a different page, every filter preserved. */
   function pageHref(next: number) {
     const search = new URLSearchParams(params.toString());
@@ -150,6 +163,16 @@ export function VisitReview({
   // against what actually arrived so a short last page reads correctly.
   const firstRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const lastRow = total === 0 ? 0 : firstRow + visits.length - 1;
+  const totalLabel =
+    visitTotal === 0 && callTotal > 0
+      ? `${total} call report${total === 1 ? "" : "s"}`
+      : callTotal === 0
+        ? `${total} visit${total === 1 ? "" : "s"}`
+        : `${total} report${total === 1 ? "" : "s"}`;
+  const breakdown =
+    visitTotal > 0 && callTotal > 0
+      ? ` · ${visitTotal} visit${visitTotal === 1 ? "" : "s"} · ${callTotal} call report${callTotal === 1 ? "" : "s"}`
+      : "";
 
   const activeCount = [
     "member",
@@ -220,6 +243,7 @@ export function VisitReview({
                     {a.label}
                   </SelectItem>
                 ))}
+                <SelectItem value="call">Call</SelectItem>
               </SelectContent>
             </Select>
           </Field>
@@ -254,6 +278,7 @@ export function VisitReview({
                 <SelectItem value={ALL}>Any</SelectItem>
                 <SelectItem value="reported">Filed</SelectItem>
                 <SelectItem value="unreported">Not filed</SelectItem>
+                <SelectItem value="calls">Call Reports</SelectItem>
               </SelectContent>
             </Select>
           </Field>
@@ -359,13 +384,21 @@ export function VisitReview({
                   which was honest about the cap and offered no way past it.
                 */}
                 {total === 0
-                  ? "No visits match these filters"
-                  : `Showing ${firstRow}–${lastRow} of ${total} visit${total === 1 ? "" : "s"}`}
+                  ? "No reports match these filters"
+                  : `Showing ${firstRow}–${lastRow} of ${totalLabel}${breakdown}`}
                 {pageCount > 1 && ` · page ${page} of ${pageCount}`}
               </>
             )}
           </p>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant={value("reported") === "calls" ? "default" : "outline"}
+              className="h-8"
+              onClick={showCalls}
+            >
+              Call Report Review
+            </Button>
             {activeCount > 0 && (
               <Button
                 type="button"
@@ -388,7 +421,7 @@ export function VisitReview({
       {visits.length === 0 ? (
         <EmptyState
           icon={SearchIcon}
-          title="No visits match those filters"
+          title="No reports match those filters"
           description="Widen the date range, or clear a filter to see the whole team's work."
         />
       ) : (
@@ -396,7 +429,7 @@ export function VisitReview({
           {/* Phone: cards ------------------------------------------------ */}
           <ul className="space-y-3 md:hidden">
             {visits.map((visit) => (
-              <li key={visit.id}>
+              <li key={`${visit.kind}-${visit.id}`}>
                 <Card className="p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -426,7 +459,7 @@ export function VisitReview({
                     )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Badge variant="secondary">Log Visit Report</Badge>
+                    <Badge variant="secondary">{visit.reportLabel}</Badge>
                     <Badge variant="secondary">{visit.activityLabel}</Badge>
                     {visit.lifecycle && (
                       <Badge
@@ -439,6 +472,22 @@ export function VisitReview({
                       {visit.reportedAt ? "Report filed" : "No report"}
                     </Badge>
                   </div>
+                  {visit.kind === "call" && (
+                    <>
+                      {visit.notes && (
+                        <p className="mt-3 line-clamp-3 text-sm whitespace-pre-wrap">
+                          {visit.notes}
+                        </p>
+                      )}
+                      <Link
+                        prefetch={false}
+                        href={visit.href}
+                        className="mt-2 inline-block text-sm font-medium underline underline-offset-4"
+                      >
+                        Open full Call Report
+                      </Link>
+                    </>
+                  )}
                   {/*
                     ONE LINE ON A PHONE, NOT TWO COLUMNS. Seven columns is the
                     ceiling on the desktop table and there is no room for either
@@ -473,10 +522,10 @@ export function VisitReview({
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm">
                 <caption className="sr-only">
-                  Every visit the team has logged, newest first. Status is where
-                  that visit left the institute; Follow-up and Status changed
-                  describe the institute as it stands now, so they repeat across
-                  a school&rsquo;s visits.
+                  Every report the team has submitted, newest first. Status is
+                  where that report left the institute; Follow-up and Status
+                  changed describe the institute as it stands now, so they repeat
+                  across a school&rsquo;s visits.
                 </caption>
                 <thead>
                   <tr className="border-border bg-secondary/40 text-muted-foreground border-b text-left">
@@ -519,7 +568,7 @@ export function VisitReview({
                 <tbody>
                   {visits.map((visit) => (
                     <tr
-                      key={visit.id}
+                      key={`${visit.kind}-${visit.id}`}
                       className="border-border hover:bg-accent/50 border-b align-middle transition-colors last:border-0"
                     >
                       <td className="px-5 py-2">
@@ -642,15 +691,31 @@ export function VisitReview({
                       )}
                       {view.shows("report") && (
                         <td className="px-5 py-3">
-                          <span className="mr-2 text-xs">Log Visit Report</span>
+                          <span className="mr-2 text-xs">{visit.reportLabel}</span>
                           <Badge variant={visit.reportedAt ? "success" : "neutral"}>
                             {visit.reportedAt ? "Filed" : "None"}
                           </Badge>
+                          {visit.kind === "call" && (
+                            <div className="mt-1 max-w-64">
+                              {visit.notes && (
+                                <p className="text-muted-foreground line-clamp-2 text-xs whitespace-pre-wrap">
+                                  {visit.notes}
+                                </p>
+                              )}
+                              <Link
+                                prefetch={false}
+                                href={visit.href}
+                                className="mt-1 inline-block text-xs font-medium underline underline-offset-4"
+                              >
+                                Open full Call Report
+                              </Link>
+                            </div>
+                          )}
                         </td>
                       )}
                       <td className="px-2 py-3">
                         <Link
-                          href={`/review/${visit.id}`}
+                          href={visit.href}
                           className="text-muted-foreground hover:text-foreground block"
                           aria-label={`Open the report for ${visit.instituteName}`}
                         >

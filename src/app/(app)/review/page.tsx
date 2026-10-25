@@ -2,12 +2,12 @@ import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
 import { VisitReview } from "@/components/admin/visit-review";
 import { requireStaff } from "@/lib/admin";
-import { listTeamVisits } from "@/lib/admin-workspace";
+import { listTeamVisits, REVIEW_PAGE_SIZE } from "@/lib/admin-workspace";
 import { listReps } from "@/lib/closing-report";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { listInstitutesForPicker } from "@/lib/visits";
 import { listCallReports } from "@/lib/call-reports";
-import { CallReports } from "@/components/admin/call-reports";
+import { mergeReviewFeed, reviewKinds } from "@/lib/review-feed";
 
 export const metadata = { title: "Review" };
 
@@ -71,8 +71,21 @@ export default async function ReviewPage(props: PageProps<"/review">) {
    */
   const requestedPage = Number.parseInt(first(searchParams.page) ?? "1", 10);
 
+  const kinds = reviewKinds(filters);
+  const emptyVisits = {
+    ok: true as const,
+    visits: [],
+    total: 0,
+    page: 1,
+    pageSize: REVIEW_PAGE_SIZE,
+    pageCount: 1,
+  };
+  const emptyCalls = { ok: true as const, reports: [], total: 0 };
+
   const [result, reps, institutes, catalogue, calls] = await Promise.all([
-    listTeamVisits(filters, Number.isFinite(requestedPage) ? requestedPage : 1),
+    kinds.visits
+      ? listTeamVisits(filters, 1, REVIEW_PAGE_SIZE)
+      : Promise.resolve(emptyVisits),
     listReps(),
     listInstitutesForPicker(),
     /*
@@ -87,8 +100,54 @@ export default async function ReviewPage(props: PageProps<"/review">) {
      * admin added last week has to be filterable this week.
      */
     listStatusCatalogue(),
-    listCallReports(filters),
+    kinds.calls
+      ? listCallReports(filters, REVIEW_PAGE_SIZE)
+      : Promise.resolve(emptyCalls),
   ]);
+
+  const failure = (
+    <>
+      <PageHeader
+        title="Review"
+        description="Call Reports and Log Visit Reports submitted by the team."
+      />
+      <ErrorState message="We could not load the team's reports just now. Please try again in a moment." />
+    </>
+  );
+
+  if (!result.ok || !calls.ok) return failure;
+
+  const combinedTotal = result.total + calls.total;
+  const combinedPageCount = Math.max(1, Math.ceil(combinedTotal / REVIEW_PAGE_SIZE));
+  const normalizedPage =
+    Number.isFinite(requestedPage) && requestedPage >= 1
+      ? Math.floor(requestedPage)
+      : 1;
+  const resolvedPage = Math.min(normalizedPage, combinedPageCount);
+  let visitCandidates = result.visits;
+  let callCandidates = calls.reports;
+
+  if (resolvedPage > 1) {
+    const limit = resolvedPage * REVIEW_PAGE_SIZE;
+    const [visitPage, callPage] = await Promise.all([
+      kinds.visits
+        ? listTeamVisits(filters, 1, limit)
+        : Promise.resolve(emptyVisits),
+      kinds.calls ? listCallReports(filters, limit) : Promise.resolve(emptyCalls),
+    ]);
+    if (!visitPage.ok || !callPage.ok) return failure;
+    visitCandidates = visitPage.visits;
+    callCandidates = callPage.reports;
+  }
+
+  const feed = mergeReviewFeed({
+    visits: visitCandidates,
+    calls: callCandidates,
+    visitTotal: result.total,
+    callTotal: calls.total,
+    requestedPage: resolvedPage,
+    pageSize: REVIEW_PAGE_SIZE,
+  });
 
   return (
     <>
@@ -97,25 +156,21 @@ export default async function ReviewPage(props: PageProps<"/review">) {
         description="Call Reports and Log Visit Reports submitted by the team."
       />
 
-      <CallReports reports={calls} />
-
-      {result.ok ? (
-        <VisitReview
-          visits={result.visits}
-          total={result.total}
-          page={result.page}
-          pageCount={result.pageCount}
-          reps={reps.map((r) => ({ id: r.id, name: r.name }))}
-          institutes={institutes.map((i) => ({ id: i.id, name: i.name }))}
-          statuses={catalogue.map((s) => ({
-            status: s.status,
-            isActive: s.isActive,
-          }))}
-          pageSize={result.pageSize}
-        />
-      ) : (
-        <ErrorState message="We could not load the team's visits just now. Please try again in a moment." />
-      )}
+      <VisitReview
+        visits={feed.rows}
+        total={feed.total}
+        visitTotal={feed.visitTotal}
+        callTotal={feed.callTotal}
+        page={feed.page}
+        pageCount={feed.pageCount}
+        reps={reps.map((r) => ({ id: r.id, name: r.name }))}
+        institutes={institutes.map((i) => ({ id: i.id, name: i.name }))}
+        statuses={catalogue.map((s) => ({
+          status: s.status,
+          isActive: s.isActive,
+        }))}
+        pageSize={feed.pageSize}
+      />
     </>
   );
 }
