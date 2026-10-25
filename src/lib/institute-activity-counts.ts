@@ -69,6 +69,16 @@ export interface InstituteStatusActivityRow {
   lastCheckoutArea: string | null;
 }
 
+export function inactiveStatusCount(
+  row: { totalVisits: number; byStatus: Record<string, number> },
+  statuses: readonly StatusColumn[],
+): number {
+  return (
+    row.totalVisits -
+    statuses.reduce((sum, status) => sum + (row.byStatus[status.status] ?? 0), 0)
+  );
+}
+
 /** One visit for the admin Excel export. */
 export interface StatusActivityVisit {
   institute: string;

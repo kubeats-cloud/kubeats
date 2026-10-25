@@ -552,4 +552,27 @@ describe("the institute-wise report lives on the Institutes tab", () => {
     expect(institutes).toContain("view=activity");
     expect(institutes).toContain("<InstituteStatusActivityTable");
   });
+
+  it("puts the Excel's Other / inactive status column after the statuses", () => {
+    const table = readFileSync(
+      fileURLToPath(
+        new URL(
+          "../../src/components/report/institute-status-activity-table.tsx",
+          import.meta.url,
+        ),
+      ),
+      "utf8",
+    );
+    const header = table.slice(table.indexOf("<thead"), table.indexOf("</thead>"));
+    expect(header).toContain("{OTHER_INACTIVE_STATUS_LABEL}");
+    expect(header.indexOf("{OTHER_INACTIVE_STATUS_LABEL}")).toBeGreaterThan(
+      header.indexOf("statuses.map((status) => ("),
+    );
+    expect(header.indexOf("{OTHER_INACTIVE_STATUS_LABEL}")).toBeLessThan(
+      header.indexOf('label="Follow-ups owned"'),
+    );
+    expect(table).toContain("3 + statuses.length + 3");
+    expect(table).toContain("inactiveStatusCount(row, statuses)");
+    expect(table).toContain("inactiveStatusCount(totals, statuses)");
+  });
 });

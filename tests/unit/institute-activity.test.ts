@@ -6,6 +6,7 @@ import {
 import {
   activityBucketFor,
   buildInstituteActivityRows,
+  inactiveStatusCount,
   isInstituteActivitySortKey,
   openClosedTotals,
   sortInstituteActivityRows,
@@ -663,5 +664,37 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
         "Delta School",
       ]);
     }
+  });
+});
+
+describe("the Other / inactive status column", () => {
+  const statuses = [
+    { status: "First meeting done", category: "open" as const, sortOrder: 1 },
+    { status: "RSVP received", category: "closed" as const, sortOrder: 2 },
+  ];
+
+  it("is total visits minus the active status columns", () => {
+    expect(
+      inactiveStatusCount(
+        {
+          totalVisits: 9,
+          byStatus: {
+            "First meeting done": 3,
+            "RSVP received": 2,
+            Retired: 1,
+          },
+        },
+        statuses,
+      ),
+    ).toBe(4);
+    expect(
+      inactiveStatusCount(
+        { totalVisits: 9, byStatus: { "First meeting done": 9 } },
+        statuses,
+      ),
+    ).toBe(0);
+    expect(
+      inactiveStatusCount({ totalVisits: 0, byStatus: {} }, statuses),
+    ).toBe(0);
   });
 });

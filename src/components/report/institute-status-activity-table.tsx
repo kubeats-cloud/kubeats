@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
-import type {
-  StatusColumn,
+import {
+  inactiveStatusCount,
+  type StatusColumn,
 } from "@/lib/institute-activity-counts";
 import type { PipelineRange } from "@/lib/validation/pipeline-report";
 import { instituteActivitySortHref } from "@/lib/institute-activity-links";
+import { OTHER_INACTIVE_STATUS_LABEL } from "@/lib/exports/activity-grid";
 
 /**
  * The Institute Activity table: one row per institute, one column per active
@@ -106,7 +108,7 @@ export function InstituteStatusActivityTable({
   basePath?: string;
   extraParams?: Record<string, string>;
 }) {
-  const columnCount = 2 + statuses.length + 3;
+  const columnCount = 3 + statuses.length + 3;
   return (
     <div className="border-border overflow-x-auto rounded-lg border">
       <table className="w-max min-w-full border-collapse text-sm">
@@ -140,6 +142,12 @@ export function InstituteStatusActivityTable({
                 extraParams={extraParams}
               />
             ))}
+            <th
+              scope="col"
+              className="bg-muted/60 text-muted-foreground sticky top-0 z-20 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+            >
+              {OTHER_INACTIVE_STATUS_LABEL}
+            </th>
             <SortHeader
               label="Follow-ups owned"
               sortKey="follow_ups_owned"
@@ -203,6 +211,9 @@ export function InstituteStatusActivityTable({
                   </td>
                 ))}
                 <td className="px-3 py-2 text-right tabular-nums">
+                  {inactiveStatusCount(row, statuses)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
                   {row.followUpsOwned}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
@@ -229,6 +240,9 @@ export function InstituteStatusActivityTable({
                 {totals.byStatus[status.status] ?? 0}
               </td>
             ))}
+            <td className="px-3 py-2 text-right tabular-nums">
+              {inactiveStatusCount(totals, statuses)}
+            </td>
             <td className="px-3 py-2 text-right tabular-nums">
               {totals.followUpsOwned}
             </td>
