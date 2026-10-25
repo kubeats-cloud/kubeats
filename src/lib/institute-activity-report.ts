@@ -153,9 +153,7 @@ export async function getInstituteActivityModel(query: InstituteActivityQuery = 
     return {ok: false, error: error?.message ?? 'We could not load activity. Check the audit query migration is installed.'};
   }
   const result = data as SqlRepResult;
-  // Decoration is bounded to <=100 points on a 50-institute page, not the log.
-  // An all-rows export never reads the area columns, so it skips the lookup.
-  const areas = allRows ? new Map<string,string>() : await areasFor(result.rows.flatMap((row) => [
+  const areas = await areasFor(result.rows.flatMap((row) => [
     {latitude: row.checkinLat, longitude: row.checkinLng},
     {latitude: row.checkoutLat, longitude: row.checkoutLng},
   ]));
