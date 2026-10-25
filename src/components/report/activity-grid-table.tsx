@@ -157,7 +157,7 @@ export function ActivityGridTable({
   return (
     <div
       className={cn(
-        "border-border bg-card overflow-x-auto rounded-lg border",
+        "border-border bg-card max-w-full overflow-x-auto rounded-lg border",
         compact && "max-h-[22rem] overflow-y-auto",
       )}
     >

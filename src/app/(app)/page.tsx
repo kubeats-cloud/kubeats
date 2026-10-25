@@ -320,8 +320,8 @@ export default async function DashboardPage(props: PageProps<"/">) {
             Go to. There was no rep-wise report on this page at aef8213 to keep;
             the old "Pipeline by rep" grid it replaced is gone, not hidden.
           */}
-          <div className="mt-8">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-8 min-w-0 max-w-full">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
               <SectionTitle className="mb-0">Rep activity report</SectionTitle>
               {activityReport?.ok && repRange && (
                 <ExportExcel

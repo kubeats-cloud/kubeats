@@ -66,7 +66,7 @@ export function AdminOverview({
   return (
     <>
       <SectionTitle>Today and this week</SectionTitle>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-4">
         {/*
           ONE TILE, THREE FACTS — and still the fourth of four, because the row
           is `grid-cols-2 md:grid-cols-4` and a fifth tile would break it.
@@ -122,9 +122,9 @@ export function AdminOverview({
         <Stat icon={CameraIcon} value={data.photosThisWeek} label="Photos in" />
       </div>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:items-start">
+      <div className="mt-6 grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:items-start">
         {/* Recent activity ---------------------------------------------- */}
-        <div>
+        <div className="min-w-0">
           <SectionTitle
             action={
               <Button asChild variant="outline" className="h-9">
@@ -144,7 +144,10 @@ export function AdminOverview({
           ) : (
             <Card className="gap-0 divide-y divide-border p-0 shadow-xs">
               {data.recent.map((visit) => (
-                <div key={visit.id} className="flex items-center gap-3 px-4 py-3">
+                <div
+                  key={visit.id}
+                  className="grid min-w-0 grid-cols-[4rem_minmax(0,1fr)] items-center gap-3 px-4 py-3 sm:grid-cols-[4rem_minmax(0,1fr)_auto]"
+                >
                   {visit.photo ? (
                     <VisitPhotoThumb
                       photo={visit.photo}
@@ -156,7 +159,7 @@ export function AdminOverview({
                   <div className="min-w-0 flex-1">
                     <Link prefetch={false}
                       href={`/review/${visit.id}`}
-                      className="truncate font-medium hover:underline"
+                      className="block truncate font-medium hover:underline"
                     >
                       {visit.instituteName}
                     </Link>
@@ -172,7 +175,7 @@ export function AdminOverview({
                   </div>
                   <Badge
                     variant={visit.reportedAt ? "success" : "neutral"}
-                    className="shrink-0"
+                    className="col-start-2 w-fit max-w-full sm:col-start-3 sm:row-start-1"
                   >
                     {visit.reportedAt ? "Filed" : "No report"}
                   </Badge>
@@ -183,7 +186,7 @@ export function AdminOverview({
         </div>
 
         {/* Side rail ----------------------------------------------------- */}
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <div>
             <SectionTitle>Out today</SectionTitle>
             {data.activeToday.length === 0 ? (
@@ -331,7 +334,7 @@ function Stat({
     </>
   );
 
-  if (!href) return <Card className="gap-0 p-4">{body}</Card>;
+  if (!href) return <Card className="min-w-0 gap-0 overflow-hidden p-4">{body}</Card>;
 
   /*
    * THE WHOLE TILE IS THE TARGET, not the number inside it.
@@ -343,10 +346,10 @@ function Stat({
    * makes in the other direction for its dense little counts.
    */
   return (
-    <Card className="gap-0 p-0">
+    <Card className="min-w-0 gap-0 overflow-hidden p-0">
       <Link prefetch={false}
         href={href}
-        className="hover:bg-accent/40 focus-visible:ring-ring block rounded-xl p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        className="hover:bg-accent/40 focus-visible:ring-ring block min-w-0 rounded-xl p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
       >
         {body}
       </Link>

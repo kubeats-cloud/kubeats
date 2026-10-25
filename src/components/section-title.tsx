@@ -17,9 +17,9 @@ export function SectionTitle({
 }) {
   return (
     <div
-      className={cn("mb-3 flex items-end justify-between gap-3 md:mb-4", className)}
+      className={cn("mb-3 flex min-w-0 items-end justify-between gap-3 md:mb-4", className)}
     >
-      <h2 className="flex items-center gap-2.5 text-[15px] font-semibold tracking-tight md:text-base">
+      <h2 className="flex min-w-0 items-center gap-2.5 text-[15px] font-semibold tracking-tight md:text-base">
         {/* A small flame tick — brand as punctuation, not as background. */}
         <span aria-hidden className="brand-rule h-4 w-1 shrink-0 rounded-full" />
         {children}

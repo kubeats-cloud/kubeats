@@ -178,8 +178,8 @@ export function CustomisableGrid({
 
   return (
     <>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-muted-foreground text-xs">{heading}</p>
+      <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <p className="text-muted-foreground min-w-0 text-xs break-words">{heading}</p>
         <ViewPicker
           view={view}
           groups={groups}
