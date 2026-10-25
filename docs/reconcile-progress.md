@@ -59,3 +59,9 @@ Assessment (from code inspection, not commit messages):
 | 0 | DONE | — | branch/worktree/hash table above; ancestor exit 0 |
 | 1 | DONE (no picks needed) | 6a01c87 | six originals only on codex/client-changes-live-verification; equivalents already in 1bcade4..HEAD |
 | 1.5 | DONE | 3372ef2 | `npm run lint` exit 0 (0 errors, 1 warning); `npm run typecheck` exit 0; `npm test` exit 0, 80 files passed / 1 skipped, 1390 tests passed / 155 skipped, 0 failed |
+| 2a | DONE | 2831a59 + c041f28 | admin RPC: visitCount 785, visit rows 785, 0 payloads missing nextActionDate/totalFollowUps/openFollowUps; sums 163 total / 159 open equal direct SQL counts |
+| 2b | PARTIAL | 00526a6 + 2831a59 | rep route uses the visit-level sheet shared with admin; UI control and exact UI message present; SQL/route RLS proof in 3.4 |
+| 2c | PARTIAL | b45e736 + 9e8ac48 | Overview Rep activity report wired to the shared grid; rendered/Excel headers to be shown in 3.2 and 3.5 |
+| 2d | DONE | c041f28 | Other/inactive column added after the status block; unit test for three filters proves status columns + Other = visit rows; 11 tests pass, tsc 0 |
+| 2e | PARTIAL | 6a01c87 | 400 px classes committed (min-w-0, truncate, internal scroller); measurement at 400 px in 3.5 |
+| 2f | DONE | 2831a59 (0060) | 0060 already applied at start; DOWN 117 ms -> BEFORE listing; UP 71 ms; DOWN 188 ms; diff BEFORE vs after-DOWN exit 0; re-UP 70 ms identical schema; 717 institutes / 785 visits unchanged |
