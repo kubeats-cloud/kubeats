@@ -641,4 +641,27 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
     expect(total.slice(statusStart, statusStart + 3)).toEqual([1, 1, 0]);
     expect(total.slice(-3)).toEqual([null, null, 1]);
   });
+
+  it("orders rows by check-in time, then institute name, every time", () => {
+    const visit = (institute: string, checkinAt: string | null) => ({
+      ...visits[0],
+      institute,
+      checkinAt,
+    });
+    const input = [
+      visit("Gamma School", "2026-10-03T05:00:00.000Z"),
+      visit("Beta School", "2026-10-01T05:00:00.000Z"),
+      visit("Alpha School", "2026-10-01T05:00:00.000Z"),
+      visit("Delta School", null),
+    ];
+    for (const rows of [input, [...input].reverse()]) {
+      const sheet = statusActivitySheetRows(statuses, rows);
+      expect(sheet.slice(1, -1).map((row) => row[0])).toEqual([
+        "Alpha School",
+        "Beta School",
+        "Gamma School",
+        "Delta School",
+      ]);
+    }
+  });
 });

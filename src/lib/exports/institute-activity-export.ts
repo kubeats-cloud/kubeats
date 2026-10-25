@@ -130,6 +130,15 @@ export function statusActivitySheetRows(
   const activeStatuses = new Set(statuses.map((status) => status.status));
   const isOther = (visit: StatusActivityVisit) =>
     !visit.status || !activeStatuses.has(visit.status);
+  const ordered = [...visits].sort((a, b) => {
+    if (a.checkinAt !== b.checkinAt) {
+      if (a.checkinAt === null) return 1;
+      if (b.checkinAt === null) return -1;
+      const byCheckin = Date.parse(a.checkinAt) - Date.parse(b.checkinAt);
+      if (byCheckin !== 0) return byCheckin;
+    }
+    return a.institute < b.institute ? -1 : a.institute > b.institute ? 1 : 0;
+  });
   const header: CellValue[] = [
     ...VISIT_HEADERS,
     ...statuses.map((status) => status.status),
@@ -137,7 +146,7 @@ export function statusActivitySheetRows(
     ...FOLLOW_UP_HEADERS,
   ];
 
-  const body = visits.map((visit) => [
+  const body = ordered.map((visit) => [
     visit.institute,
     visit.member ?? null,
     activityLabel(visit.activity),
@@ -164,15 +173,15 @@ export function statusActivitySheetRows(
   const total: CellValue[] = [
     "Total",
     ...Array<CellValue>(VISIT_HEADERS.length - 3).fill(null),
-    visits.reduce((sum, visit) => sum + (visit.totalFollowUps ?? 0), 0),
-    visits.reduce((sum, visit) => sum + (visit.openFollowUps ?? 0), 0),
+    ordered.reduce((sum, visit) => sum + (visit.totalFollowUps ?? 0), 0),
+    ordered.reduce((sum, visit) => sum + (visit.openFollowUps ?? 0), 0),
     ...statuses.map(
-      (status) => visits.filter((visit) => visit.status === status.status).length,
+      (status) => ordered.filter((visit) => visit.status === status.status).length,
     ),
-    visits.filter(isOther).length,
+    ordered.filter(isOther).length,
     null,
     null,
-    visits.filter((visit) => visit.followUpCreated).length,
+    ordered.filter((visit) => visit.followUpCreated).length,
   ];
 
   return [header, ...body, total];
