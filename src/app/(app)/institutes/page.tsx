@@ -10,6 +10,7 @@ import {
 import { RepInstituteSearch } from "@/components/report/rep-institute-search";
 import { RangeControls } from "@/components/report/range-controls";
 import { DownloadActivity } from "@/components/report/download-activity";
+import { DownloadButton } from "@/components/report/export-excel";
 import { getRegistryPage } from '@/lib/registry-page';
 import { auditHref } from '@/lib/audit-pagination';
 import {
@@ -254,9 +255,9 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
                   {exportProblem}
                 </p>
               ) : (
-                <a
-                  download
-                  className="my-3 inline-flex min-h-11 items-center rounded-md border px-4"
+                <DownloadButton
+                  variant="outline"
+                  className="my-3 h-11"
                   href={instituteActivityExportHref({
                     range: activityResult.model.range,
                     sortKey: activityResult.model.sort.key,
@@ -267,7 +268,7 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
                   })}
                 >
                   Download Excel
-                </a>
+                </DownloadButton>
               )}
               <ActivityPages
                 model={activityResult.model}

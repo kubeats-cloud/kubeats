@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import { FileSpreadsheetIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,52 @@ import { Card, CardContent } from "@/components/ui/card";
  * The date inputs are uncontrolled-with-state rather than a form: there is
  * nothing to submit, the href simply tracks what they say.
  */
+export function DownloadButton({
+  href,
+  children,
+  className,
+  variant,
+  disabled = false,
+}: {
+  href: string;
+  children: ReactNode;
+  className?: string;
+  variant?: ComponentProps<typeof Button>["variant"];
+  disabled?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+
+  function onClick(event: MouseEvent<HTMLAnchorElement>) {
+    if (disabled || busyRef.current) {
+      event.preventDefault();
+      return;
+    }
+    busyRef.current = true;
+    setBusy(true);
+    window.setTimeout(() => {
+      busyRef.current = false;
+      setBusy(false);
+    }, 4000);
+  }
+
+  return (
+    <Button asChild variant={variant} className={className}>
+      <a
+        href={disabled ? undefined : href}
+        download
+        aria-disabled={disabled || busy}
+        className={
+          disabled || busy ? "pointer-events-none opacity-50" : undefined
+        }
+        onClick={onClick}
+      >
+        {children}
+      </a>
+    </Button>
+  );
+}
+
 export function ExportExcel({
   start: initialStart,
   end: initialEnd,
@@ -124,12 +170,14 @@ export function ExportExcel({
           {/* `download` is a hint the same-origin endpoint already enforces with
               Content-Disposition; it is here so the filename survives a browser
               that would otherwise navigate. */}
-          <Button asChild className="h-11 flex-1" disabled={!valid}>
-            <a href={valid ? href : undefined} download>
-              <FileSpreadsheetIcon className="size-4" aria-hidden />
-              Download .xlsx
-            </a>
-          </Button>
+          <DownloadButton
+            href={href}
+            disabled={!valid}
+            className="h-11 flex-1"
+          >
+            <FileSpreadsheetIcon className="size-4" aria-hidden />
+            Download .xlsx
+          </DownloadButton>
           <Button
             type="button"
             variant="outline"

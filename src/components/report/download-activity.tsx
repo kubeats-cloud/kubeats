@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { repActivityExportRangeProblem } from "@/lib/validation/export";
+import { DownloadButton } from "@/components/report/export-excel";
 
 /**
  * "Download Activity (Excel)" on the rep's Institutes tab.
@@ -97,12 +98,10 @@ export function DownloadActivity({
         {problem && <p className="text-danger text-xs">{problem}</p>}
 
         <div className="flex gap-2">
-          <Button asChild className="h-11 flex-1" disabled={!valid}>
-            <a href={valid ? href : undefined} download>
-              <FileSpreadsheetIcon className="size-4" aria-hidden />
-              Download .xlsx
-            </a>
-          </Button>
+          <DownloadButton href={href} disabled={!valid} className="h-11 flex-1">
+            <FileSpreadsheetIcon className="size-4" aria-hidden />
+            Download .xlsx
+          </DownloadButton>
           <Button
             type="button"
             variant="outline"
