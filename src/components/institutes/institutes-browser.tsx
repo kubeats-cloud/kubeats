@@ -347,14 +347,14 @@ export function InstitutesBrowser({
 
   return (
     <div className="space-y-4">
-      <form action="/institutes" className="relative flex flex-wrap gap-2 md:max-w-lg">
+      <form action="/institutes" className="relative flex flex-col gap-2 min-[480px]:flex-row min-[480px]:items-center md:max-w-lg">
         <SearchIcon
-          className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          className="text-muted-foreground pointer-events-none absolute top-[22px] left-3 size-4 -translate-y-1/2"
           aria-hidden
         />
         <Input
           name="q"
-          className="h-11 pl-9"
+          className="h-11 pl-9 min-[480px]:flex-1"
           placeholder="Search by name, city or area"
           value={search}
           onChange={(e) => {
@@ -369,7 +369,7 @@ export function InstitutesBrowser({
           {Object.entries({status,state,city,area,type,owner:showOwner ? owner : undefined,board:boards.join('|')})
             .filter(([,value]) => value && value !== ALL)
             .map(([key,value]) => <input key={key} type="hidden" name={key} value={value} />)}
-          <button className="bg-primary text-primary-foreground min-h-11 rounded-md px-4">Apply</button>
+          <button className="bg-primary text-primary-foreground min-h-11 w-full rounded-md px-4 min-[480px]:w-auto">Apply</button>
         </>}
       </form>
 
