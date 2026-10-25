@@ -68,6 +68,9 @@ const VISIT_HEADERS: CellValue[] = [
   "Location",
   "Status",
   "Next action",
+  "Next action date",
+  "Total follow-ups",
+  "Open follow-ups",
 ];
 
 function durationOf(visit: StatusActivityVisit): string | null {
@@ -143,6 +146,9 @@ export function statusActivitySheetRows(
     visit.location ?? null,
     visit.status ?? null,
     nextActionLabel(visit.nextAction),
+    visit.nextActionDate ? formatDate(visit.nextActionDate) : null,
+    visit.totalFollowUps ?? 0,
+    visit.openFollowUps ?? 0,
     ...statuses.map((status) => (visit.status === status.status ? 1 : 0)),
     visit.followUpDate ? formatDate(visit.followUpDate) : null,
     visit.followUpTime ? formatClockTime(visit.followUpTime) : null,
@@ -151,7 +157,9 @@ export function statusActivitySheetRows(
 
   const total: CellValue[] = [
     "Total",
-    ...Array<CellValue>(VISIT_HEADERS.length - 1).fill(null),
+    ...Array<CellValue>(VISIT_HEADERS.length - 3).fill(null),
+    visits.reduce((sum, visit) => sum + (visit.totalFollowUps ?? 0), 0),
+    visits.reduce((sum, visit) => sum + (visit.openFollowUps ?? 0), 0),
     ...statuses.map(
       (status) => visits.filter((visit) => visit.status === status.status).length,
     ),
@@ -324,7 +332,7 @@ export async function buildInstituteActivityExport(
 
   const dataRows =
     query.view === "rep"
-      ? repInstituteSheetRows(result.model.rows)
+      ? statusActivitySheetRows(result.model.statuses, result.model.visits)
       : query.view === "presence"
         ? presenceSheetRows(result.model.rows)
         : instituteActivitySheetRows(

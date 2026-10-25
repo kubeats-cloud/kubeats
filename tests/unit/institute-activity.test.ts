@@ -519,6 +519,9 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
       date: "2026-10-01",
       status: "First meeting done",
       nextAction: "call",
+      nextActionDate: "2026-10-05",
+      totalFollowUps: 2,
+      openFollowUps: 1,
       checkinAt: "2026-10-01T05:00:00.000Z",
       checkoutAt: "2026-10-01T06:25:00.000Z",
       location: "Gandhinagar",
@@ -534,6 +537,9 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
       date: "2026-10-02",
       status: "RSVP received",
       nextAction: null,
+      nextActionDate: null,
+      totalFollowUps: 1,
+      openFollowUps: 0,
       checkinAt: null,
       checkoutAt: null,
       location: null,
@@ -546,7 +552,7 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
   it("writes one row per visit, a column per active status, and IST times", () => {
     const sheet = statusActivitySheetRows(statuses, visits);
     expect(sheet).toHaveLength(4); // header + two visits + Total
-    expect(sheet[0].slice(0, 13)).toEqual([
+    expect(sheet[0].slice(0, 16)).toEqual([
       "Institute",
       "Rep",
       "Activity",
@@ -560,6 +566,9 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
       "Location",
       "Status",
       "Next action",
+      "Next action date",
+      "Total follow-ups",
+      "Open follow-ups",
     ]);
     const statusStart = sheet[0].indexOf("First meeting done");
     expect(sheet[0].slice(statusStart, statusStart + 3)).toEqual([
@@ -616,6 +625,7 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
     expect(sheet[1][sheet[0].indexOf("Meeting purpose")]).toBeNull();
     expect(sheet[1][sheet[0].indexOf("Duration")]).toBeNull();
     expect(sheet[1][sheet[0].indexOf("Next action")]).toBeNull();
+    expect(sheet[1][sheet[0].indexOf("Next action date")]).toBe("5 Oct 2026");
   });
 
   it("sums the status and follow-up columns into the final Total row", () => {
@@ -623,7 +633,11 @@ describe("statusActivitySheetRows — the visit-level Institute Activity Excel",
     const total = sheet.at(-1)!;
     const statusStart = sheet[0].indexOf("First meeting done");
     expect(total[0]).toBe("Total");
-    expect(total.slice(1, statusStart)).toEqual(Array(statusStart - 1).fill(null));
+    expect(total.slice(1, sheet[0].indexOf("Total follow-ups"))).toEqual(
+      Array(sheet[0].indexOf("Total follow-ups") - 1).fill(null),
+    );
+    expect(total[sheet[0].indexOf("Total follow-ups")]).toBe(3);
+    expect(total[sheet[0].indexOf("Open follow-ups")]).toBe(1);
     expect(total.slice(statusStart, statusStart + 3)).toEqual([1, 1, 0]);
     expect(total.slice(-3)).toEqual([null, null, 1]);
   });

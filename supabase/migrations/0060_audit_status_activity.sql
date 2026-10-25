@@ -58,6 +58,14 @@ begin
         select institute_id,status_set_to,count(*) n
         from ranged_visits group by institute_id,status_set_to
       ) c group by institute_id
+    ), visit_followups as (
+      select from_visit_id,
+        count(*)::integer total_follow_ups,
+        count(*) filter (where done_at is null)::integer open_follow_ups,
+        min(due_date) filter (where done_at is null) next_action_date
+      from follow_up_tasks
+      where from_visit_id is not null
+      group by from_visit_id
     ), ranged_plans as materialized (
       select d.id,d.institute_id,d.date,d.meetings_actual,d.checkin_at,d.checkout_at,
         d.checkin_lat,d.checkin_lng,d.checkout_lat,d.checkout_lng
@@ -139,6 +147,9 @@ begin
         'date',rv.date,
         'status',rv.status_set_to,
         'nextAction',rv.next_action,
+        'nextActionDate',vf.next_action_date,
+        'totalFollowUps',coalesce(vf.total_follow_ups,0),
+        'openFollowUps',coalesce(vf.open_follow_ups,0),
         'checkinAt',rv.checkin_at,
         'checkoutAt',rv.checkout_at,
         'checkinLat',rv.checkin_lat,
@@ -150,6 +161,7 @@ begin
       ) payload,rv.date,rv.id
       from ranged_visits rv join registry r on r.id = rv.institute_id
         left join profiles p on p.id = rv.member
+        left join visit_followups vf on vf.from_visit_id = rv.id
     )
     select jsonb_build_object(
       'total',w.total,'pages',w.pages,'page',w.page,
@@ -320,6 +332,41 @@ begin
         case when coalesce(p_page,1) < 1 then 1 else least(pages,greatest(1,p_page)) end page,
         coalesce(p_page,1) < 1 all_rows
       from counts
+    ), visit_followups as (
+      select from_visit_id,
+        count(*)::integer total_follow_ups,
+        count(*) filter (where done_at is null)::integer open_follow_ups,
+        min(due_date) filter (where done_at is null) next_action_date
+      from follow_up_tasks
+      where from_visit_id is not null and member = v_me
+      group by from_visit_id
+    ), visit_payloads as (
+      select jsonb_build_object(
+        'institute',r.name,
+        'member',p.name,
+        'activity',v.activity,
+        'meetingPurpose',d.purpose,
+        'date',v.date,
+        'status',v.status_set_to,
+        'nextAction',v.next_action,
+        'nextActionDate',vf.next_action_date,
+        'totalFollowUps',coalesce(vf.total_follow_ups,0),
+        'openFollowUps',coalesce(vf.open_follow_ups,0),
+        'checkinAt',d.checkin_at,
+        'checkoutAt',d.checkout_at,
+        'checkinLat',d.checkin_lat,
+        'checkinLng',d.checkin_lng,
+        'followUpDate',v.follow_up_date,
+        'followUpTime',v.follow_up_time,
+        'followUpCreated',coalesce(vf.total_follow_ups,0) > 0
+      ) payload,v.date,v.id
+      from visits v join registry r on r.id = v.institute_id
+        left join daily_plans d on d.id = v.daily_plan_id
+        left join profiles p on p.id = v.member
+        left join visit_followups vf on vf.from_visit_id = v.id
+      where v.member = v_me
+        and (p_from is null or v.date >= p_from)
+        and (p_to is null or v.date <= p_to)
     )
     select jsonb_build_object(
       'total',w.total,'pages',w.pages,'page',w.page,
@@ -337,6 +384,10 @@ begin
         'totalActivities',tot.total_activities,'meetingsCompleted',tot.meetings_completed,
         'followUpsOwned',tot.follow_ups_owned,'followUpsPending',tot.follow_ups_pending,
         'totalVisits',tot.total_visits),
+      'visitCount',case when w.all_rows then (select count(*) from visit_payloads) else null end,
+      'visits',case when w.all_rows then (
+        select coalesce(jsonb_agg(vp.payload order by vp.date,vp.id),'[]'::jsonb)
+        from visit_payloads vp) else '[]'::jsonb end,
       'rows',coalesce((select jsonb_agg(n.payload order by n.position) from numbered n
         where w.all_rows or (n.position > (w.page-1)*50 and n.position <= w.page*50)),'[]'::jsonb)
     )

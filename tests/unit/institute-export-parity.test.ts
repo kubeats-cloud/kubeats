@@ -37,10 +37,12 @@ const statuses = [
 const visits = [
   {institute:'Synthetic Institute',member:'Synthetic Rep',activity:'meeting',
     meetingPurpose:'First meeting',date:'2026-10-01',status:'First meeting done',nextAction:'call',
+    nextActionDate:'2026-10-05',totalFollowUps:2,openFollowUps:1,
     checkinAt:'2026-10-01T05:00:00.000Z',checkoutAt:'2026-10-01T06:25:00.000Z',location:'Synthetic Area',
     followUpDate:'2026-10-05',followUpTime:'09:30:00',followUpCreated:true},
   {institute:'Synthetic Institute',member:'Synthetic Rep',activity:'meeting',
     meetingPurpose:null,date:'2026-10-02',status:'RSVP received',nextAction:null,
+    nextActionDate:null,totalFollowUps:1,openFollowUps:0,
     checkinAt:null,checkoutAt:null,location:null,
     followUpDate:null,followUpTime:null,followUpCreated:false},
 ];
@@ -66,6 +68,7 @@ describe('visit-level export shape and parity',() => {
       'First meeting','1 Oct 2026','1 Oct 2026','10:30','1 Oct 2026','11:55','1h 25m',
       'Synthetic Area','First meeting done','Call',
     ]);
+    expect(sheet[1].slice(13,16)).toEqual(['5 Oct 2026',2,1]);
   });
   it('asks the admin model for every matching visit and writes its exact sheet',async () => {
     exportMocks.statusModel.mockResolvedValue({ok:true,model:{rows:[],statuses,range:{from:'2026-10-01',to:'2026-10-02'},
@@ -76,7 +79,9 @@ describe('visit-level export shape and parity',() => {
     expect(exportMocks.statusModel).toHaveBeenCalledWith(expect.objectContaining({allRows:true,page:undefined}));
     const sheet = exportMocks.book.mock.calls[0][0] as {rows:unknown[][]};
     expect(sheet.rows).toHaveLength(visits.length+2);
-    expect(sheet.rows.at(-1)).toEqual(['Total',...Array(12).fill(null),1,1,null,null,1]);
+    expect(sheet.rows.at(-1)).toEqual([
+      'Total',...Array(13).fill(null),3,1,1,1,null,null,1,
+    ]);
   });
   it('matches the rep consolidated table columns and totals',() => {
     const sheet = repInstituteSheetRows(rows);
@@ -98,6 +103,17 @@ describe('visit-level export shape and parity',() => {
     const result = await buildInstituteActivityExport({view:'presence',range:{from:'2026-10-01',to:'2026-10-02'},page:'2'});
     expect(result.ok).toBe(true);
     expect(exportMocks.model).toHaveBeenCalledWith(expect.objectContaining({allRows:true,page:undefined}));
+  });
+  it('uses the identical visit-level grid for a rep export',async () => {
+    exportMocks.model.mockResolvedValue({ok:true,model:{rows,statuses,visits,visitCount:2,
+      range:{from:'2026-10-01',to:'2026-10-02'},rangeActive:true,
+      sort:{key:'institute',dir:'asc'},totalInstitutes:1,reconciliationFailed:false,
+      page:1,pages:1,totals:{byActivity:sqlTotals,totalActivities:2,meetingsCompleted:2,
+        followUpsOwned:1,followUpsPending:1,totalVisits:2}}});
+    const result = await buildInstituteActivityExport({view:'rep',range:{from:'2026-10-01',to:'2026-10-02'}});
+    expect(result.ok).toBe(true);
+    const sheet = exportMocks.book.mock.calls[0][0] as {rows:unknown[][]};
+    expect(sheet.rows).toEqual(statusActivitySheetRows(statuses,visits));
   });
   it('preserves every filter in export URLs; page is not part of the file',() => {
     const href = instituteActivityExportHref({range:{from:'2026-10-01',to:'2026-10-23'},sortKey:'status:RSVP received',sortDir:'desc',search:'Synthetic',member:'rep-id',campus:'campus-id'});

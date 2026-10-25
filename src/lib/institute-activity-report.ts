@@ -37,6 +37,10 @@ export interface InstituteActivityModel {
   totals: InstituteActivityTotals;
   page: number;
   pages: number;
+  /** Export-only visit payload returned by the rep-scoped SQL RPC. */
+  visits: StatusActivityVisit[];
+  statuses: StatusColumn[];
+  visitCount: number;
 }
 /**
  * The rep report reads its own RPC. It takes NO member id: the function derives
@@ -91,6 +95,17 @@ interface SqlTotals {
   totalActivities: number; meetingsCompleted: number;
   followUpsOwned: number; followUpsPending: number; totalVisits: number;
 }
+interface SqlRepResult {
+  rows: SqlRow[];
+  statuses?: StatusColumn[];
+  visits?: SqlStatusVisit[];
+  visitCount?: number | null;
+  total: number;
+  page: number;
+  pages: number;
+  reconciliationFailed: boolean;
+  totals: SqlTotals;
+}
 interface SqlStatusRow extends Omit<InstituteStatusActivityRow, 'lastCheckinArea' | 'lastCheckoutArea'> {
   checkinLat: number | null; checkinLng: number | null;
   checkoutLat: number | null; checkoutLng: number | null;
@@ -137,8 +152,7 @@ export async function getInstituteActivityModel(query: InstituteActivityQuery = 
     logError('institute-activity:rep-sql', error ?? 'Missing aggregate');
     return {ok: false, error: error?.message ?? 'We could not load activity. Check the audit query migration is installed.'};
   }
-  const result = data as {rows: SqlRow[]; total: number; page: number; pages: number;
-    reconciliationFailed: boolean; totals: SqlTotals};
+  const result = data as SqlRepResult;
   // Decoration is bounded to <=100 points on a 50-institute page, not the log.
   // An all-rows export never reads the area columns, so it skips the lookup.
   const areas = allRows ? new Map<string,string>() : await areasFor(result.rows.flatMap((row) => [
@@ -150,12 +164,24 @@ export async function getInstituteActivityModel(query: InstituteActivityQuery = 
   const rows = result.rows.map(({checkinLat,checkinLng,checkoutLat,checkoutLng,...row}) => ({
     ...row, lastCheckinArea: areaAt(checkinLat,checkinLng), lastCheckoutArea: areaAt(checkoutLat,checkoutLng),
   }));
+  const visitAreas = allRows ? await areasFor((result.visits ?? []).map((visit) => ({
+    latitude: visit.checkinLat,
+    longitude: visit.checkinLng,
+  }))) : new Map<string,string>();
+  const visitAreaAt = (lat: number | null, lng: number | null) =>
+    lat === null || lng === null ? null : visitAreas.get(cellFor(lat,lng)) ?? null;
+  const visits = (result.visits ?? []).map(({checkinLat,checkinLng,...visit}) => ({
+    ...visit,
+    location: visitAreaAt(checkinLat,checkinLng),
+  }));
   const {meeting,session,campus_visit,olympiad,application,admission,
     totalActivities,meetingsCompleted,followUpsOwned,followUpsPending,totalVisits} = result.totals;
   return {ok: true, model: {rows,range,sort,rangeActive: rangeIsActive(range),
     totals: {byActivity: {meeting,session,campus_visit,olympiad,application,admission},
       totalActivities,meetingsCompleted,followUpsOwned,followUpsPending,totalVisits},
-    totalInstitutes: result.total, page: result.page, pages: result.pages, reconciliationFailed: result.reconciliationFailed}};
+    totalInstitutes: result.total, page: result.page, pages: result.pages,
+    reconciliationFailed: result.reconciliationFailed,
+    visits, statuses: result.statuses ?? [], visitCount: result.visitCount ?? visits.length}};
 }
 
 /**

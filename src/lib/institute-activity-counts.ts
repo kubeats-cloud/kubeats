@@ -80,6 +80,12 @@ export interface StatusActivityVisit {
   status: string | null;
   /** `visits.next_action`, as filed: "call", "meeting", or none. */
   nextAction: string | null;
+  /** Earliest still-open task date created from this visit. */
+  nextActionDate?: string | null;
+  /** All follow-up tasks created from this visit, including completed tasks. */
+  totalFollowUps?: number;
+  /** Follow-up tasks created from this visit whose `done_at` is still null. */
+  openFollowUps?: number;
   checkinAt: string | null;
   checkoutAt: string | null;
   location: string | null;
