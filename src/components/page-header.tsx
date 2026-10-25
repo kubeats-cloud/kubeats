@@ -27,7 +27,7 @@ export function PageHeader({
           {eyebrow}
         </p>
       )}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <h1 className="text-[22px] leading-tight font-semibold tracking-tight text-balance md:text-[28px]">
           {title}
         </h1>
