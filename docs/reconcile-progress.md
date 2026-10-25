@@ -58,3 +58,4 @@ Assessment (from code inspection, not commit messages):
 | --- | --- | --- | --- |
 | 0 | DONE | — | branch/worktree/hash table above; ancestor exit 0 |
 | 1 | DONE (no picks needed) | 6a01c87 | six originals only on codex/client-changes-live-verification; equivalents already in 1bcade4..HEAD |
+| 1.5 | DONE | 3372ef2 | `npm run lint` exit 0 (0 errors, 1 warning); `npm run typecheck` exit 0; `npm test` exit 0, 80 files passed / 1 skipped, 1390 tests passed / 155 skipped, 0 failed |
