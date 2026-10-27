@@ -7397,14 +7397,20 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     /**
-     * (d) A rep under a lead on another campus is a rep whose institutes their
-     * lead cannot see: institutes are campus-scoped, so the team would be
-     * visible in the roster and invisible in the work.
+     * (d) is GONE (0053) — the client's spec asks for a rep and their team
+     * lead to be pairable regardless of campus. Supervision was never
+     * campus-based to begin with (0042: `supervises()` reads the link, not
+     * `my_campus()`), so a cross-campus pair sees exactly what any other
+     * pair does — this just proves the link itself no longer refuses one.
      */
-    it("refuses a rep and a lead on different campuses", async () => {
+    it("allows a rep and a lead on different campuses", async () => {
       const elsewhere = await makeMember("rep", "tl-rep-elsewhere", campusB);
       const { error } = await link(elsewhere.id, leadA.id);
-      expect(error?.code).toBe("FO033");
+      expect(error, error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("profiles").select("team_lead_id").eq("id", elsewhere.id).single();
+      expect(data?.team_lead_id).toBe(leadA.id);
     });
 
     /* ---- FO033 (e): who may write it -------------------------------- */
@@ -8481,20 +8487,23 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(await leadOf(repSpare.id)).toBeNull();
     });
 
-    /** The same-campus rule, from the layer the app reads. */
-    it("refuses a rep and a lead on different campuses", async () => {
-      const mine = await assign(leadP, repFar.id, leadP.id);
-      expect(mine.error?.code).toBe("FO034");
-      expect(mine.error?.message).toMatch(/same campus/i);
+    /**
+     * The same-campus rule is GONE (0053) — the client's spec asks for a rep
+     * and their team lead to be pairable regardless of campus, by either the
+     * lead taking them on or an admin placing them anywhere.
+     *
+     * Ends with repFar back on leadFar, which is the same final state the
+     * pre-0053 version of this test left behind — "leaves no cross-team
+     * sight open after the reassignments" below depends on repFar not being
+     * on leadP's team, and that has nothing to do with campus.
+     */
+    it("lets a rep and a lead on different campuses be paired", async () => {
+      const byLead = await assign(leadP, repFar.id, leadP.id);
+      expect(byLead.error, byLead.error?.message).toBeNull();
+      expect(await leadOf(repFar.id)).toBe(leadP.id);
 
-      const byAdmin = await assign(boss, repFar.id, leadP.id);
-      expect(byAdmin.error?.code, "an admin bypassed the campus rule").toBe("FO034");
-      expect(await leadOf(repFar.id)).toBeNull();
-
-      // On their own campus it works, which is what makes the refusal a rule
-      // rather than a block.
-      const right = await assign(boss, repFar.id, leadFar.id);
-      expect(right.error, right.error?.message).toBeNull();
+      const byAdmin = await assign(boss, repFar.id, leadFar.id);
+      expect(byAdmin.error, byAdmin.error?.message).toBeNull();
       expect(await leadOf(repFar.id)).toBe(leadFar.id);
     });
 
@@ -8516,12 +8525,13 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     /* ---- the campus trap the plan flagged ----------------------------- */
 
     /**
-     * ⚠ FO033 HOLDS "A REP AND THEIR LEAD SHARE ONE CAMPUS" FROM THE REP'S SIDE
-     * and fires on the rep's row. Moving the LEAD'S campus is the other half of
-     * the same rule and no trigger on profiles can see it: their UPDATE touches
-     * only their own row, which satisfies every check on it, and the whole team
-     * is left pointing at a lead who now works somewhere else — visible in the
-     * roster and invisible in the work, because institutes are campus-scoped.
+     * `correct_member_campus()` (0035) is untouched by 0053: it still refuses
+     * to move a team LEAD while they have reps, independently of whatever
+     * campus those reps are on. Before 0053 that refusal doubled as the only
+     * way the rep-side same-campus rule could have been broken from the
+     * lead's own row; FO033 no longer holds that rule at all, but this guard
+     * was never only about campus — moving a lead out from under their team
+     * with one UPDATE to their own row is still the thing being refused here.
      */
     it("refuses moving a team lead who still has reps, and says how many", async () => {
       // leadP currently has repP.

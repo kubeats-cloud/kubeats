@@ -213,9 +213,9 @@ export const memberCreatorSchema = z
  * what lets one control both assign and unassign. `assign_rep_to_team()` reads
  * a null second argument the same way.
  *
- * No same-campus check here: that is a fact about two rows the form does not
- * hold, and FO033 plus FO034 both refuse it with a sentence naming the campus.
- * A form cannot usefully pre-empt a rule it cannot evaluate.
+ * No campus check here, and none in FO033 or FO034 either (0053) — a rep and
+ * their team lead no longer have to share a campus, so there is nothing left
+ * for a form to pre-empt on that front.
  */
 export const teamAssignmentSchema = z
   .object({

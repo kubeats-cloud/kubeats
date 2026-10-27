@@ -46,9 +46,13 @@ export function TeamStructure({
   const reps = members.filter((m) => m.role === "rep");
   const unassigned = reps.filter((m) => !m.teamLeadId);
 
-  /** A rep's lead must be on their campus — FO033 and FO034 both refuse otherwise. */
-  const leadsFor = (rep: TeamMember) =>
-    leads.filter((l) => l.campusId === rep.campusId);
+  /*
+   * Every lead is offered to every rep, regardless of campus (0053). FO033
+   * and FO034 used to refuse a cross-campus pairing, so this picker used to
+   * filter `leads` down to the rep's own campus; the client's spec asks for
+   * cross-campus teams, so both the SQL check and this filter are gone
+   * together — `leads` itself is now the whole list, used directly below.
+   */
 
   const RepRow = ({ rep }: { rep: TeamMember }) => (
     <li className="border-border flex flex-col gap-2 border-t px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -76,9 +80,9 @@ export function TeamStructure({
             form, which is what lets this be ONE control for assign AND release
             with no client state at all — "" is the release, as the schema says.
 
-            Only leads on the REP'S OWN CAMPUS are offered, because FO033 and
-            FO034 both refuse the rest and a picker that lists an option the
-            database will reject is a picker that teaches people to distrust it.
+            Every lead is offered, regardless of campus (0053) — FO033 and
+            FO034 no longer refuse a cross-campus pairing, so there is no
+            option here the database would reject.
           */}
           <select
             id={`lead-${rep.id}`}
@@ -87,7 +91,7 @@ export function TeamStructure({
             className="border-input bg-background h-9 rounded-md border px-2 text-sm"
           >
             <option value="">— no team —</option>
-            {leadsFor(rep).map((lead) => (
+            {leads.map((lead) => (
               <option key={lead.id} value={lead.id}>
                 {lead.name}
               </option>
