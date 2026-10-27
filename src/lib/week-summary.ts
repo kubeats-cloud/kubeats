@@ -214,6 +214,51 @@ export interface TeamMemberWeek {
   achieved: MetricCounts;
 }
 
+interface RepProfileRow {
+  id: string;
+  name: string | null;
+  role: string;
+}
+
+/**
+ * Every rep profile, paged past the server's own row cap.
+ *
+ * A bare `.select()` with no `.range()` is capped at whatever the hosted
+ * project's PostgREST `db.max_rows` is configured to — see the matching note
+ * on `listTeamMembers()` (admin.ts) for the full reasoning. This is "the rep
+ * list for the LEAD'S OWN TEAM": `profiles_select` is `supervises(id)`, so a
+ * team lead's call already narrows to their own reps before any cap applies,
+ * and a lead with more reps than that cap would see their own roster on
+ * `/team` silently cut short — the same failure as `listTeamMembers()`, on a
+ * different screen, for a different viewer.
+ *
+ * Advances by however many rows the server actually returned rather than by
+ * a fixed step, and stops only on an empty page — a short page is not proof
+ * there is no more, since the server's own cap can clip one while rows still
+ * remain beyond it.
+ */
+async function fetchAllReps(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<{ data: RepProfileRow[] | null; error: { message: string } | null }> {
+  const rows: RepProfileRow[] = [];
+  for (let offset = 0; ; ) {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, name, role")
+      .eq("role", "rep")
+      .order("name")
+      .range(offset, offset + 999);
+
+    if (error) return { data: null, error };
+
+    const page = (data ?? []) as unknown as RepProfileRow[];
+    rows.push(...page);
+    if (page.length === 0) break;
+    offset += page.length;
+  }
+  return { data: rows, error: null };
+}
+
 /**
  * Every member's week in four queries rather than four per member.
  *
@@ -240,7 +285,7 @@ export async function getTeamWeek(
        * activity — and the hierarchy still groups by them, because "which
        * admin created this account" is exactly what admins are there for.
        */
-      supabase.from("profiles").select("id, name, role").eq("role", "rep").order("name"),
+      fetchAllReps(supabase),
       supabase
         .from("targets")
         .select(ROW_COLUMNS)
