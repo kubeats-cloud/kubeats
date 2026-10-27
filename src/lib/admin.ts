@@ -382,6 +382,25 @@ function embeddedName(row: unknown, key: string): string | null {
 }
 
 /**
+ * One row of the profiles select below, before it is reshaped into a
+ * TeamMember. Named only so the pagination loop has something to push into —
+ * see the note on listTeamMembers() for why that loop exists at all.
+ */
+interface ProfileListRow {
+  id: string;
+  name: string | null;
+  role: string;
+  created_at: string | null;
+  campus_id: string | null;
+  campuses: { name: string | null } | { name: string | null }[] | null;
+  created_by: string | null;
+  team_lead_id: string | null;
+}
+
+const PROFILE_COLUMNS =
+  "id, name, role, created_at, campus_id, campuses(name), created_by, team_lead_id";
+
+/**
  * The team list.
  *
  * Names and roles come from `profiles` through the caller's own session, so RLS
@@ -390,51 +409,87 @@ function embeddedName(row: unknown, key: string): string | null {
  */
 export async function listTeamMembers(): Promise<TeamMember[]> {
   const supabase = await createClient();
-  const { data: profiles, error } = await supabase
-    .from("profiles")
-    /*
-     * NO SELF-EMBED HERE, AND THAT IS A SCAR.
-     *
-     * This shipped as `creator:profiles!profiles_created_by_fkey(name)` and
-     * took every admin screen down: PostgREST answered
-     *
-     *   PGRST200 — Could not find a relationship between 'profiles' and
-     *   'profiles' in the schema cache. Searched for a foreign key
-     *   relationship between 'profiles' and 'profiles' using the hint
-     *   'profiles_created_by_fkey' … but no matches were found.
-     *
-     * and a failed query here returns [] — so the team list, Assign, Field
-     * Presence, the hierarchy and the member editor all rendered empty against
-     * a table with every row intact.
-     *
-     * THE CONSTRAINT NAME IS THE WRONG KIND OF HINT FOR A SELF-RELATION.
-     * The foreign key was there all along — a dangling `created_by` is still
-     * refused with 23503 naming `profiles_created_by_fkey` — and RLS was never
-     * involved: the service role, which bypasses policies entirely, got the
-     * identical PGRST200. PostgREST disambiguates a self-join by the
-     * REFERENCING COLUMN (`profiles!created_by`), not by the constraint.
-     *
-     * SO THE EMBED IS GONE RATHER THAN RESPELLED. `profiles!created_by` does
-     * work, but this query already fetches EVERY profile — it runs only in an
-     * admin's scope, where `profiles_select` returns the whole table — so the
-     * creator's name is already in hand and a second read of the same table to
-     * find it is a round trip to learn something we have. Resolving it in
-     * TypeScript also means no admin screen can ever again depend on
-     * PostgREST's relationship graph agreeing with the schema.
-     *
-     * The map is COMPLETE BY CONSTRUCTION, which is what makes this safe:
-     * FO028 refuses a `created_by` that is not an admin, admins are profiles,
-     * and the foreign key is ON DELETE SET NULL — so a non-null `created_by`
-     * always names a row in this very result set.
-     */
-    .select(
-      "id, name, role, created_at, campus_id, campuses(name), created_by, team_lead_id",
-    )
-    .order("name");
 
-  if (error) {
-    logError("admin:team", error);
-    return [];
+  /*
+   * PAGINATED, NOT ONE SELECT — FIX for the roster quietly losing everyone
+   * past the hosted project's PostgREST row cap.
+   *
+   * A bare `.select()` with no `.range()` is capped at whatever `db.max_rows`
+   * the project is configured with; supabase-js sends no Range header, so
+   * PostgREST hands back exactly one page and nothing says a second one was
+   * ever truncated. Every screen built on this function — the Hierarchy
+   * page's "on no team" bucket, every team lead's own card, Team's row editor
+   * — only ever saw that first page, so a rep past the cut never rendered
+   * anywhere and could not be assigned to a team lead at all: not because
+   * assigning was refused, but because the rep was never offered.
+   *
+   * `listCallReports()` (call-reports.ts) and `listFieldVisits()`
+   * (exports/field-visit-export.ts) guard the same trap by asking for 1000
+   * rows at a time and stopping once a page comes back under that — which
+   * only works if the server's own cap is at least 1000. It is NOT assumed to
+   * be here, because this is the one list where the symptom was a roster
+   * silently short by whatever that cap actually is, not by a thousand: the
+   * offset below advances by however many rows the server actually handed
+   * back, never by the window requested, so a server that clips every page to
+   * far fewer than 1000 still gets walked to the end rather than mistaken for
+   * one short page.
+   */
+  const profiles: ProfileListRow[] = [];
+  for (let offset = 0; ; ) {
+    const { data, error } = await supabase
+      .from("profiles")
+      /*
+       * NO SELF-EMBED HERE, AND THAT IS A SCAR.
+       *
+       * This shipped as `creator:profiles!profiles_created_by_fkey(name)` and
+       * took every admin screen down: PostgREST answered
+       *
+       *   PGRST200 — Could not find a relationship between 'profiles' and
+       *   'profiles' in the schema cache. Searched for a foreign key
+       *   relationship between 'profiles' and 'profiles' using the hint
+       *   'profiles_created_by_fkey' … but no matches were found.
+       *
+       * and a failed query here returns [] — so the team list, Assign, Field
+       * Presence, the hierarchy and the member editor all rendered empty against
+       * a table with every row intact.
+       *
+       * THE CONSTRAINT NAME IS THE WRONG KIND OF HINT FOR A SELF-RELATION.
+       * The foreign key was there all along — a dangling `created_by` is still
+       * refused with 23503 naming `profiles_created_by_fkey` — and RLS was never
+       * involved: the service role, which bypasses policies entirely, got the
+       * identical PGRST200. PostgREST disambiguates a self-join by the
+       * REFERENCING COLUMN (`profiles!created_by`), not by the constraint.
+       *
+       * SO THE EMBED IS GONE RATHER THAN RESPELLED. `profiles!created_by` does
+       * work, but this query already fetches EVERY profile — it runs only in an
+       * admin's scope, where `profiles_select` returns the whole table — so the
+       * creator's name is already in hand and a second read of the same table to
+       * find it is a round trip to learn something we have. Resolving it in
+       * TypeScript also means no admin screen can ever again depend on
+       * PostgREST's relationship graph agreeing with the schema.
+       *
+       * The map is COMPLETE BY CONSTRUCTION, which is what makes this safe:
+       * FO028 refuses a `created_by` that is not an admin, admins are profiles,
+       * and the foreign key is ON DELETE SET NULL — so a non-null `created_by`
+       * always names a row in this very result set.
+       */
+      .select(PROFILE_COLUMNS)
+      .order("name")
+      .range(offset, offset + 999);
+
+    if (error) {
+      logError("admin:team", error);
+      return [];
+    }
+
+    const page = (data ?? []) as unknown as ProfileListRow[];
+    profiles.push(...page);
+    // A page of zero is the only reliable "nothing more to fetch" — the
+    // server's own cap can clip a page to fewer rows than asked for while
+    // more still remain, so stopping on a SHORT page rather than an EMPTY one
+    // is exactly the bug this loop exists to avoid.
+    if (page.length === 0) break;
+    offset += page.length;
   }
 
   /*
