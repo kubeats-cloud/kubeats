@@ -1,5 +1,5 @@
 -- =============================================================================
--- KUbeats - migration 0053: a team lead's team is not a campus
+-- KUbeats - migration 0061: a team lead's team is not a campus
 --
 -- ✅ ADDITIVE IN SHAPE, NARROWING IN EFFECT. No table, no column, no policy.
 -- Replaces two functions in place; nothing to backfill.
@@ -37,7 +37,7 @@
 --   Run. Idempotent: safe to run twice.
 --
 -- DOWN
---   supabase/rollbacks/0053_team_lead_cross_campus_down.sql restores both
+--   supabase/rollbacks/0061_team_lead_cross_campus_down.sql restores both
 --   functions to their 0043 bodies, campus check included.
 -- =============================================================================
 
@@ -154,7 +154,7 @@ comment on function public.assign_rep_to_team is
   'anybody; a team lead may take a rep onto their OWN team and release one of '
   'their own. SECURITY DEFINER because profiles_update does not let a lead '
   'reach another profile - and FO033 still re-checks every rule inside, since '
-  'auth.uid() is the caller even here. Since 0053, a rep and their team lead '
+  'auth.uid() is the caller even here. Since 0061, a rep and their team lead '
   'need not share a campus. Raises FO034.';
 
 revoke all on function public.assign_rep_to_team(uuid, uuid) from public;
@@ -363,15 +363,15 @@ begin
     select 1 from pg_trigger
      where tgname = 'profiles_campus_required' and not tgisinternal
   ) then
-    raise notice '0053 note: profiles_campus_required not found under that name - check FO021 was not lost.';
+    raise notice '0061 note: profiles_campus_required not found under that name - check FO021 was not lost.';
   end if;
 
   if array_length(problems, 1) > 0 then
-    raise exception '0053 did not apply cleanly: %', array_to_string(problems, '; ');
+    raise exception '0061 did not apply cleanly: %', array_to_string(problems, '; ');
   end if;
 
   raise notice
-    '0053 applied: a rep and their team lead no longer need to share a campus. Every other FO033/FO034 rule - direction, self-lead, poaching, who may write the link - is unchanged.';
+    '0061 applied: a rep and their team lead no longer need to share a campus. Every other FO033/FO034 rule - direction, self-lead, poaching, who may write the link - is unchanged.';
 end $$;
 
 

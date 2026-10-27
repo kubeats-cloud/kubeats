@@ -47,7 +47,7 @@ export function TeamStructure({
   const unassigned = reps.filter((m) => !m.teamLeadId);
 
   /*
-   * Every lead is offered to every rep, regardless of campus (0053). FO033
+   * Every lead is offered to every rep, regardless of campus (0061). FO033
    * and FO034 used to refuse a cross-campus pairing, so this picker used to
    * filter `leads` down to the rep's own campus; the client's spec asks for
    * cross-campus teams, so both the SQL check and this filter are gone
@@ -80,7 +80,7 @@ export function TeamStructure({
             form, which is what lets this be ONE control for assign AND release
             with no client state at all — "" is the release, as the schema says.
 
-            Every lead is offered, regardless of campus (0053) — FO033 and
+            Every lead is offered, regardless of campus (0061) — FO033 and
             FO034 no longer refuse a cross-campus pairing, so there is no
             option here the database would reject.
           */}

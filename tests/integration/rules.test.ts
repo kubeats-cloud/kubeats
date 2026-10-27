@@ -7397,7 +7397,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     /**
-     * (d) is GONE (0053) — the client's spec asks for a rep and their team
+     * (d) is GONE (0061) — the client's spec asks for a rep and their team
      * lead to be pairable regardless of campus. Supervision was never
      * campus-based to begin with (0042: `supervises()` reads the link, not
      * `my_campus()`), so a cross-campus pair sees exactly what any other
@@ -8488,12 +8488,12 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     });
 
     /**
-     * The same-campus rule is GONE (0053) — the client's spec asks for a rep
+     * The same-campus rule is GONE (0061) — the client's spec asks for a rep
      * and their team lead to be pairable regardless of campus, by either the
      * lead taking them on or an admin placing them anywhere.
      *
      * Ends with repFar back on leadFar, which is the same final state the
-     * pre-0053 version of this test left behind — "leaves no cross-team
+     * pre-0061 version of this test left behind — "leaves no cross-team
      * sight open after the reassignments" below depends on repFar not being
      * on leadP's team, and that has nothing to do with campus.
      */
@@ -8525,9 +8525,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
     /* ---- the campus trap the plan flagged ----------------------------- */
 
     /**
-     * `correct_member_campus()` (0035) is untouched by 0053: it still refuses
+     * `correct_member_campus()` (0035) is untouched by 0061: it still refuses
      * to move a team LEAD while they have reps, independently of whatever
-     * campus those reps are on. Before 0053 that refusal doubled as the only
+     * campus those reps are on. Before 0061 that refusal doubled as the only
      * way the rep-side same-campus rule could have been broken from the
      * lead's own row; FO033 no longer holds that rule at all, but this guard
      * was never only about campus — moving a lead out from under their team

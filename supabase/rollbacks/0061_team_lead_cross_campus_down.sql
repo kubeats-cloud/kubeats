@@ -1,7 +1,7 @@
 -- =============================================================================
--- KUbeats - DOWN migration 0053
+-- KUbeats - DOWN migration 0061
 --
--- Reverses supabase/migrations/0053_team_lead_cross_campus.sql.
+-- Reverses supabase/migrations/0061_team_lead_cross_campus.sql.
 -- NOT applied by walking migrations/ — this file lives in rollbacks/ so a
 -- forward apply cannot run it by accident.
 --
@@ -12,15 +12,15 @@
 --
 -- WHAT IT REFUSES TO UNDO
 --
---   Any cross-campus pairing made while 0053 was in effect. Re-applying this
+--   Any cross-campus pairing made while 0061 was in effect. Re-applying this
 --   down migration does NOT retroactively unassign a rep from a lead on
 --   another campus — the trigger only re-checks on the next write to that
---   row. Run the query at the foot of 0053 first to find any such pairing
+--   row. Run the query at the foot of 0061 first to find any such pairing
 --   and decide by hand whether to release it.
 --
 -- HOW TO RUN
 --   Supabase dashboard -> SQL Editor -> paste this whole file -> Run.
---   Idempotent: safe to run twice. Re-applying 0053 afterwards removes the
+--   Idempotent: safe to run twice. Re-applying 0061 afterwards removes the
 --   campus check again.
 -- =============================================================================
 
@@ -227,8 +227,8 @@ begin
   end if;
 
   if array_length(problems, 1) > 0 then
-    raise exception '0053 down did not apply cleanly: %', array_to_string(problems, '; ');
+    raise exception '0061 down did not apply cleanly: %', array_to_string(problems, '; ');
   end if;
 
-  raise notice '0053 down applied: a rep and their team lead must share a campus again.';
+  raise notice '0061 down applied: a rep and their team lead must share a campus again.';
 end $$;

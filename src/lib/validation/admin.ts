@@ -213,7 +213,7 @@ export const memberCreatorSchema = z
  * what lets one control both assign and unassign. `assign_rep_to_team()` reads
  * a null second argument the same way.
  *
- * No campus check here, and none in FO033 or FO034 either (0053) — a rep and
+ * No campus check here, and none in FO033 or FO034 either (0061) — a rep and
  * their team lead no longer have to share a campus, so there is nothing left
  * for a form to pre-empt on that front.
  */
