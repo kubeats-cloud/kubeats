@@ -39,7 +39,7 @@ import {
   isOpenStatus,
 } from "@/lib/validation/institute";
 import { Card } from "@/components/ui/card";
-import { listRepsForCampus } from "@/lib/admin";
+import { listAllReps } from "@/lib/admin";
 import { ReassignOwner } from "@/components/institutes/reassign-owner";
 import { ReassignmentHistory } from '@/components/institutes/reassignment-history';
 import { DeleteInstitute } from "@/components/institutes/delete-institute";
@@ -122,7 +122,7 @@ export default async function InstituteDetailPage(
       getInstituteVisits(id),
       getInstituteStatusHistory(id),
       listStatusCatalogue(),
-      admin ? listRepsForCampus(institute.campus_id) : Promise.resolve([]),
+      admin ? listAllReps() : Promise.resolve([]),
       // Scoped by RLS through the parent institute (0037), so this needs no
       // ownership test of its own — a rep who cannot see the institute has
       // already been sent to notFound() above.

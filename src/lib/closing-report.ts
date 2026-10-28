@@ -236,7 +236,7 @@ export async function getVisitReport(visitId: string): Promise<VisitReport | nul
 /**
  * The reps — for the admin's assign form, and the Review and report pickers.
  *
- * AN ADMIN IS NEVER IN THIS LIST, the same rule `listRepsForCampus()` states
+ * AN ADMIN IS NEVER IN THIS LIST, the same rule `listAllReps()` states
  * and for the same reason: field work is a rep's thing. An admin has no campus
  * (`enforce_profile_campus`, FO021) and logs no visits, so offering one here
  * only ever produced a dead end. The activity report selects `role = 'rep'`

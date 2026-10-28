@@ -58,7 +58,7 @@ function denied(error: string): AdminState {
 /* ------------------------------------------------------------------ */
 
 /**
- * Move an institute to another rep.
+ * Move an institute to another rep — any rep, on any campus.
  *
  * THIS IS A PERMISSIONS CHANGE, not bookkeeping, and it is worth being blunt
  * about that here because the column it writes has spent its whole life being
@@ -68,13 +68,12 @@ function denied(error: string): AdminState {
  * journey, its row in Pending — and takes it from another.
  *
  * `guard_institute_owner()` (FO010) has always allowed an admin to do this and
- * always refused a rep, so nothing needed unlocking. What the migration adds is
- * where it may point: FO025 refuses a rep on another campus, and refuses the
- * move at all while the current owner is mid-visit at that institute.
- *
- * The same-campus rule is enforced twice on purpose — the picker only offers
- * reps on the institute's campus, and FO025 refuses anything else. The picker
- * is the courtesy; the trigger is the control.
+ * always refused a rep, so nothing needed unlocking there. Migration 0028 kept
+ * one restriction on WHERE it may point — the new owner had to share the
+ * institute's campus — and migration 0062 removes exactly that: the client's
+ * requirement is a cross-campus reassignment. FO025's other half is unchanged
+ * and is now the only thing it refuses: the move while the current owner is
+ * mid-visit at that institute.
  */
 export async function reassignInstitute(
   _prev: AdminState,
@@ -102,9 +101,8 @@ export async function reassignInstitute(
     // the wording lives here and no database text reaches a screen.
     if (error.code === "FO025") {
       return denied(
-        "That cannot be moved right now. Either the rep is not on this " +
-          "institute's campus, or its current owner is part-way through a " +
-          "visit there. Try again once they have finished.",
+        "That cannot be moved right now — its current owner is part-way " +
+          "through a visit there. Try again once they have finished.",
       );
     }
     if (error.code === "FO010") {

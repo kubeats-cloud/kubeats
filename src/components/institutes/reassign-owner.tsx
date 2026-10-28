@@ -31,10 +31,11 @@ import type { CampusRep } from "@/lib/admin";
  * and its row in Pending, and takes all three from another. The confirmation
  * wording says so rather than reading like an edit.
  *
- * ONLY SAME-CAMPUS REPS ARE OFFERED. Campus is still the outer boundary, so a
- * rep on another campus could not see the institute even after being handed it
- * — the move would succeed and change nothing anyone could use. The picker is
- * the courtesy; FO025 in the database is the control, and refuses it outright.
+ * ANY ACTIVE REP, ON ANY CAMPUS, IS OFFERED. The client's requirement is a
+ * cross-campus reassignment, so the picker is not scoped to the institute's
+ * own campus — `listAllReps()` lists the whole team. FO025 in the database is
+ * still the control and still refuses the move while the current owner is
+ * mid-visit there; it no longer refuses a destination off this campus.
  *
  * AND NOT THE CURRENT OWNER. Reassigning to whoever already holds it is a write
  * that changes nothing and then reports success, which is worse than being
@@ -58,7 +59,7 @@ export function ReassignOwner({
   ownerId: string | null;
   /** Null when nobody owns it — see the Unassigned note below. */
   ownerName: string | null;
-  /** Reps on THIS institute's campus. Empty if the campus has none. */
+  /** Every active rep, on any campus. Empty if there are none at all. */
   reps: CampusRep[];
 }) {
   const [state, formAction, isPending] = useActionState(
@@ -68,19 +69,19 @@ export function ReassignOwner({
   const [member, setMember] = useState("");
 
   /*
-   * WHO IT CAN ACTUALLY GO TO, which is not the same as who is on the campus.
+   * WHO IT CAN ACTUALLY GO TO, which is not the same as who is listed.
    *
    * Handing an institute to the rep who already owns it writes the value that
    * is already there: no permission changes, nothing moves, and the card says
    * "Reassigned. It now belongs to that rep." — a success message for an event
    * that did not happen. So the owner comes out of the list.
    *
-   * That in turn creates the state this exists to name. A campus with one rep
-   * is the ordinary case for this client, and once that rep owns the institute
-   * the picker is EMPTY: a dropdown with nothing in it, above a button that
-   * cannot be pressed, with no explanation. `reps.length === 0` was already
-   * handled — "no reps on this campus at all" — but this one looked identical
-   * and meant something quite different.
+   * That in turn creates the state this exists to name. A one-rep team is an
+   * edge case rather than the ordinary shape now that every campus is pooled,
+   * but once that lone rep owns the institute the picker is still EMPTY: a
+   * dropdown with nothing in it, above a button that cannot be pressed, with
+   * no explanation. `reps.length === 0` was already handled — "no reps at
+   * all" — but this one looked identical and meant something quite different.
    */
   const candidates = reps.filter((rep) => rep.id !== ownerId);
 
@@ -107,18 +108,18 @@ export function ReassignOwner({
 
       {reps.length === 0 ? (
         <p className="text-muted-foreground text-xs">
-          There are no reps on this institute&rsquo;s campus to hand it to. Add
-          one in Settings, or move the institute to another campus first.
+          There are no reps to hand this institute to. Add one in Settings
+          first.
         </p>
       ) : candidates.length === 0 ? (
         /*
           THE SOLE REP ALREADY OWNS IT. Said as its own sentence rather than
-          folded into the empty-campus one above, because the two have different
+          folded into the empty-team one above, because the two have different
           answers: that one wants another rep created, this one is simply
           finished. Nothing is wrong and there is nothing to do.
         */
         <p className="text-muted-foreground text-xs">
-          No other reps on this campus to reassign to.{" "}
+          No other reps to reassign to.{" "}
           {ownerName ? `${ownerName} is` : "Its owner is"} the only one, so
           there is nowhere to move it. Add another rep in Settings first.
         </p>
@@ -135,7 +136,7 @@ export function ReassignOwner({
                 quietly reassigning to whoever happened to be first. */}
             <Select value={member} onValueChange={setMember}>
               <SelectTrigger className="h-11 w-full" aria-label="Hand it to">
-                <SelectValue placeholder="Choose a rep on this campus" />
+                <SelectValue placeholder="Choose a rep" />
               </SelectTrigger>
               <SelectContent>
                 {candidates.map((rep) => (

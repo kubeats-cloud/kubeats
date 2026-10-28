@@ -161,13 +161,12 @@ export const statusRenameSchema = z.object({
 });
 
 /**
- * Moving an institute to another rep.
+ * Moving an institute to another rep — any rep, on any campus (0062).
  *
- * Two ids and nothing else — the CAMPUS rule is not expressed here on purpose.
- * A schema can check that a uuid looks like a uuid; it cannot know which campus
- * a rep is on without a query, and putting a second opinion about that in the
- * app is how it drifts from the trigger that actually decides. The picker
- * offers only same-campus reps and FO025 refuses the rest.
+ * Two ids and nothing else. There never was a campus rule here: a schema can
+ * check that a uuid looks like a uuid, not which campus a rep is on, so that
+ * question was always the trigger's — `guard_institute_owner()` (FO025) — and
+ * stays the trigger's now that it no longer asks it.
  */
 export const reassignSchema = z.object({
   institute_id: z.uuid("That institute could not be identified."),
