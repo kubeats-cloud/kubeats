@@ -15,9 +15,12 @@ import { listCallReports } from "@/lib/call-reports";
 import { mergeReviewFeed, reviewKinds } from "@/lib/review-feed";
 import {
   getCallActivityReport,
+  parseCallActivityFilters,
   parseCallActivitySort,
   totalsRow,
 } from "@/lib/call-activity-report";
+import { CallActivityFilters } from "@/components/report/call-activity-filters";
+import { FormNotice } from "@/components/form-notice";
 
 export const metadata = { title: "Review" };
 
@@ -104,7 +107,7 @@ export default async function ReviewPage(props: PageProps<"/review">) {
   };
   const emptyCalls = { ok: true as const, reports: [], total: 0 };
 
-  const [result, reps, institutes, catalogue, calls, callActivity] = await Promise.all([
+  const [result, reps, institutes, catalogue, calls] = await Promise.all([
     kinds.visits
       ? listTeamVisits(filters, 1, REVIEW_PAGE_SIZE)
       : Promise.resolve(emptyVisits),
@@ -125,10 +128,31 @@ export default async function ReviewPage(props: PageProps<"/review">) {
     kinds.calls
       ? listCallReports(filters, REVIEW_PAGE_SIZE)
       : Promise.resolve(emptyCalls),
-    // No filters yet (Part 3 adds them) — one admin/team-lead-scoped read,
-    // its own section below the register.
-    getCallActivityReport({}, callSort, callPageRequested),
   ]);
+
+  /*
+   * THE CALL ACTIVITY REPORT'S OWN FILTERS — parsed only now, because
+   * validating `callStatus` against the live catalogue needs `catalogue`
+   * resolved first (it is the same read `listStatusCatalogue()` above
+   * already did; asking twice would be the thing this file's performance
+   * rule exists to avoid). Each bad field is dropped and explained rather
+   * than thrown — see `parseCallActivityFilters()`'s own header.
+   */
+  const { filters: callFilters, notices: callNotices } = parseCallActivityFilters(
+    {
+      from: first(searchParams.callFrom),
+      to: first(searchParams.callTo),
+      member: first(searchParams.callMember),
+      institute: first(searchParams.callInstitute),
+      status: first(searchParams.callStatus),
+    },
+    catalogue,
+  );
+  const callActivity = await getCallActivityReport(
+    callFilters,
+    callSort,
+    callPageRequested,
+  );
 
   const failure = (
     <>
@@ -249,6 +273,26 @@ export default async function ReviewPage(props: PageProps<"/review">) {
       <p className="text-muted-foreground mb-3 text-xs">
         One row per rep: every call counted once, under its current status.
       </p>
+
+      <CallActivityFilters
+        reps={reps.map((r) => ({ id: r.id, name: r.name }))}
+        statuses={catalogue
+          .filter((s) => s.isActive)
+          .map((s) => ({ status: s.status, category: s.category }))}
+        initial={{
+          from: first(searchParams.callFrom),
+          to: first(searchParams.callTo),
+          member: first(searchParams.callMember),
+          institute: first(searchParams.callInstitute),
+          status: first(searchParams.callStatus),
+        }}
+      />
+
+      {callNotices.map((notice) => (
+        <div key={notice} className="mb-3">
+          <FormNotice message={notice} />
+        </div>
+      ))}
 
       {!callActivity.ok ? (
         <ErrorState message={callActivity.error} />

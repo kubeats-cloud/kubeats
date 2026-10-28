@@ -6769,6 +6769,126 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(ids).toContain(ownRep.id);
       expect(ids).not.toContain(otherRep.id);
     });
+
+    /**
+     * Part 3 — a lead cannot widen their own scope by NAMING another team's
+     * rep in p_member. `registry` filters on supervises(p.id) BEFORE it ever
+     * asks "is this p_member", so a foreign rep id matches no row — nothing
+     * is returned, and nothing is refused either, which is the right answer
+     * for a parameter that is legal in general and merely unreachable here.
+     */
+    it("cannot widen its scope by naming another team's rep in p_member", async () => {
+      const { data, error } = await lead.db.rpc("call_activity_report", {
+        p_member: otherRep.id,
+      });
+      expect(error, error?.message).toBeNull();
+      expect(data.rows).toEqual([]);
+    });
+  });
+
+  /**
+   * call_activity_report() filters (Part 3) — From/To (IST calendar date,
+   * inclusive), Representative, Institute (name-contains, case-insensitive),
+   * Call Status, alone and combined. No Call Activity filter (client
+   * decision).
+   */
+  describe.skipIf(!has0064)("call_activity_report() filters (Part 3)", () => {
+    const openStatus = "First meeting done";
+    const closedStatus = "Will not come";
+    let subject: Member;
+    let institute: string;
+
+    beforeAll(async () => {
+      subject = await makeMember("rep", "call-filter-subject", campusA);
+      institute = await makeInstitute(subject.id, campusA, "Call Filter Institute");
+
+      const rows = [
+        // First and last second of 2026-10-15 IST — must be INCLUDED by a
+        // From=To=2026-10-15 filter.
+        { status: openStatus, at: "2026-10-15T00:00:00+05:30" },
+        { status: openStatus, at: "2026-10-15T23:59:59+05:30" },
+        // One second either side of that day — must be EXCLUDED by it.
+        { status: closedStatus, at: "2026-10-16T00:00:00+05:30" },
+        { status: closedStatus, at: "2026-10-14T23:59:59+05:30" },
+      ];
+      for (const row of rows) {
+        await admin.from("follow_up_tasks").insert({
+          member: subject.id, institute_id: institute, kind: "call",
+          status_set_to: row.status, outcome: "done",
+          done_at: row.at, reported_at: row.at,
+        });
+      }
+    });
+
+    const rowFor = async (extra: Record<string, unknown>) => {
+      const { data, error } = await boss.db.rpc("call_activity_report", {
+        p_member: subject.id, ...extra,
+      });
+      expect(error, error?.message).toBeNull();
+      return data.rows[0] as {
+        statuses: Record<string, number>; total: number;
+        openTotal: number; closedTotal: number;
+      };
+    };
+
+    it("From=To=the day includes only its first and last second, never the day either side", async () => {
+      const row = await rowFor({ p_from: "2026-10-15", p_to: "2026-10-15" });
+      expect(row.statuses).toEqual({ [openStatus]: 2 });
+      expect(row.total).toBe(2);
+    });
+
+    it("a status filter populates only that status' column", async () => {
+      const row = await rowFor({ p_status: openStatus });
+      expect(row.statuses).toEqual({ [openStatus]: 2 });
+      expect(row.statuses[closedStatus]).toBeUndefined();
+    });
+
+    it("the institute filter matches case-insensitively", async () => {
+      const lower = await rowFor({ p_institute: "call filter institute" });
+      const upper = await rowFor({ p_institute: "CALL FILTER" });
+      expect(lower.total).toBe(4);
+      expect(upper.total).toBe(4);
+    });
+
+    it("an institute filter matching nothing reports a zero row, not an error", async () => {
+      const row = await rowFor({ p_institute: "does not exist anywhere" });
+      expect(row.statuses).toEqual({});
+      expect(row.total).toBe(0);
+    });
+
+    it("every filter combined narrows to exactly the matching calls", async () => {
+      const row = await rowFor({
+        p_status: openStatus, p_institute: "Call Filter",
+        p_from: "2026-10-15", p_to: "2026-10-15",
+      });
+      expect(row.statuses).toEqual({ [openStatus]: 2 });
+      expect(row.total).toBe(2);
+    });
+
+    it("clearing every filter reproduces the unfiltered row", async () => {
+      const row = await rowFor({});
+      expect(row.statuses).toEqual({ [openStatus]: 2, [closedStatus]: 2 });
+      expect(row.total).toBe(4);
+    });
+
+    it("totals equal the sum of every page's rows for a FILTERED set too", async () => {
+      const first = await boss.db.rpc("call_activity_report", {
+        p_status: openStatus, p_page: 1,
+      });
+      expect(first.error, first.error?.message).toBeNull();
+      let allRows = [...first.data.rows];
+      for (let p = 2; p <= first.data.pages; p += 1) {
+        const page = await boss.db.rpc("call_activity_report", {
+          p_status: openStatus, p_page: p,
+        });
+        expect(page.error, page.error?.message).toBeNull();
+        allRows = allRows.concat(page.data.rows);
+      }
+      const summedOpen = allRows.reduce(
+        (sum: number, r: { openTotal: number }) => sum + r.openTotal, 0,
+      );
+      expect(summedOpen).toBe(first.data.totals.openTotal);
+    });
   });
 
   /**

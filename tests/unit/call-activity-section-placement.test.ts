@@ -39,3 +39,62 @@ describe("the Call Activity Report section on Review", () => {
     expect(page).toContain("showGroupTotals");
   });
 });
+
+/**
+ * Part 3 — the filter bar: above the table, its own query params, server-
+ * side (a navigation, never a client-side row filter).
+ */
+describe("the Call Activity Report's filter bar", () => {
+  it("sits above the table, below the heading", () => {
+    const headingIndex = page.indexOf("Call Activity Report");
+    const filtersIndex = page.indexOf("<CallActivityFilters");
+    const gridIndex = page.indexOf("<CustomisableGrid");
+    expect(headingIndex).toBeGreaterThan(-1);
+    expect(filtersIndex).toBeGreaterThan(headingIndex);
+    expect(gridIndex).toBeGreaterThan(filtersIndex);
+  });
+
+  it("reads all five of its own query params, none shared with the register above", () => {
+    for (const key of ["callFrom", "callTo", "callMember", "callInstitute", "callStatus"]) {
+      expect(page).toContain(key);
+    }
+  });
+
+  it("validates filters against the live catalogue before calling the RPC", () => {
+    expect(page).toContain("parseCallActivityFilters(");
+  });
+});
+
+describe("CallActivityFilters component", () => {
+  const component = readFileSync(
+    fileURLToPath(
+      new URL("../../src/components/report/call-activity-filters.tsx", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  it("is a client component with Apply and Clear, not an instant-apply filter", () => {
+    expect(component).toContain('"use client"');
+    expect(component).toMatch(/>\s*Apply\s*</);
+    expect(component).toContain("Clear");
+    // The regression this guards: VisitReview's own Selects call `apply()`
+    // directly from onValueChange. This filter bar must not.
+    expect(component).not.toMatch(/onValueChange=\{\(v\)\s*=>\s*apply\(/);
+  });
+
+  it("filters Institute with a name-contains text box, not a Select of every institute", () => {
+    const field = component.slice(
+      component.indexOf('label="Institute"'),
+      component.indexOf('label="Call Status"'),
+    );
+    expect(field).toContain("<Input");
+    expect(field).not.toContain("<Select");
+  });
+
+  it("navigates via router.push rather than filtering rows it already has", () => {
+    expect(component).toContain("router.push(");
+    // `.filter(` legitimately appears once, counting non-empty draft values
+    // for the "Clear N filters" label — never applied to `reps` or `rows`.
+    expect(component).not.toMatch(/\breps\.filter\(|\brows\.filter\(/);
+  });
+});

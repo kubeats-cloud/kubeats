@@ -10,13 +10,29 @@
 -- next read and never duplicates it. No Call Activity column/filter: a call
 -- has one activity, "Call" (client decision); p_status is the only status
 -- filter this function offers.
+--
+-- FILTERS (added in place for Part 3 — this file was never applied anywhere
+-- but the rehearsal DB, so it is amended rather than versioned as 0065):
+-- p_from/p_to compare the call's reported date in Asia/Kolkata, inclusive of
+-- the whole p_to day — a calendar-date comparison, not a timestamp one, so
+-- 23:59:59 IST on the To day is included and 00:00:00 IST the day after is
+-- not. p_member narrows to one rep (and, for a team lead, cannot widen their
+-- scope beyond their own reps — registry's supervises() is checked before
+-- p_member is, so a foreign rep id simply matches nothing). p_institute is
+-- NAME-CONTAINS, not an id — a 700-institute dropdown is exactly what this
+-- avoids — case-insensitive via strpos(lower(...)), the same idiom
+-- audit_institute_activity (0055) already uses for its own p_search.
 begin;
+
+drop function if exists public.call_activity_report(
+  date, date, uuid, uuid, text, text, boolean, integer
+);
 
 create or replace function public.call_activity_report(
   p_from      date    default null,
   p_to        date    default null,
   p_member    uuid    default null,
-  p_institute uuid    default null,
+  p_institute text    default null,
   p_status    text    default null,
   p_sort      text    default 'rep',
   p_desc      boolean default false,
@@ -55,7 +71,8 @@ begin
       where f.kind = 'call' and f.status_set_to is not null and f.reported_at is not null
         and (p_from is null or (f.reported_at at time zone 'Asia/Kolkata')::date >= p_from)
         and (p_to is null or (f.reported_at at time zone 'Asia/Kolkata')::date <= p_to)
-        and (p_institute is null or f.institute_id = p_institute)
+        and (coalesce(trim(p_institute),'') = ''
+             or strpos(lower(i.name), lower(trim(p_institute))) > 0)
         and (p_status is null or f.status_set_to = p_status)
     ), call_counts as (
       select member, status_set_to, count(*) n from ranged_calls group by member, status_set_to
@@ -121,7 +138,7 @@ begin
     from windowed w, totals tot
   );
 end $$;
-revoke all on function public.call_activity_report(date,date,uuid,uuid,text,text,boolean,integer) from public,anon;
-grant execute on function public.call_activity_report(date,date,uuid,uuid,text,text,boolean,integer) to authenticated;
+revoke all on function public.call_activity_report(date,date,uuid,text,text,text,boolean,integer) from public,anon;
+grant execute on function public.call_activity_report(date,date,uuid,text,text,text,boolean,integer) to authenticated;
 
 commit;

@@ -3,6 +3,12 @@
 -- cannot run it by accident. Net-new function; nothing earlier depends on it.
 begin;
 
+-- The current (Part 3) signature, and the pre-Part-3 one (p_institute was
+-- uuid, never shipped anywhere but this rehearsal DB) — both IF EXISTS, so
+-- whichever is actually live is the one that goes.
+drop function if exists public.call_activity_report(
+  date, date, uuid, text, text, text, boolean, integer
+);
 drop function if exists public.call_activity_report(
   date, date, uuid, uuid, text, text, boolean, integer
 );
