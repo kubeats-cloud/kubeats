@@ -398,6 +398,21 @@ export interface GridInput {
    * return value for why that would have been wrong three separate ways.
    */
   showTotals?: boolean;
+  /**
+   * Two more columns in the TOTAL band, before TOTAL itself: each row's own
+   * sum of the CLOSED columns and of the OPEN columns.
+   *
+   * DEFAULTS TO FALSE, and every existing caller leaves it unset — the Rep
+   * Activity Report, the Overview, the pipeline report and the client's own
+   * .xlsx template all keep the single TOTAL column they have always had.
+   * Only the Call Activity Report asks for it, because that is the one
+   * screen whose spec names three totals rather than one.
+   *
+   * Ignored entirely when `showTotals` is false, the same precedence
+   * `showActivities`/`showActivityStatuses` already have over the bands they
+   * feed — a caller cannot ask for subtotals of a total that is not there.
+   */
+  showGroupTotals?: boolean;
 }
 
 export const GROUP_HEADERS = {
@@ -423,6 +438,10 @@ export const GROUP_HEADERS = {
 
 /** What the TOTAL column's second-row header cell says. */
 export const TOTAL_COLUMN_LABEL = "Total";
+
+/** The two `showGroupTotals` columns' second-row header cells. */
+export const OPEN_TOTAL_COLUMN_LABEL = "Open total";
+export const CLOSED_TOTAL_COLUMN_LABEL = "Closed total";
 
 /** What the total ROW's first cell says, in column A. */
 export const TOTAL_ROW_LABEL = "All reps";
@@ -554,8 +573,12 @@ export function buildActivityGrid(input: GridInput): {
     unsetColumn,
     hrefFor,
     showTotals = true,
+    showGroupTotals = false,
     hiddenColumns,
   } = input;
+
+  // Meaningless without a TOTAL to be a subtotal of.
+  const groupTotals = showTotals && showGroupTotals;
 
   /*
    * Folded away by the reader, before anything is derived from the lists.
@@ -632,7 +655,17 @@ export function buildActivityGrid(input: GridInput): {
         .map((column) => column.label),
     })),
     // ...and TOTAL after even that, for the same reason one more time over.
-    { title: GROUP_HEADERS.total, labels: showTotals ? [TOTAL_COLUMN_LABEL] : [] },
+    // Open total / Closed total sit in the same band, immediately before it,
+    // when the caller asks for them — one band, three labels, rather than a
+    // band of its own that would need its own place in this list.
+    {
+      title: GROUP_HEADERS.total,
+      labels: showTotals
+        ? groupTotals
+          ? [OPEN_TOTAL_COLUMN_LABEL, CLOSED_TOTAL_COLUMN_LABEL, TOTAL_COLUMN_LABEL]
+          : [TOTAL_COLUMN_LABEL]
+        : [],
+    },
   ].filter((band) => band.labels.length > 0);
 
   const groupRow: CellValue[] = [GROUP_HEADERS.representative];
@@ -716,6 +749,25 @@ export function buildActivityGrid(input: GridInput): {
         : statusTotal;
     perRow.push(rowTotal);
 
+    /*
+     * THE TWO SUBTOTALS, read straight off the rep's own counts rather than
+     * from `statusTotal` above — that accumulator also folds in `unset`,
+     * which is neither open nor closed. Cheap: both lists are a handful of
+     * statuses, not a second pass over any real data.
+     */
+    if (groupTotals) {
+      const closedTotal = closedColumns.reduce(
+        (sum, column) => sum + (rep.statuses[column.status] ?? 0),
+        0,
+      );
+      const openTotal = openColumns.reduce(
+        (sum, column) => sum + (rep.statuses[column.status] ?? 0),
+        0,
+      );
+      row.push(openTotal, closedTotal);
+      hrefRow.push(null, null);
+    }
+
     if (showTotals) {
       row.push(rowTotal);
       /*
@@ -786,6 +838,17 @@ export function buildActivityGrid(input: GridInput): {
               row.push(count);
               activityStatusTotal += count;
             }
+            if (groupTotals) {
+              const closedTotal = closedColumns.reduce(
+                (sum, column) => sum + (rep.statuses[column.status] ?? 0),
+                0,
+              );
+              const openTotal = openColumns.reduce(
+                (sum, column) => sum + (rep.statuses[column.status] ?? 0),
+                0,
+              );
+              row.push(openTotal, closedTotal);
+            }
             row.push(
               activityStatusColumns.length > 0
                 ? activityStatusTotal + otherStatusTotal
@@ -825,6 +888,7 @@ export function buildActivityGrid(input: GridInput): {
     // The 12 are folds of visits by status category, not a single status, so
     // sorting by one would answer no question the status columns do not.
     ...activityStatusColumns.map(() => null),
+    ...(groupTotals ? [SORT_BY_OPEN_TOTAL, SORT_BY_CLOSED_TOTAL] : []),
     ...(showTotals ? [SORT_BY_TOTAL] : []),
   ];
 
@@ -878,6 +942,12 @@ export function buildActivityGrid(input: GridInput): {
       label: column.label,
       band: column.band,
     })),
+    ...(groupTotals
+      ? [
+          { key: SORT_BY_OPEN_TOTAL, label: OPEN_TOTAL_COLUMN_LABEL, band: null },
+          { key: SORT_BY_CLOSED_TOTAL, label: CLOSED_TOTAL_COLUMN_LABEL, band: null },
+        ]
+      : []),
     ...(showTotals
       ? [{ key: SORT_BY_TOTAL, label: TOTAL_COLUMN_LABEL, band: null }]
       : []),
@@ -898,6 +968,10 @@ export const SORT_BY_REP = "rep";
 
 /** Sorting by the TOTAL column. Not a status, so it needs its own key. */
 export const SORT_BY_TOTAL = "total";
+
+/** Sorting by the `showGroupTotals` subtotal columns. */
+export const SORT_BY_OPEN_TOTAL = "open_total";
+export const SORT_BY_CLOSED_TOTAL = "closed_total";
 
 /** Bound the Overview report's rendered rows without changing export totals. */
 export const ACTIVITY_PAGE_SIZE = 50;

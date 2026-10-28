@@ -449,6 +449,17 @@ const has0063 = configured
       .then(({ error }) => error?.code !== "PGRST202")
   : false;
 
+/**
+ * 0064 adds call_activity_report(). Probed the same way. The service role
+ * has no auth.uid(), so a resolved call answers 42501 (neither admin nor
+ * team lead) rather than PGRST202 when the function exists.
+ */
+const has0064 = configured
+  ? await admin
+      .rpc("call_activity_report", { p_page: null })
+      .then(({ error }) => error?.code !== "PGRST202")
+  : false;
+
 if (configured && !has0038) {
   console.warn(
     [
@@ -6596,6 +6607,167 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_task_id: open!.id, p_status_set_to: closedStatus, p_outcome: "done",
       });
       expect(error?.code).toBe("FO046");
+    });
+  });
+
+  /**
+   * call_activity_report() (migration 0064) — one row per rep, call counts by
+   * CURRENT status, Open/Closed split. Part 2 of the Call Report review
+   * feature. No Call Activity column/filter (client decision) — a call has
+   * one activity, "Call".
+   */
+  describe.skipIf(!has0064)("call_activity_report() (migration 0064)", () => {
+    const statusA = "First meeting done"; // open
+    const statusB = "Will not come"; // closed
+    let subject: Member;
+    let calls: string[] = [];
+
+    beforeAll(async () => {
+      subject = await makeMember("rep", "call-activity-subject", campusA);
+      const institute = await makeInstitute(subject.id, campusA, "call-activity-institute");
+      calls = [];
+      for (let i = 0; i < 5; i += 1) {
+        const { data } = await subject.db
+          .from("follow_up_tasks")
+          .insert({ member: subject.id, institute_id: institute, kind: "call" })
+          .select("id").single();
+        const { error } = await subject.db.rpc("log_call", {
+          p_task_id: data!.id, p_status_set_to: statusA,
+          p_follow_up_date: iso(1), p_notes: `${TAG} a-${i}`,
+        });
+        expect(error, error?.message).toBeNull();
+        calls.push(data!.id as string);
+      }
+      for (let i = 0; i < 3; i += 1) {
+        const { data } = await subject.db
+          .from("follow_up_tasks")
+          .insert({ member: subject.id, institute_id: institute, kind: "call" })
+          .select("id").single();
+        const { error } = await subject.db.rpc("log_call", {
+          p_task_id: data!.id, p_status_set_to: statusB, p_notes: `${TAG} b-${i}`,
+        });
+        expect(error, error?.message).toBeNull();
+        calls.push(data!.id as string);
+      }
+    });
+
+    const rowForSubject = async () => {
+      const { data, error } = await boss.db.rpc("call_activity_report", {
+        p_member: subject.id,
+      });
+      expect(error, error?.message).toBeNull();
+      return data.rows.find((r: { id: string }) => r.id === subject.id);
+    };
+
+    it("counts 5 under status A and 3 under status B, once each", async () => {
+      const row = await rowForSubject();
+      expect(row.statuses[statusA]).toBe(5);
+      expect(row.statuses[statusB]).toBe(3);
+      expect(row.openTotal).toBe(5);
+      expect(row.closedTotal).toBe(3);
+      expect(row.total).toBe(8);
+    });
+
+    it("moving one call A -> B gives 4 and 4, never duplicating the count", async () => {
+      const { error } = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: calls[0], p_status_set_to: statusB, p_outcome: "done",
+      });
+      expect(error, error?.message).toBeNull();
+
+      const row = await rowForSubject();
+      expect(row.statuses[statusA]).toBe(4);
+      expect(row.statuses[statusB]).toBe(4);
+      expect(row.total).toBe(8);
+
+      // Restored, so the remaining tests in this block see the baseline.
+      const restore = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: calls[0], p_status_set_to: statusA,
+        p_follow_up_date: iso(1), p_outcome: "done",
+      });
+      expect(restore.error, restore.error?.message).toBeNull();
+    });
+
+    it("editing notes only leaves every count exactly as it was", async () => {
+      const before = await rowForSubject();
+      const { error } = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: calls[1], p_status_set_to: statusA,
+        p_follow_up_date: iso(2), p_outcome: "done",
+        p_notes: `${TAG} edited notes only`,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const after = await rowForSubject();
+      expect(after.statuses).toEqual(before.statuses);
+      expect(after.total).toBe(before.total);
+    });
+
+    it("a closed status lands in the Closed group", async () => {
+      const { data, error } = await boss.db.rpc("call_activity_report", {
+        p_member: subject.id,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const closedColumn = data.statuses.find(
+        (s: { status: string; category: string }) => s.status === statusB,
+      );
+      expect(closedColumn.category).toBe("closed");
+
+      const row = data.rows.find((r: { id: string }) => r.id === subject.id);
+      expect(row.closedTotal).toBeGreaterThanOrEqual(row.statuses[statusB]);
+    });
+
+    it("the totals equal the sum of every page's rows, not only the visible one", async () => {
+      const first = await boss.db.rpc("call_activity_report", { p_page: 1 });
+      expect(first.error, first.error?.message).toBeNull();
+
+      let allRows = [...first.data.rows];
+      for (let p = 2; p <= first.data.pages; p += 1) {
+        const page = await boss.db.rpc("call_activity_report", { p_page: p });
+        expect(page.error, page.error?.message).toBeNull();
+        allRows = allRows.concat(page.data.rows);
+      }
+
+      const summedOpen = allRows.reduce(
+        (sum: number, r: { openTotal: number }) => sum + r.openTotal, 0,
+      );
+      const summedClosed = allRows.reduce(
+        (sum: number, r: { closedTotal: number }) => sum + r.closedTotal, 0,
+      );
+      expect(summedOpen).toBe(first.data.totals.openTotal);
+      expect(summedClosed).toBe(first.data.totals.closedTotal);
+      expect(allRows.length).toBe(first.data.total);
+    });
+
+    it("refuses a rep outright", async () => {
+      const { error } = await subject.db.rpc("call_activity_report", {});
+      expect(error?.code).toBe("42501");
+    });
+  });
+
+  /**
+   * Team Lead scoping for call_activity_report() — a lead sees only their
+   * own reps' rows, never another team's, and a rep gets nothing.
+   */
+  describe.skipIf(!has0064)("call_activity_report() — Team Lead scoping", () => {
+    let lead: Member;
+    let ownRep: Member;
+    let otherRep: Member;
+
+    beforeAll(async () => {
+      lead = await makeMember("team_lead", "cal-lead", campusA);
+      ownRep = await makeMember("rep", "cal-lead-rep", campusA);
+      otherRep = await makeMember("rep", "cal-other-rep", campusA);
+      const { error } = await admin
+        .from("profiles").update({ team_lead_id: lead.id }).eq("id", ownRep.id);
+      if (error) throw new Error(`team_lead_id: ${error.message}`);
+    });
+
+    it("sees only their own rep, never another team's", async () => {
+      const { data, error } = await lead.db.rpc("call_activity_report", {});
+      expect(error, error?.message).toBeNull();
+      const ids = data.rows.map((r: { id: string }) => r.id);
+      expect(ids).toContain(ownRep.id);
+      expect(ids).not.toContain(otherRep.id);
     });
   });
 

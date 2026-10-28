@@ -576,3 +576,133 @@ describe("the institute-wise report lives on the Institutes tab", () => {
     expect(table).toContain("inactiveStatusCount(totals, statuses)");
   });
 });
+
+/**
+ * showGroupTotals (0064) — the Call Activity Report's two extra columns.
+ *
+ * Additive and opt-in, the same shape `showActivityStatuses` and `showTotals`
+ * already have: default false, only the one new caller passes it, and the
+ * .xlsx export never does — so every existing byte-identity test above this
+ * block is the proof that nothing already shipped moved.
+ */
+describe("showGroupTotals — Open total / Closed total", () => {
+  it("adds no columns when left unset — the default every existing caller relies on", () => {
+    const grid = buildActivityGrid({ reps, columns, showActivities: false });
+    expect(grid.rows[1]).not.toContain("Open total");
+    expect(grid.rows[1]).not.toContain("Closed total");
+    expect(grid.sortKeys).not.toContain("open_total");
+    expect(grid.sortKeys).not.toContain("closed_total");
+  });
+
+  it("does nothing when showTotals is false — a subtotal needs a total to be of", () => {
+    const grid = buildActivityGrid({
+      reps,
+      columns,
+      showActivities: false,
+      showTotals: false,
+      showGroupTotals: true,
+    });
+    expect(grid.rows[1]).not.toContain("Open total");
+    expect(grid.rows[1]).not.toContain("Closed total");
+  });
+
+  it("puts Open total, Closed total, Total in that order in the TOTAL band", () => {
+    const grid = buildActivityGrid({
+      reps,
+      columns,
+      showActivities: false,
+      showGroupTotals: true,
+    });
+    const labels = grid.rows[1].slice(-3);
+    expect(labels).toEqual(["Open total", "Closed total", "Total"]);
+  });
+
+  it("computes each rep's own open and closed subtotals correctly", () => {
+    const grid = buildActivityGrid({
+      reps,
+      columns,
+      showActivities: false,
+      showGroupTotals: true,
+    });
+    // Column order: name, 2 closed statuses, 2 open statuses, open total,
+    // closed total, total. Asha: Session done=1 (closed), Session
+    // scheduled=2 (open) -> open 2, closed 1, total 3.
+    expect(grid.rows[2]).toEqual(["Asha Rao", 1, 0, 2, 0, 2, 1, 3]);
+    // Bhavin: Will not come=3 (closed), First meeting done=1 (open) -> open
+    // 1, closed 3, total 4.
+    expect(grid.rows[3]).toEqual(["Bhavin Shah", 0, 3, 0, 1, 1, 3, 4]);
+  });
+
+  it("sums the two subtotal columns down the rep axis in perColumn, and the grand total still reconciles", () => {
+    const grid = buildActivityGrid({
+      reps,
+      columns,
+      showActivities: false,
+      showGroupTotals: true,
+    });
+    const width = grid.rows[1].length;
+    // Open total column, Closed total column, Total column — the last three.
+    expect(grid.totals?.perColumn.slice(-3)).toEqual([3, 4, 7]);
+    expect(grid.totals?.grand).toBe(7);
+    void width;
+  });
+
+  it("are not foldable — band is null, like TOTAL itself", () => {
+    const grid = buildActivityGrid({
+      reps,
+      columns,
+      showActivities: false,
+      showGroupTotals: true,
+    });
+    const openCol = grid.columns.find((c) => c.key === "open_total");
+    const closedCol = grid.columns.find((c) => c.key === "closed_total");
+    expect(openCol?.band).toBeNull();
+    expect(closedCol?.band).toBeNull();
+  });
+
+  it("are sortable by their own keys", () => {
+    const grid = buildActivityGrid({
+      reps,
+      columns,
+      showActivities: false,
+      showGroupTotals: true,
+    });
+    expect(grid.sortKeys).toContain("open_total");
+    expect(grid.sortKeys).toContain("closed_total");
+  });
+
+  it("totalsFrom (the paginated-footer path) produces the same subtotals as the full body", () => {
+    const full = buildActivityGrid({
+      reps,
+      columns,
+      showActivities: false,
+      showGroupTotals: true,
+    });
+    const paged = buildActivityGrid({
+      reps: [reps[0]],
+      columns,
+      showActivities: false,
+      showGroupTotals: true,
+      totalsFrom: reps,
+    });
+    expect(paged.totals?.perColumn).toEqual(full.totals?.perColumn);
+    expect(paged.totals?.grand).toBe(full.totals?.grand);
+  });
+
+  /**
+   * The real proof this is additive is the hardcoded-hash test above
+   * ("matches the re-baselined export, totals included") — it calls
+   * `buildActivityGrid({ reps, columns })` with no `showGroupTotals` at all
+   * and still produces `BASELINE_SHA256` to the byte, which it could not do
+   * if this field had changed anything about the default path.
+   */
+  it("activitySheet() never passes showGroupTotals, so the client template is unaffected", () => {
+    const text = readFileSync(
+      fileURLToPath(
+        new URL("../../src/lib/exports/activity-export.ts", import.meta.url),
+      ),
+      "utf8",
+    );
+    expect(text).not.toContain("showGroupTotals");
+  });
+});

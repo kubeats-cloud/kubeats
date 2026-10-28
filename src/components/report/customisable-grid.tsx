@@ -55,6 +55,7 @@ export function CustomisableGrid({
   caption,
   showActivities,
   showActivityStatuses,
+  showGroupTotals,
   unsetColumn,
   linkCohorts = false,
   linkReps = false,
@@ -78,6 +79,8 @@ export function CustomisableGrid({
    * it.
    */
   showActivityStatuses?: boolean;
+  /** Call Activity Report only: Open total / Closed total before TOTAL. */
+  showGroupTotals?: boolean;
   unsetColumn?: StatusColumn;
   /** Pipeline report only: every non-zero cell opens the institutes behind it. */
   linkCohorts?: boolean;
@@ -113,9 +116,10 @@ export function CustomisableGrid({
         columns,
         showActivities,
         showActivityStatuses,
+        showGroupTotals,
         unsetColumn,
       }),
-    [reps, columns, showActivities, showActivityStatuses, unsetColumn],
+    [reps, columns, showActivities, showActivityStatuses, showGroupTotals, unsetColumn],
   );
 
   /*
@@ -193,6 +197,7 @@ export function CustomisableGrid({
           columns,
           showActivities,
           showActivityStatuses,
+          showGroupTotals,
           unsetColumn,
           hiddenColumns: hidden,
           totalsFrom: totalsReps,
