@@ -45,6 +45,7 @@ function call(id: string, reportedAt: string): CallReport {
     next_action: null,
     note: null,
     due_date: reportedAt.slice(0, 10),
+    outcome: "done",
     custom_fields: null,
     profiles: { name: "Rep One" },
     institutes: { name: "Institute One", status: "Session scheduled" },

@@ -13,6 +13,8 @@ import { getVisitReport } from "@/lib/closing-report";
 import { activityLabelFor } from "@/lib/validation/visit";
 import { getCallReport } from "@/lib/call-reports";
 import { CallReportDetails } from "@/components/admin/call-reports";
+import { CallReportEdit } from "@/components/admin/call-report-edit";
+import { listStatusCatalogue } from "@/lib/statuses";
 
 export const metadata = { title: "Visit" };
 
@@ -45,6 +47,29 @@ export default async function ReviewVisitPage(props: PageProps<"/review/[id]">) 
       <PageHeader title="Call Report" description={call.institutes?.name}
         action={<Button asChild variant="outline"><Link href="/review">Review</Link></Button>} />
       <CallReportDetails report={call} />
+      {/*
+        ADMIN ONLY. `gate.isAdmin` is requireStaff()'s own flag — a team lead
+        reaches this page (they may review their reps' calls) but never this
+        card, the same split ReassignOwner draws on an institute's page.
+      */}
+      {gate.isAdmin && (
+        <div className="mt-4">
+          <CallReportEdit
+            taskId={call.id}
+            statuses={(await listStatusCatalogue()).map((s) => ({
+              status: s.status,
+              isActive: s.isActive,
+            }))}
+            initial={{
+              status: call.status_set_to,
+              followUpDate: call.follow_up_date,
+              expectedDate: call.expected_date,
+              outcome: call.outcome,
+              notes: call.call_notes,
+            }}
+          />
+        </div>
+      )}
     </PageColumn>;
   }
   const report = await getVisitReport(id);

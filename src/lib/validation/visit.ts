@@ -1056,6 +1056,58 @@ export function callFormDataToInput(formData: FormData) {
   };
 }
 
+/** follow_up_tasks_outcome_valid (0038, widened by 0048) — the app's own copy. */
+export const CALL_OUTCOMES = ["done", "no_answer", "rescheduled", "cancelled"] as const;
+export type CallOutcome = (typeof CALL_OUTCOMES)[number];
+
+/**
+ * An admin's correction to an already-filed Call Report (0063) — net-new,
+ * admin-only, and deliberately narrower than `makeCallSchema` above.
+ *
+ * THE SAME STATUS-DRIVEN DATE RULE, via the same `refineStatusDrivenDates` —
+ * `next_action` is fixed to `null` because this editor has no such field, so
+ * the "or a next action was chosen" half of that rule can never fire; what
+ * is left is exactly `admin_update_call_report()`'s FO016/FO040 checks,
+ * asked here first so a bad request gets a field error instead of a round
+ * trip to the database.
+ *
+ * NOT `refineReportForStatus`. That asks about `session_topic`,
+ * `session_taken_by` and `students_attended` — none of which is an editable
+ * field here — so applying it would demand answers this form never
+ * collects and make some corrections impossible to save. See
+ * `admin_update_call_report()`'s header for the same decision made in SQL.
+ */
+export function makeAdminCallEditSchema(catalogue: StatusCatalogue) {
+  return z
+    .object({
+      task_id: z.uuid("That call report could not be identified."),
+      status_set_to: z
+        .string()
+        .trim()
+        .min(1, "Choose a status.")
+        .refine((v) => selectableStatuses(catalogue).includes(v), {
+          message: "Choose one of the listed statuses.",
+        }),
+      expected_date: absentableDate,
+      follow_up_date: absentableDate,
+      outcome: z
+        .string()
+        .trim()
+        .optional()
+        .transform((v) => (v === undefined || v === "" ? null : v))
+        .nullable()
+        .refine((v) => v === null || (CALL_OUTCOMES as readonly string[]).includes(v), {
+          message: "Choose a valid outcome.",
+        }),
+      notes: absentableText(2000),
+    })
+    .superRefine((value, ctx) => {
+      refineStatusDrivenDates(catalogue, { ...value, next_action: null }, ctx);
+    });
+}
+
+export type AdminCallEditInput = z.infer<ReturnType<typeof makeAdminCallEditSchema>>;
+
 /**
  * The meeting-kind tasks the Meeting section prompts on, with the one
  * collision this shape can actually produce taken out.

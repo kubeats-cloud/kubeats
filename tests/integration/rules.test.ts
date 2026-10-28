@@ -438,6 +438,17 @@ const has0046 = configured
       .then(({ error }) => error?.code !== "PGRST202")
   : false;
 
+/**
+ * 0063 adds admin_update_call_report() and the call_report_edits table.
+ * Probed the same way 0046's log_call() is: calling it with its own
+ * argument name. PGRST202 means the function is not there.
+ */
+const has0063 = configured
+  ? await admin
+      .rpc("admin_update_call_report", { p_task_id: null })
+      .then(({ error }) => error?.code !== "PGRST202")
+  : false;
+
 if (configured && !has0038) {
   console.warn(
     [
@@ -6371,6 +6382,220 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(next?.from_visit_id).toBeNull();
       expect(next?.member).toBe(repA.id);
       expect(next?.done_at).toBeNull();
+    });
+  });
+
+  /**
+   * admin_update_call_report() (migration 0063) — an admin's correction to
+   * an already-filed Call Report. Part 1 of the Call Report review feature.
+   */
+  describe.skipIf(!has0063)("admin_update_call_report() (migration 0063)", () => {
+    const openStatus = "First meeting done";
+    const closedStatus = "RSVP received";
+
+    const loggedCall = async (label: string, status = openStatus) => {
+      const mine = await makeInstitute(repA.id, campusA, label);
+      const { data: created } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+      const { error } = await repA.db.rpc("log_call", {
+        p_task_id: created!.id,
+        p_status_set_to: status,
+        p_follow_up_date: status === openStatus ? iso(1) : null,
+        p_notes: `${TAG} ${label} original notes`,
+      });
+      expect(error, error?.message).toBeNull();
+      return { instituteId: mine, taskId: created!.id as string };
+    };
+
+    it("lets an admin correct status, dates, outcome and notes — and moves the institute's status with it", async () => {
+      const { instituteId, taskId } = await loggedCall("admin-edit-latest");
+
+      const { error } = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: taskId,
+        p_status_set_to: closedStatus,
+        p_follow_up_date: null,
+        p_expected_date: null,
+        p_outcome: "rescheduled",
+        p_notes: `${TAG} corrected by admin`,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: task } = await admin
+        .from("follow_up_tasks")
+        .select("status_set_to, follow_up_date, outcome, call_notes, next_action")
+        .eq("id", taskId)
+        .single();
+      expect(task?.status_set_to).toBe(closedStatus);
+      expect(task?.follow_up_date).toBeNull();
+      expect(task?.outcome).toBe("rescheduled");
+      expect(task?.call_notes).toBe(`${TAG} corrected by admin`);
+      // Closed status, no next action — the same rule log_call() enforces.
+      expect(task?.next_action).toBeNull();
+
+      // THE STATUS CHANGE APPEARS ELSEWHERE: this call was the institute's
+      // only, hence most recent, status-setting event, so the institute's
+      // own status moved with it — same trigger cascade as a fresh filing.
+      const { data: institute } = await admin
+        .from("institutes").select("status").eq("id", instituteId).single();
+      expect(institute?.status).toBe(closedStatus);
+
+      const { data: history } = await admin
+        .from("institute_status_history")
+        .select("status, changed_by, visit_id")
+        .eq("institute_id", instituteId)
+        .order("changed_at", { ascending: false })
+        .limit(1)
+        .single();
+      expect(history?.status).toBe(closedStatus);
+      expect(history?.changed_by).toBe(boss.id);
+      expect(history?.visit_id, "a direct update, not attributed to a visit").toBeNull();
+    });
+
+    it("persists a follow-up-only edit, leaving the status and institute untouched", async () => {
+      const { instituteId, taskId } = await loggedCall("admin-edit-followup-only");
+
+      const { error } = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: taskId,
+        p_status_set_to: openStatus,
+        p_follow_up_date: iso(5),
+        p_outcome: "done",
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("follow_up_date, status_set_to").eq("id", taskId).single();
+      expect(task?.follow_up_date).toBe(iso(5));
+      expect(task?.status_set_to).toBe(openStatus);
+
+      const { data: institute } = await admin
+        .from("institutes").select("status").eq("id", instituteId).single();
+      expect(institute?.status).toBe(openStatus);
+    });
+
+    it("does NOT move the institute's status when a later call has already decided it", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "admin-edit-not-latest");
+
+      const { data: older } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+      const olderLog = await repA.db.rpc("log_call", {
+        p_task_id: older!.id, p_status_set_to: openStatus,
+        p_follow_up_date: iso(1), p_notes: `${TAG} older call`,
+      });
+      expect(olderLog.error, olderLog.error?.message).toBeNull();
+
+      // A later call, reported after the first, decides the institute is
+      // now closed.
+      const { data: newer } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+      const newerLog = await repA.db.rpc("log_call", {
+        p_task_id: newer!.id, p_status_set_to: closedStatus,
+        p_notes: `${TAG} newer call closes it`,
+      });
+      expect(newerLog.error, newerLog.error?.message).toBeNull();
+
+      const { data: before } = await admin
+        .from("institutes").select("status").eq("id", mine).single();
+      expect(before?.status, "the newer call decided it").toBe(closedStatus);
+
+      // Correcting the OLDER call must not drag the institute backwards.
+      const { error } = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: older!.id,
+        p_status_set_to: openStatus,
+        p_follow_up_date: iso(9),
+        p_outcome: "done",
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: olderTask } = await admin
+        .from("follow_up_tasks").select("status_set_to, follow_up_date").eq("id", older!.id).single();
+      expect(olderTask?.status_set_to, "the call row itself still moves").toBe(openStatus);
+      expect(olderTask?.follow_up_date).toBe(iso(9));
+
+      const { data: after } = await admin
+        .from("institutes").select("status").eq("id", mine).single();
+      expect(after?.status, "the institute stays on the newer call's word").toBe(closedStatus);
+    });
+
+    it("never inserts a new follow_up_tasks row", async () => {
+      const { taskId } = await loggedCall("admin-edit-no-new-task");
+
+      const before = await admin
+        .from("follow_up_tasks").select("id", { count: "exact", head: true });
+
+      const { error } = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: taskId, p_status_set_to: closedStatus, p_outcome: "done",
+      });
+      expect(error, error?.message).toBeNull();
+
+      const after = await admin
+        .from("follow_up_tasks").select("id", { count: "exact", head: true });
+      expect(after.count).toBe(before.count);
+    });
+
+    it("records one append-only call_report_edits row with the old and new values", async () => {
+      const { taskId } = await loggedCall("admin-edit-audit-trail");
+
+      const { error } = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: taskId,
+        p_status_set_to: closedStatus,
+        p_outcome: "cancelled",
+        p_notes: `${TAG} audited edit`,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const { data: edits } = await admin
+        .from("call_report_edits")
+        .select("old_status_set_to, new_status_set_to, old_outcome, new_outcome, edited_by")
+        .eq("call_id", taskId);
+      expect(edits ?? [], "exactly one edit row").toHaveLength(1);
+      expect(edits?.[0].old_status_set_to).toBe(openStatus);
+      expect(edits?.[0].new_status_set_to).toBe(closedStatus);
+      expect(edits?.[0].old_outcome).toBe("done");
+      expect(edits?.[0].new_outcome).toBe("cancelled");
+      expect(edits?.[0].edited_by).toBe(boss.id);
+
+      // Append-only: even the admin who made it cannot rewrite it.
+      const { error: mutateError } = await boss.db
+        .from("call_report_edits")
+        .update({ new_outcome: "done" })
+        .eq("call_id", taskId);
+      expect(mutateError?.code).toBe("42501");
+    });
+
+    it("refuses a rep — admin only, stricter than follow_up_tasks RLS", async () => {
+      const { taskId } = await loggedCall("admin-edit-non-admin");
+
+      const { error } = await repA.db.rpc("admin_update_call_report", {
+        p_task_id: taskId, p_status_set_to: closedStatus, p_outcome: "done",
+      });
+      expect(error?.code).toBe("FO045");
+
+      const { data: task } = await admin
+        .from("follow_up_tasks").select("status_set_to").eq("id", taskId).single();
+      expect(task?.status_set_to, "unchanged").toBe(openStatus);
+    });
+
+    it("refuses a call that has not been filed yet", async () => {
+      const mine = await makeInstitute(repA.id, campusA, "admin-edit-unfiled");
+      const { data: open } = await repA.db
+        .from("follow_up_tasks")
+        .insert({ member: repA.id, institute_id: mine, kind: "call" })
+        .select("id")
+        .single();
+
+      const { error } = await boss.db.rpc("admin_update_call_report", {
+        p_task_id: open!.id, p_status_set_to: closedStatus, p_outcome: "done",
+      });
+      expect(error?.code).toBe("FO046");
     });
   });
 

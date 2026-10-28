@@ -4,12 +4,16 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
+import { requireAdmin } from "@/lib/admin";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { makeReportSchema, feedbackFormDataToInput } from "@/lib/validation/feedback";
-import { eventDateRequired, followUpRequired, nextActionShown, visitFieldErrors } from "@/lib/validation/visit";
+import { eventDateRequired, followUpRequired, nextActionShown, visitFieldErrors, makeAdminCallEditSchema } from "@/lib/validation/visit";
 import { selectableStatuses } from "@/lib/validation/institute";
 import { listStatusFields } from "@/lib/status-fields";
+import { fieldErrorsFrom, textOf } from "@/lib/validation/admin";
+import { logError, toFriendlyMessage } from "@/lib/errors";
 import type { FormState } from "@/lib/visit-form-state";
+import type { AdminState } from "@/lib/admin-form-state";
 
 export async function submitCallReport(formData: FormData): Promise<FormState & { ok?: boolean }> {
   const user = await getCurrentUser();
@@ -78,4 +82,80 @@ export async function submitCallReport(formData: FormData): Promise<FormState & 
 
   revalidatePath("/", "layout");
   return {error:null,fieldErrors:{},ok:true};
+}
+
+/**
+ * An admin corrects an already-filed Call Report.
+ *
+ * ADMIN ONLY — `requireAdmin()` here is stricter than `follow_up_tasks`'
+ * own RLS, which already lets a team lead reach their rep's row. The RPC
+ * repeats the check in SQL (FO045) so the two cannot drift; this gate just
+ * means a team lead never reaches the RPC with a request worth sending.
+ *
+ * Editable fields only: status, follow-up date, expected date, outcome,
+ * notes. `makeAdminCallEditSchema()` (validation/visit.ts) is the same
+ * status-driven date rule Log Call uses, asked here first so a bad request
+ * gets a field error before the round trip; the RPC (FO016/FO040) is still
+ * the control.
+ */
+export async function adminUpdateCallReport(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return { error: gate.error, fieldErrors: {} };
+
+  const catalogue = await listStatusCatalogue();
+  const optional = (key: string) => textOf(formData, key) || null;
+
+  const parsed = makeAdminCallEditSchema(catalogue).safeParse({
+    task_id: textOf(formData, "task_id"),
+    status_set_to: textOf(formData, "status_set_to"),
+    follow_up_date: optional("follow_up_date"),
+    expected_date: optional("expected_date"),
+    outcome: optional("outcome"),
+    notes: optional("notes"),
+  });
+
+  if (!parsed.success) {
+    return { error: "Check the call report fields.", fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+  const value = parsed.data;
+
+  const { error } = await gate.supabase.rpc("admin_update_call_report", {
+    p_task_id: value.task_id,
+    p_status_set_to: value.status_set_to,
+    p_follow_up_date: value.follow_up_date,
+    p_expected_date: value.expected_date,
+    p_outcome: value.outcome,
+    p_notes: value.notes,
+  });
+
+  if (error) {
+    logError("admin:update-call-report", error);
+    if (error.code === "FO045") {
+      return { error: "Only an admin can edit a Call Report.", fieldErrors: {} };
+    }
+    if (error.code === "FO046") {
+      return { error: "That Call Report could not be found.", fieldErrors: {} };
+    }
+    if (error.code === "FO016") {
+      return {
+        error: "That status leaves the institute open, so a follow-up date is needed.",
+        fieldErrors: { follow_up_date: "Enter the Follow-up Date." },
+      };
+    }
+    if (error.code === "FO040") {
+      return { error: "Enter the status date.", fieldErrors: { expected_date: "Enter the status date." } };
+    }
+    return { error: toFriendlyMessage(error, "We could not save those changes."), fieldErrors: {} };
+  }
+
+  // The institute's own status may have moved too (when this call was its
+  // most recent status-setting event), so Pending, the Daily Plan and the
+  // institute's own page all need to see it, not only Review.
+  revalidatePath("/review", "layout");
+  revalidatePath("/institutes", "layout");
+  revalidatePath("/pending");
+  return { error: null, fieldErrors: {}, ok: true, message: "Saved." };
 }
