@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
+import { ChevronLeftIcon, ChevronRightIcon, FileSpreadsheetIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
   totalsRow,
 } from "@/lib/call-activity-report";
 import { CallActivityFilters } from "@/components/report/call-activity-filters";
+import { DownloadButton } from "@/components/report/export-excel";
 import { FormNotice } from "@/components/form-notice";
 
 export const metadata = { title: "Review" };
@@ -293,6 +294,31 @@ export default async function ReviewPage(props: PageProps<"/review">) {
           <FormNotice message={notice} />
         </div>
       ))}
+
+      {/*
+        THE SAME FILTERS THE TABLE IS SHOWING, built from the validated
+        `callFilters` rather than raw searchParams — a download must match
+        what is on screen even when a bad field was dropped and explained
+        above. The route re-validates independently; this is only the link.
+      */}
+      <div className="mb-4">
+        <DownloadButton
+          href={`/api/export/call-activity?${new URLSearchParams(
+            Object.entries({
+              from: callFilters.from,
+              to: callFilters.to,
+              member: callFilters.member,
+              institute: callFilters.institute,
+              status: callFilters.status,
+            }).filter((entry): entry is [string, string] => Boolean(entry[1])),
+          ).toString()}`}
+          variant="outline"
+          className="h-10"
+        >
+          <FileSpreadsheetIcon className="size-4" aria-hidden />
+          Download Excel
+        </DownloadButton>
+      </div>
 
       {!callActivity.ok ? (
         <ErrorState message={callActivity.error} />

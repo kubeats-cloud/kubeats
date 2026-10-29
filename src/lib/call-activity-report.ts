@@ -3,6 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 import { ZERO_COUNTS } from "@/lib/validation/weekly";
 import type { RepRow, StatusColumn, StatusColumns } from "@/lib/exports/activity-grid";
 import type { StatusCatalogue } from "@/lib/validation/institute";
+import { totalsRow, type CallActivityTotals } from "@/lib/exports/call-activity-grid";
+
+/** Re-exported so existing callers (the Review page, its tests) need no
+ *  import-path change — the canonical definitions now live beside the
+ *  .xlsx sheet builder in `exports/call-activity-grid.ts`, which is PURE
+ *  and must not import this server-only module. */
+export { totalsRow };
+export type { CallActivityTotals };
 
 /**
  * The Call Activity Report (0064) — one row per rep, call counts by CURRENT
@@ -34,13 +42,6 @@ export interface CallActivitySort {
   dir: "asc" | "desc";
 }
 
-export interface CallActivityTotals {
-  byStatus: Record<string, number>;
-  openTotal: number;
-  closedTotal: number;
-  total: number;
-}
-
 export interface CallActivityReportModel {
   reps: RepRow[];
   columns: StatusColumns;
@@ -65,17 +66,14 @@ interface RpcRow {
   total: number;
 }
 
-interface RpcPayload {
+/** Exported so `call-activity-export.ts` can call the same RPC and shape
+ *  its answer the same way — one mapping, never two that could drift. */
+export interface RpcPayload {
   total: number;
   pages: number;
   page: number;
   statuses: RpcStatus[];
-  totals: {
-    byStatus: Record<string, number>;
-    openTotal: number;
-    closedTotal: number;
-    total: number;
-  };
+  totals: CallActivityTotals;
   rows: RpcRow[];
 }
 
@@ -91,6 +89,35 @@ function columnsFrom(statuses: RpcStatus[]): StatusColumns {
   return {
     closed: statuses.filter((s) => s.category === "closed").map(toColumn),
     open: statuses.filter((s) => s.category === "open").map(toColumn),
+  };
+}
+
+/**
+ * The ONE mapping from the RPC's jsonb answer to `RepRow[]`/`StatusColumns`
+ * — shared by the screen (`getCallActivityReport`, one page) and the
+ * export (`call-activity-export.ts`, every row via `p_page: 0`), so the two
+ * can never shape the same answer two different ways.
+ */
+export function shapeRpcPayload(
+  payload: RpcPayload,
+): Pick<CallActivityReportModel, "reps" | "columns" | "totals" | "total" | "page" | "pages"> {
+  const columns = columnsFrom(payload.statuses);
+  const reps: RepRow[] = payload.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    // Unused — showActivities is always false for this report — but
+    // RepRow.activities is required, so a zeroed shape costs nothing and
+    // adds nothing to any cell this screen renders.
+    activities: ZERO_COUNTS,
+    statuses: row.statuses,
+  }));
+  return {
+    reps,
+    columns,
+    totals: payload.totals,
+    total: payload.total,
+    page: payload.page,
+    pages: payload.pages,
   };
 }
 
@@ -123,44 +150,7 @@ export async function getCallActivityReport(
     };
   }
 
-  const payload = data as RpcPayload;
-  const columns = columnsFrom(payload.statuses);
-
-  const reps: RepRow[] = payload.rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    // Unused — showActivities is always false for this report — but
-    // RepRow.activities is required, so a zeroed shape costs nothing and
-    // adds nothing to any cell this screen renders.
-    activities: ZERO_COUNTS,
-    statuses: row.statuses,
-  }));
-
-  return {
-    ok: true,
-    reps,
-    columns,
-    totals: payload.totals,
-    total: payload.total,
-    page: payload.page,
-    pages: payload.pages,
-  };
-}
-
-/**
- * The footer's "All reps" row, as a single `RepRow` — fed to
- * `CustomisableGrid`'s `totalsReps` in place of every rep's own row.
- *
- * `buildActivityGrid()` recomputes the Open/Closed/Total subtotals from
- * `.statuses` itself (see `activity-grid.ts`'s `showGroupTotals` body), so
- * summing a SINGLE row whose `.statuses` is already the server's full-
- * population sum (`totals.byStatus`, computed over every matching rep, not
- * only the visible page) reproduces exactly the same footer a true
- * "all reps" totals-row reduction would — without this screen ever holding
- * more than one page of individual `RepRow`s at a time.
- */
-export function totalsRow(totals: CallActivityTotals): RepRow {
-  return { name: "", activities: ZERO_COUNTS, statuses: totals.byStatus };
+  return { ok: true, ...shapeRpcPayload(data as RpcPayload) };
 }
 
 /**

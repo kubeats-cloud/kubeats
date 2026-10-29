@@ -98,3 +98,31 @@ describe("CallActivityFilters component", () => {
     expect(component).not.toMatch(/\breps\.filter\(|\brows\.filter\(/);
   });
 });
+
+/**
+ * Part 4 — "Download Excel": its own route, built from the filters actually
+ * on screen, visible to admin and team lead alike (no isAdmin-only wrap).
+ */
+describe("the Call Activity Report's Download Excel button", () => {
+  it("sits between the filter bar and the table, using the same validated filters", () => {
+    const filtersIndex = page.indexOf("<CallActivityFilters");
+    const downloadIndex = page.indexOf("/api/export/call-activity");
+    const gridIndex = page.indexOf("<CustomisableGrid");
+    expect(filtersIndex).toBeGreaterThan(-1);
+    expect(downloadIndex).toBeGreaterThan(filtersIndex);
+    expect(downloadIndex).toBeLessThan(gridIndex);
+    expect(page).toContain("callFilters.from");
+    expect(page).toContain("callFilters.institute");
+  });
+
+  it("is not wrapped in an isAdmin-only check", () => {
+    const downloadIndex = page.indexOf("/api/export/call-activity");
+    const nearby = page.slice(Math.max(0, downloadIndex - 400), downloadIndex);
+    expect(nearby).not.toContain("gate.isAdmin &&");
+  });
+
+  it("downloads from its own route, not the Visit/Activity export's", () => {
+    expect(page).toContain("/api/export/call-activity");
+    expect(page).not.toContain("/api/export/activity");
+  });
+});

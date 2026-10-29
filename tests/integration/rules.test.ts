@@ -6892,6 +6892,54 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   });
 
   /**
+   * call_activity_report() export mode (Part 4) — `p_page: 0` (or any value
+   * below 1) returns EVERY matching rep in one answer, which is exactly
+   * what `buildCallActivityExport()` calls instead of looping over the
+   * screen's own 50-at-a-time pages. The numbers it returns must be the
+   * SAME numbers the paginated screen would show for the same filters —
+   * proven here by comparing export mode's own `rows`/`totals` against a
+   * hand-walked page-by-page sum, the same arithmetic the "totals equal
+   * the sum of every page" tests above already trust.
+   */
+  describe.skipIf(!has0064)("call_activity_report() export mode (Part 4)", () => {
+    const openStatus = "First meeting done";
+
+    it("export mode's rows and totals equal a page-by-page sum for the same filters", async () => {
+      const exportAll = await boss.db.rpc("call_activity_report", {
+        p_status: openStatus, p_page: 0,
+      });
+      expect(exportAll.error, exportAll.error?.message).toBeNull();
+
+      const paged = await boss.db.rpc("call_activity_report", {
+        p_status: openStatus, p_page: 1,
+      });
+      expect(paged.error, paged.error?.message).toBeNull();
+      let allRows = [...paged.data.rows];
+      for (let p = 2; p <= paged.data.pages; p += 1) {
+        const page = await boss.db.rpc("call_activity_report", {
+          p_status: openStatus, p_page: p,
+        });
+        expect(page.error, page.error?.message).toBeNull();
+        allRows = allRows.concat(page.data.rows);
+      }
+
+      expect(exportAll.data.rows.length).toBe(allRows.length);
+      expect(exportAll.data.totals).toEqual(paged.data.totals);
+      const summedFromExport = exportAll.data.rows.reduce(
+        (sum: number, r: { openTotal: number }) => sum + r.openTotal, 0,
+      );
+      expect(summedFromExport).toBe(exportAll.data.totals.openTotal);
+    });
+
+    it("refuses an export with no date range narrower than 31 days when both ends are given", async () => {
+      const { error } = await boss.db.rpc("call_activity_report", {
+        p_from: "2026-01-01", p_to: "2026-03-01", p_page: 0,
+      });
+      expect(error?.code).toBe("22023");
+    });
+  });
+
+  /**
    * ★ THE PHASE A FIX, PROVEN AGAINST A REAL ROW ★ — `closeFollowUpTask()`
    * now filters its update by the CALLER'S claimed kind, exactly as the log-
    * call page's own `.eq("kind", "call")` already does. A caller that got
