@@ -12,7 +12,8 @@ import { TargetStatusesPanel } from "@/components/weekly/target-statuses-panel";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getWeekSummary, memberName } from "@/lib/week-summary";
-import { listTargetStatuses } from "@/lib/target-statuses";
+import { listTargetStatusRows, type TargetStatusRow } from "@/lib/target-statuses";
+import { listCampuses } from "@/lib/campuses";
 import { AdminTargetRoster } from '@/components/weekly/admin-target-roster';
 import { completionPercent } from "@/lib/validation/weekly";
 import { formatWeekRange, normaliseWeekParam } from "@/lib/weeks";
@@ -67,7 +68,10 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
   const adminHome = isAdmin(user) && !viewingOther;
 
   if (adminHome) {
-    const statuses = await listTargetStatuses();
+    const [statuses, campuses] = await Promise.all([
+      listTargetStatusRows(),
+      listCampuses(),
+    ]);
     return (
       <PageColumn>
         <PageHeader
@@ -77,6 +81,7 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
         <TargetStatusesPanel
           statuses={statuses.ok ? statuses.statuses : []}
           canAdd
+          campuses={campuses}
         />
         {!statuses.ok && <ErrorState message="Target statuses could not be loaded." />}
         <AdminTargetRoster week={weekStart} page={first(searchParams.page)} />
@@ -85,12 +90,17 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
   }
 
   // Only the rep's own view renders the list below — see where it is used.
-  const [result, name, statuses] = await Promise.all([
+  // Campuses are fetched alongside it too: campus names are readable by
+  // every signed-in user (campuses_select), and a status scoped to the
+  // rep's own campus should read as that campus's name, not "Unknown
+  // campus" for want of the lookup list.
+  const [result, name, statuses, repCampuses] = await Promise.all([
     getWeekSummary(memberId, weekStart),
     viewingOther ? memberName(memberId) : Promise.resolve(user.name),
     viewingOther
-      ? Promise.resolve({ ok: true as const, statuses: [] as string[] })
-      : listTargetStatuses(),
+      ? Promise.resolve({ ok: true as const, statuses: [] as TargetStatusRow[] })
+      : listTargetStatusRows(),
+    viewingOther ? Promise.resolve([]) : listCampuses(),
   ]);
 
   const displayName = name ?? "this member";
@@ -207,6 +217,7 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
           <TargetStatusesPanel
             statuses={statuses.ok ? statuses.statuses : []}
             canAdd={false}
+            campuses={repCampuses}
           />
         </div>
       )}

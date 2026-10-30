@@ -23,7 +23,10 @@ describe('target-status validation feedback',() => {
   });
   it('trims a valid saved name and refreshes Targets',async () => {
     expect((await add('  Synthetic Status  ')).ok).toBe(true);
-    expect(mocks.insert).toHaveBeenCalledWith({name:'Synthetic Status'});
+    // campus_id is new (migration 0066): a form that sends no campus_id at
+    // all (this test's FormData only sets `name`) means every campus, same
+    // as an explicit "".
+    expect(mocks.insert).toHaveBeenCalledWith({name:'Synthetic Status', campus_id: null});
     expect(mocks.revalidate).toHaveBeenCalledWith('/targets');
   });
   it('does not insert for a non-admin',async () => {
