@@ -99,7 +99,7 @@ export default async function SettingsPage() {
       </div>
 
       <SectionTitle className="mt-8">Status Management</SectionTitle>
-      <StatusesPanel statuses={statuses} fields={statusFields} />
+      <StatusesPanel statuses={statuses} fields={statusFields} campuses={campuses} />
 
       <SectionTitle className="mt-8">Storage</SectionTitle>
       <Card>

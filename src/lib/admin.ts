@@ -105,6 +105,17 @@ export interface StatusAdminRow {
   asksHeadCount: boolean;
   /** How many institutes, visits and history rows are pinned to this status. */
   usedBy: number;
+  /**
+   * Which campus this status is scoped to (migration 0065), or null for
+   * every campus. The NAME is deliberately not resolved here — the panel
+   * already receives the campus list for its own picker, and resolving a
+   * label a second time from an id it was already given would be the same
+   * fact kept in two places. An admin always sees every row regardless of
+   * this value: `listStatusRows()` reads through the signed-in user's own
+   * client, and institute_statuses_select already lets an admin see every
+   * campus's statuses (0065) — no app-side filter is added here.
+   */
+  campusId: string | null;
 }
 
 export async function listStatusRows(): Promise<StatusAdminRow[]> {
@@ -114,7 +125,7 @@ export async function listStatusRows(): Promise<StatusAdminRow[]> {
     supabase
       .from("institute_statuses")
       .select(
-        "status, category, tone, sort_order, is_active, asks_expected_date, asks_session_detail, asks_head_count",
+        "status, category, tone, sort_order, is_active, asks_expected_date, asks_session_detail, asks_head_count, campus_id",
       )
       .order("sort_order")
       .order("status"),
@@ -148,6 +159,7 @@ export async function listStatusRows(): Promise<StatusAdminRow[]> {
     asksSessionDetail: row.asks_session_detail ?? false,
     asksHeadCount: row.asks_head_count ?? false,
     usedBy: used.get(row.status) ?? 0,
+    campusId: row.campus_id ?? null,
   }));
 }
 

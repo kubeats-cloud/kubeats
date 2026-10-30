@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
-import { addStatus, setStatusActive } from "@/lib/admin-actions";
+import { addStatus, setStatusActive, setStatusCampus } from "@/lib/admin-actions";
 import { addStatusField, deleteStatusField } from "@/lib/status-field-actions";
 import type { StatusField } from "@/lib/status-fields";
 import { EMPTY_ADMIN_STATE, type AdminState } from "@/lib/admin-form-state";
@@ -28,7 +28,19 @@ import {
   type StatusTone,
 } from "@/lib/validation/institute";
 import type { StatusAdminRow } from "@/lib/admin";
+import { campusLabel, type Campus } from "@/lib/campus-display";
 import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
+
+/**
+ * Not "" — that is indistinguishable from a control nobody has touched. Same
+ * sentinel material-upload-form.tsx uses for the same reason: a Radix Select
+ * needs a real string value for its "every campus" option. Unlike that form,
+ * campus is REQUIRED here rather than optional-with-a-blank-mount — a status
+ * has to say which campus sees it or every campus does — so this sentinel is
+ * also the field's deliberate default, matching every status added before
+ * campus scoping existed.
+ */
+const ALL_CAMPUSES = "__all__";
 
 /**
  * The status vocabulary, which an admin maintains from here.
@@ -58,9 +70,11 @@ import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
 export function StatusesPanel({
   statuses,
   fields = [],
+  campuses = [],
 }: {
   statuses: StatusAdminRow[];
   fields?: StatusField[];
+  campuses?: Campus[];
 }) {
   const [serverState, formAction, isPending] = useActionState(
     addStatus,
@@ -73,8 +87,20 @@ export function StatusesPanel({
   const [asksDate, setAsksDate] = useState(false);
   const [asksSession, setAsksSession] = useState(false);
   const [asksCount, setAsksCount] = useState(false);
+  const [campusId, setCampusId] = useState<string>(ALL_CAMPUSES);
   const [retiring, startRetiring] = useTransition();
+  const [campusEditing, startCampusEditing] = useTransition();
+  const [campusEditState, setCampusEditState] = useState<
+    (AdminState & { status?: string }) | null
+  >(null);
   const [fieldMessage, setFieldMessage] = useState<{ error?: string | null; ok?: boolean } | null>(null);
+
+  /** The label an admin already knows: the campus's own, or "All campuses". */
+  function campusLabelFor(id: string | null): string {
+    if (id === null) return "All campuses";
+    const campus = campuses.find((c) => c.id === id);
+    return campus ? campusLabel(campus) : "Unknown campus";
+  }
 
   async function handleAddField(event: React.FormEvent<HTMLFormElement>, statusName: string) {
     event.preventDefault();
@@ -135,6 +161,7 @@ export function StatusesPanel({
       asks_expected_date: asksDate,
       asks_session_detail: asksSession,
       asks_head_count: asksCount,
+      campus_id: campusId === ALL_CAMPUSES ? "" : campusId,
     });
     if (!parsed.success) {
       setClientState({
@@ -156,6 +183,9 @@ export function StatusesPanel({
     setAsksDate(false);
     setAsksSession(false);
     setAsksCount(false);
+    // Back to ALL_CAMPUSES, not "" — the field is required and that is its
+    // intended default, matching every status added before this existed.
+    setCampusId(ALL_CAMPUSES);
   }
 
   return (
@@ -183,6 +213,11 @@ export function StatusesPanel({
                   <Badge variant={row.tone as StatusTone}>
                     {row.category === "open" ? "Open" : "Closed"}
                   </Badge>
+                  {/* Which campus owns this status — "a column or label" so an
+                      admin can tell at a glance, independent of the picker
+                      below that changes it. Neutral tone: this is not an
+                      outcome, just a scope. */}
+                  <Badge variant="neutral">{campusLabelFor(row.campusId)}</Badge>
                   {!row.isActive && <Badge variant="neutral">Retired</Badge>}
                 </div>
 
@@ -200,28 +235,80 @@ export function StatusesPanel({
                   </span>
                 </div>
 
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-9"
-                  disabled={retiring}
-                  onClick={() =>
-                    startRetiring(async () => {
-                      setRetireState(
-                        await setStatusActive(row.status, !row.isActive),
-                      );
-                    })
-                  }
-                >
-                  {row.isActive ? (
-                    "Retire"
-                  ) : (
-                    <>
-                      <RotateCcwIcon className="size-4" aria-hidden />
-                      Restore
-                    </>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-9"
+                    disabled={retiring}
+                    onClick={() =>
+                      startRetiring(async () => {
+                        setRetireState(
+                          await setStatusActive(row.status, !row.isActive),
+                        );
+                      })
+                    }
+                  >
+                    {row.isActive ? (
+                      "Retire"
+                    ) : (
+                      <>
+                        <RotateCcwIcon className="size-4" aria-hidden />
+                        Restore
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Re-scope this one status — the edit half of Part 2. Changing
+                      this does not touch category, tone or the asks_* flags: the
+                      action updates campus_id alone. */}
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor={`campus-${row.status}`} className="text-muted-foreground text-xs">
+                      Campus
+                    </Label>
+                    <Select
+                      value={row.campusId ?? ALL_CAMPUSES}
+                      disabled={campusEditing}
+                      onValueChange={(value) => {
+                        const nextCampusId = value === ALL_CAMPUSES ? null : value;
+                        startCampusEditing(async () => {
+                          const result = await setStatusCampus(row.status, nextCampusId);
+                          setCampusEditState({ ...result, status: row.status });
+                        });
+                      }}
+                    >
+                      <SelectTrigger
+                        id={`campus-${row.status}`}
+                        className="h-8 w-auto min-w-[9rem] text-xs"
+                        aria-label={`Campus for ${row.status}`}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL_CAMPUSES}>All campuses</SelectItem>
+                        {campuses.map((campus) => (
+                          <SelectItem key={campus.id} value={campus.id}>
+                            {campusLabel(campus)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {campusEditState?.status === row.status && campusEditState.error && (
+                  <FormNotice message={campusEditState.error} />
+                )}
+                {campusEditState?.status === row.status &&
+                  campusEditState.ok &&
+                  campusEditState.message && (
+                    <p
+                      role="status"
+                      className="bg-success-subtle text-success-subtle-foreground rounded-md px-3 py-2 text-xs"
+                    >
+                      {campusEditState.message}
+                    </p>
                   )}
-                </Button>
 
                 {/* Status-specific dynamic fields */}
                 {(() => {
@@ -411,6 +498,42 @@ export function StatusesPanel({
               </Select>
               {fieldError("tone")}
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Campus</Label>
+            {/* UNLIKE category and tone above, this mounts to a real default
+                rather than empty — "All campuses" is the right answer unless
+                an admin has a reason to say otherwise, and a status scoped by
+                accident is a rep on every other campus losing it with no clue
+                why. */}
+            <input
+              type="hidden"
+              name="campus_id"
+              value={campusId === ALL_CAMPUSES ? "" : campusId}
+            />
+            <Select value={campusId} onValueChange={setCampusId}>
+              <SelectTrigger
+                className="h-11 w-full"
+                aria-label="Campus"
+                aria-invalid={shown.fieldErrors.campus_id ? true : undefined}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_CAMPUSES}>All campuses</SelectItem>
+                {campuses.map((campus) => (
+                  <SelectItem key={campus.id} value={campus.id}>
+                    {campusLabel(campus)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-xs">
+              A campus-specific status is visible only to that campus&rsquo;s
+              reps (and to an admin or a team lead who supervises one).
+            </p>
+            {fieldError("campus_id")}
           </div>
 
           <fieldset className="space-y-2">

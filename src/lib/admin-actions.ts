@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { requireAdmin, requireStaff, selectPhotosUpTo } from "@/lib/admin";
+import { requireAdmin, requireStaff, selectPhotosUpTo, type AdminGate } from "@/lib/admin";
 import { ensureAreas, ensureCity, ensureState } from "@/lib/locations";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import type {
@@ -26,6 +26,7 @@ import {
   purposeUpdateSchema,
   reassignSchema,
   removeSchema,
+  statusCampusSchema,
   statusRenameSchema,
   statusSchema,
   statusUpdateSchema,
@@ -141,6 +142,35 @@ const STATUS_IN_USE =
   "That status is already recorded on visits, so it cannot be renamed. " +
   "Add the corrected one and retire this.";
 
+const CHOOSE_LISTED_CAMPUS = "Choose one of the listed campuses.";
+
+/**
+ * Null (every campus) always passes; a real id must name one of the campuses
+ * currently ACTIVE.
+ *
+ * `statusSchema`/`statusCampusSchema` only check that a non-null value looks
+ * like a uuid — they cannot ask "is this active right now", because that
+ * answer is live data, not a shape. The institute_statuses.campus_id FOREIGN
+ * KEY (0065) would catch a campus that does not exist at all, but not one
+ * that exists and has been deactivated — `campuses.active` is not part of
+ * that key. So this is the one place that asks the real question, the same
+ * way `listCampuses()` already answers it for the Add-rep and Add-material
+ * pickers: active campuses only.
+ */
+async function campusIsActiveOrAll(
+  supabase: AdminGate["supabase"],
+  campusId: string | null,
+): Promise<boolean> {
+  if (campusId === null) return true;
+  const { data, error } = await supabase
+    .from("campuses")
+    .select("id")
+    .eq("id", campusId)
+    .eq("active", true)
+    .maybeSingle();
+  return !error && data !== null;
+}
+
 /**
  * Add a status to the vocabulary.
  *
@@ -169,9 +199,17 @@ export async function addStatus(
     asks_expected_date: textOf(formData, "asks_expected_date") === "yes",
     asks_session_detail: textOf(formData, "asks_session_detail") === "yes",
     asks_head_count: textOf(formData, "asks_head_count") === "yes",
+    campus_id: textOf(formData, "campus_id"),
   });
   if (!parsed.success) {
     return { error: CHECK_FIELDS, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+
+  if (!(await campusIsActiveOrAll(gate.supabase, parsed.data.campus_id))) {
+    return {
+      error: CHECK_FIELDS,
+      fieldErrors: { campus_id: CHOOSE_LISTED_CAMPUS },
+    };
   }
 
   const { error } = await gate.supabase.from("institute_statuses").insert({
@@ -181,12 +219,16 @@ export async function addStatus(
     asks_expected_date: parsed.data.asks_expected_date,
     asks_session_detail: parsed.data.asks_session_detail,
     asks_head_count: parsed.data.asks_head_count,
+    campus_id: parsed.data.campus_id,
   });
 
   if (error) {
     logError("admin:status-add", error);
     if (error.code === UNIQUE_VIOLATION) {
       return denied("A status with that name already exists.");
+    }
+    if (error.code === FOREIGN_KEY_VIOLATION) {
+      return denied(CHOOSE_LISTED_CAMPUS);
     }
     return denied(toFriendlyMessage(error, "We could not add that status."));
   }
@@ -252,6 +294,76 @@ export async function setStatusActive(
     message: isActive
       ? `“${parsed.data.status}” is available again.`
       : `“${parsed.data.status}” is retired. Visits that already carry it are unchanged.`,
+  };
+}
+
+/**
+ * Re-scope an existing status to another campus, or back to every campus.
+ *
+ * THIS IS HOW THE KOLKATA STATUSES GET SCOPED: migration 0065 backfilled
+ * every existing status to campus_id = null, deliberately, so nothing was
+ * re-scoped by the migration itself — an admin does it from here, one status
+ * at a time, on purpose. There is no bulk "scope everything named Kolkata"
+ * action; this changes exactly the one row it is given.
+ *
+ * Nothing else about the row moves. Category, tone and the asks_* flags are
+ * untouched — this UPDATE names only campus_id — so re-scoping a status
+ * cannot silently flip whether it leaves an institute open or what the
+ * closing report asks for.
+ *
+ * Visibility for a rep is institute_statuses_select's job (0065), not this
+ * action's: this only writes the column. Which rows a rep's next read
+ * returns follows from the RLS rewrite alone.
+ */
+export async function setStatusCampus(
+  status: string,
+  campusId: string | null,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = statusCampusSchema.safeParse({ status, campus_id: campusId });
+  if (!parsed.success) {
+    return {
+      error: CHECK_FIELDS,
+      fieldErrors: fieldErrorsFrom(parsed.error),
+    };
+  }
+
+  if (!(await campusIsActiveOrAll(gate.supabase, parsed.data.campus_id))) {
+    return {
+      error: CHECK_FIELDS,
+      fieldErrors: { campus_id: CHOOSE_LISTED_CAMPUS },
+    };
+  }
+
+  const { error } = await gate.supabase
+    .from("institute_statuses")
+    .update({ campus_id: parsed.data.campus_id })
+    .eq("status", parsed.data.status);
+
+  if (error) {
+    logError("admin:status-campus", error);
+    if (error.code === FOREIGN_KEY_VIOLATION) {
+      return denied(CHOOSE_LISTED_CAMPUS);
+    }
+    return denied(toFriendlyMessage(error, "We could not change that status's campus."));
+  }
+
+  // A rep's next read already reflects this — institute_statuses_select is
+  // uncached RLS, the same reasoning listStatusCatalogue() gives for the
+  // table as a whole — but the admin's own Settings panel is a server
+  // component and needs telling.
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message:
+      parsed.data.campus_id === null
+        ? `“${parsed.data.status}” is visible to every campus again.`
+        : `“${parsed.data.status}” is now scoped to one campus.`,
   };
 }
 

@@ -116,6 +116,31 @@ export const purposeUpdateSchema = z.object({
 });
 
 /**
+ * Which campus a status belongs to, or every campus.
+ *
+ * "" is the ALL_CAMPUSES sentinel the form sends — not a missing answer, since
+ * the field is required and defaults to it — so it is normalised to null here
+ * exactly as `materialSchema.campus_id` normalises the same shape for
+ * materials. The regex is the same shape check, not a database lookup: it
+ * catches a malformed value, not an INACTIVE campus or one that does not
+ * exist. Both of those are checked against the live, active campus list by
+ * the action itself (campusIsActiveOrAll() in admin-actions.ts), because a
+ * static schema has no way to ask "is this one of the five active campuses
+ * right now" — that answer changes if an admin deactivates one.
+ */
+const campusIdField = z
+  .string()
+  .trim()
+  .transform((v) => (v === "" ? null : v))
+  .nullable()
+  .refine(
+    (v) =>
+      v === null ||
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+    "Choose one of the listed campuses.",
+  );
+
+/**
  * A status an admin adds to the vocabulary.
  *
  * EVERY PART OF IT IS REQUIRED, and none of it has a default, because each
@@ -132,10 +157,17 @@ export const purposeUpdateSchema = z.object({
  *   asks_*     which extra questions the closing report asks. Each maps to a
  *              real column on public.visits — a closed vocabulary of groups,
  *              never free-form fields.
+ *   campus_id  which campus sees this status, or every campus (migration
+ *              0065). UNLIKE the three above, this one DOES default — to
+ *              "every campus" — because a status scoped to one campus by
+ *              accident is a rep on every other campus losing it from their
+ *              picker with nothing on screen to explain why.
  *
  * The label is the PRIMARY KEY of public.institute_statuses and is what every
  * institute and visit stores, so it is a name, not an id, and renaming one is
- * refused by the foreign keys the moment it has been used.
+ * refused by the foreign keys the moment it has been used. The primary key is
+ * unchanged by campus scoping: two campuses cannot each own a status under
+ * the same name.
  */
 export const statusSchema = z.object({
   status: name(80, "The status"),
@@ -146,6 +178,7 @@ export const statusSchema = z.object({
   asks_expected_date: z.boolean(),
   asks_session_detail: z.boolean(),
   asks_head_count: z.boolean(),
+  campus_id: campusIdField,
 });
 
 export type StatusInput = z.infer<typeof statusSchema>;
@@ -158,6 +191,19 @@ export const statusUpdateSchema = z.object({
 export const statusRenameSchema = z.object({
   status: z.string().trim().min(1, "That status could not be identified.").max(80),
   renameTo: name(80, "The new name"),
+});
+
+/**
+ * Re-scoping an EXISTING status to another campus, or to every campus.
+ *
+ * Separate from `statusSchema` because this is the only field being changed —
+ * category, tone and the asks_* flags are untouched by an edit that only
+ * moves which campus owns the row, and resending them would risk overwriting
+ * one with a stale client-side value.
+ */
+export const statusCampusSchema = z.object({
+  status: z.string().trim().min(1, "That status could not be identified.").max(80),
+  campus_id: campusIdField,
 });
 
 /**
