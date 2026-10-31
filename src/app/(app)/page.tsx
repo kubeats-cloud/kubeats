@@ -8,6 +8,7 @@ import { ErrorState } from "@/components/states";
 import { AlertBanner } from "@/components/dashboard/alert-banner";
 import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
+import { DailyStatusToggle } from "@/components/report/daily-status-toggle";
 import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
 import { CustomisableGrid } from "@/components/report/customisable-grid";
@@ -26,6 +27,7 @@ import {
 } from "@/lib/visits";
 import { listUnseenAlerts } from "@/lib/alerts";
 import { getWeekSummary } from "@/lib/week-summary";
+import { getMyTodayStatus } from "@/lib/rep-daily-status";
 import { formatWeekRange, mondayOf, weekCountEnd } from "@/lib/weeks";
 import { todayISO } from "@/lib/dates";
 import { getOverview } from "@/lib/admin-workspace";
@@ -126,6 +128,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
     tasks,
     alerts,
     totalInstitutes,
+    todayStatus,
   ] = await Promise.all([
     staff
       ? Promise.resolve({ ok: true as const, entries: [] })
@@ -200,6 +203,21 @@ export default async function DashboardPage(props: PageProps<"/">) {
     staff
       ? Promise.resolve(null)
       : settled(countMyInstitutes(), null, "dashboard:institute-count"),
+    /*
+     * 0069 — today's declared field status, for the rep's own Dashboard only.
+     * Skipped for staff exactly like every other rep-only fetch above: their
+     * landing screen is supervision and has nowhere to write this.
+     */
+    staff
+      ? Promise.resolve(null)
+      : settled(
+          getMyTodayStatus(user.id),
+          {
+            ok: false as const,
+            error: "We could not load today's status just now.",
+          },
+          "dashboard:daily-status",
+        ),
   ]);
 
   const entries = plan.ok ? plan.entries : [];
@@ -284,6 +302,22 @@ export default async function DashboardPage(props: PageProps<"/">) {
           is still open. */}
       {!staff && (
         <>
+          {/*
+            THE DAILY STATUS CONTROL SITS AT THE VERY TOP OF THE REP DASHBOARD,
+            above Today: it is the one thing on this screen a rep DECLARES
+            rather than reads, and the day's plan only makes sense after it.
+            Staff never reach this branch — their landing screen is supervision
+            — so neither a team lead nor an admin is offered a control that
+            0069 refuses them.
+          */}
+          {todayStatus && !todayStatus.ok ? (
+            <p className="text-destructive mt-4 text-sm">{todayStatus.error}</p>
+          ) : (
+            <DailyStatusToggle
+              initial={todayStatus?.ok ? todayStatus.today?.status ?? null : null}
+            />
+          )}
+
           <SectionTitle>Today</SectionTitle>
           <TodaySnapshot
             planned={entries.length}
