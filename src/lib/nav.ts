@@ -84,6 +84,11 @@ export const ADMIN_NAV: NavItem[] = [
   { href: "/team", label: "Team", icon: "team" },
   { href: "/institutes", label: "Institutes", icon: "institutes" },
   { href: "/settings", label: "Settings", icon: "settings" },
+  // The consolidated Activity tab: Rep Activity, Call Activity, Pipeline by
+  // Rep and Institute-Wise Activity as switchable cards, admin-only (the
+  // four reports stay reachable from their own screens for a team lead,
+  // unchanged — see src/app/(app)/activity/page.tsx).
+  { href: "/activity", label: "Activity", icon: "report" },
 ];
 
 /**

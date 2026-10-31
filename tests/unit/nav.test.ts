@@ -104,8 +104,12 @@ describe("navItemsFor", () => {
     expect(navItemsFor("team_lead").map((item) => item.href)).not.toContain("/slabs");
     // Shared by every role. Rep-only would bounce the admin off their queue.
     expect(isRepOnlyPath("/slabs")).toBe(false);
-    expect(ADMIN_NAV.length).toBeLessThanOrEqual(7);
+    // Eight, not seven: the Activity tab (consolidated Rep/Call/Pipeline/
+    // Institute-Wise reports) is an explicit, admin-only addition on top of
+    // the existing seven.
+    expect(ADMIN_NAV.length).toBeLessThanOrEqual(8);
     expect(ADMIN_NAV.map(item => item.href)).toContain('/targets');
+    expect(ADMIN_NAV.map(item => item.href)).toContain('/activity');
     expect(TEAM_LEAD_NAV.length).toBeLessThanOrEqual(6);
   });
 });

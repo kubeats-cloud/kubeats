@@ -6,6 +6,7 @@ import { CalendarIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 /**
  * The date range the report is counted over.
@@ -29,6 +30,9 @@ export function RangeControls({
   extraParams,
   hint,
   idPrefix = "range",
+  paramNames,
+  clearable = false,
+  className,
 }: {
   start: string;
   end: string;
@@ -61,6 +65,29 @@ export function RangeControls({
   extraParams?: Record<string, string>;
   /** One line under the controls, for what the range actually filters on. */
   hint?: string;
+  /**
+   * Override the two query keys this control reads and writes.
+   *
+   * ABSENT EVERYWHERE EXCEPT THE ACTIVITY TAB. Every existing caller keeps the
+   * default `from`/`to` (optional) or `start`/`end` (mandatory) it has always
+   * used. The Activity tab hosts Pipeline by Rep and Institute-Wise Activity
+   * on the same URL, and both are `optional` ranges that would otherwise both
+   * write `?from=&to=` — so Pipeline's instance there passes
+   * `{ from: "pipeFrom", to: "pipeTo" }` to keep the two from overwriting each
+   * other, while Institute-Wise Activity keeps the bare names unchanged.
+   */
+  paramNames?: { from: string; to: string };
+  /**
+   * Offer Clear even when the range is mandatory.
+   *
+   * Only the Activity tab's Rep Activity box uses this. Its range defaults to
+   * the current month, so "clear" means navigate back to that default rather
+   * than to an empty table; `/team/report` keeps its original shape because
+   * this defaults to false.
+   */
+  clearable?: boolean;
+  /** Replaces the control's own bottom margin, which a toolbar already owns. */
+  className?: string;
 }) {
   const router = useRouter();
   const [start, setStart] = useState(initialStart);
@@ -75,10 +102,13 @@ export function RangeControls({
   const dirty = start !== initialStart || end !== initialEnd;
   const anything = start !== "" || end !== "";
 
+  const fromKey = paramNames?.from ?? (optional ? "from" : "start");
+  const toKey = paramNames?.to ?? (optional ? "to" : "end");
+
   function hrefFor(from: string, to: string) {
     const params = new URLSearchParams();
-    if (from) params.set(optional ? "from" : "start", from);
-    if (to) params.set(optional ? "to" : "end", to);
+    if (from) params.set(fromKey, from);
+    if (to) params.set(toKey, to);
     if (member) params.set("member", member);
     for (const [key, value] of Object.entries(extraParams ?? {})) {
       params.set(key, value);
@@ -99,7 +129,12 @@ export function RangeControls({
   }
 
   return (
-    <div className="border-border bg-card mb-4 flex flex-wrap items-end gap-3 rounded-lg border p-3">
+    <div
+      className={cn(
+        "border-border bg-card flex flex-wrap items-end gap-3 rounded-lg border p-3",
+        className ?? "mb-4",
+      )}
+    >
       <div className="min-w-[8.5rem] flex-1 space-y-1.5">
         <Label htmlFor={`${idPrefix}-start`} className="text-xs">
           From
@@ -133,7 +168,7 @@ export function RangeControls({
         <CalendarIcon className="size-4" aria-hidden />
         Apply
       </Button>
-      {optional && (
+      {(optional || clearable) && (
         /* Shown always rather than only when a range is set, so the control
            does not change shape as it is used — but disabled when there is
            nothing to clear, which says the same thing without moving. */

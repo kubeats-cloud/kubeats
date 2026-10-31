@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -53,6 +54,9 @@ export function CallActivityFilters({
   reps,
   statuses,
   initial,
+  basePath = "/review",
+  extraParams,
+  actions,
 }: {
   /** Every rep the caller may filter to — a team lead's own reps only,
    *  the same `supervises()` scoping the RPC itself applies. */
@@ -66,6 +70,32 @@ export function CallActivityFilters({
     institute?: string;
     status?: string;
   };
+  /**
+   * Where Apply/Clear navigate to. Defaults to `/review`, where this filter
+   * bar originally lived; the Activity tab — now its only call site — points
+   * it at `/activity`. `navigate()` below merges onto `useSearchParams()`
+   * rather than rebuilding from scratch, so it already preserves whatever
+   * else that page's URL carries (the selected tab, the other three reports'
+   * own params) with no further change needed here.
+   */
+  basePath?: string;
+  /**
+   * Forced onto the URL after the self-merge above, overriding anything the
+   * same-named key already carries. The Activity tab's only use: `{ tab:
+   * "call" }`, so applying a filter here lands back on the Call Activity card
+   * even when the browser's current `?tab=` is stale — the active card is
+   * local React state (so switching cards costs no navigation), and that
+   * state can drift from the URL between card switches. Every outgoing link
+   * this box writes must restate its own identity rather than trust the URL.
+   */
+  extraParams?: Record<string, string>;
+  /**
+   * Rendered at the right-hand end of the Apply/Clear row. The Activity tab
+   * passes its Download Excel here so the filter bar and the download are one
+   * toolbar, as the consolidated layout requires. Omitted everywhere else, and
+   * then the Apply/Clear row keeps its original right alignment.
+   */
+  actions?: React.ReactNode;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -104,8 +134,11 @@ export function CallActivityFilters({
     // A new filter result may be a different length — same rule as the
     // register above: a filter change always returns to page one.
     search.delete("callPage");
+    for (const [key, value] of Object.entries(extraParams ?? {})) {
+      search.set(key, value);
+    }
     const query = search.toString();
-    router.push(query ? `/review?${query}` : "/review", { scroll: false });
+    router.push(query ? `${basePath}?${query}` : basePath, { scroll: false });
   }
 
   function apply() {
@@ -187,15 +220,26 @@ export function CallActivityFilters({
         </Field>
       </div>
 
-      <div className="mt-4 flex items-center justify-end gap-2">
-        {activeCount > 0 && (
-          <Button type="button" variant="ghost" className="h-9" onClick={clear}>
-            Clear {activeCount} filter{activeCount === 1 ? "" : "s"}
-          </Button>
+      <div
+        className={cn(
+          "mt-4 flex flex-wrap items-center gap-2",
+          actions ? "justify-between" : "justify-end",
         )}
-        <Button type="button" className="h-9" onClick={apply}>
-          Apply
-        </Button>
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          {activeCount > 0 && (
+            <Button type="button" variant="ghost" className="h-9" onClick={clear}>
+              Clear {activeCount} filter{activeCount === 1 ? "" : "s"}
+            </Button>
+          )}
+          <Button type="button" className="h-9" onClick={apply}>
+            Apply
+          </Button>
+        </div>
+        {/* Wrapped rather than rendered bare: a JSX element passed in as a
+            prop and placed beside a static sibling is an array child to
+            React's dev validator, which then asks it for a key. */}
+        {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
     </Card>
   );
