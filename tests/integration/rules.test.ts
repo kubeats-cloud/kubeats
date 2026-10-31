@@ -503,6 +503,48 @@ const has0069 = configured
       .then(({ error }) => !error)
   : false;
 
+/**
+ * 0070/0071 add the CALL vocabulary and its dynamic fields. Probed by column
+ * for the same reason 0065/0066 are: there is no new function to call, and a
+ * table that exists without its campus column would still look present.
+ */
+const has0070 = configured
+  ? await admin
+      .from("call_statuses")
+      .select("status, campus_id, is_active")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+const has0071 = configured
+  ? await admin
+      .from("call_status_fields")
+      .select("id, call_status")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+/** 0072 adds institutes.call_status (+ audit pair) and its history table. */
+const has0072 = configured
+  ? await admin
+      .from("institutes")
+      .select("call_status")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+/**
+ * 0073 appends four columns to audit_open_follow_ups. The view existing is not
+ * the question — the OLD view exists too — so this asks for the new columns.
+ */
+const has0073 = configured
+  ? await admin
+      .from("audit_open_follow_ups")
+      .select("institute_id, status_source, is_open, visit_status, call_status")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
 if (configured && !has0038) {
   console.warn(
     [
@@ -4881,6 +4923,237 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
               );
             });
           });
+
+          /*
+           * THE CALL TRACK'S TWO TABLES repeat 0065/0067 against their own
+           * vocabulary (0070/0071) — including the fourth clause neither of
+           * those suites covers: a CROSS-CAMPUS team lead (0061) must keep
+           * seeing a status held by a rep they supervise, or that rep's call
+           * form would show a status whose label the lead cannot resolve.
+           *
+           * The retired row is deliberately part of the fixture: RLS filters
+           * on campus, never on `is_active`, because a status an institute
+           * already carries must keep resolving after an admin retires it.
+           */
+          describe.skipIf(!has0070 || !has0071)(
+            "call_statuses and call_status_fields — campus scoping (0070/0071)",
+            () => {
+              const scopedCall = `${TAG} campus-A call status`;
+              const globalCall = `${TAG} global call status`;
+              const retiredCall = `${TAG} retired call status`;
+              let scopedCallField: string;
+              let globalCallField: string;
+              let lead: Member;
+
+              beforeAll(async () => {
+                const { error: scopedErr } = await admin
+                  .from("call_statuses")
+                  .insert({ status: scopedCall, category: "open", campus_id: campusA });
+                if (scopedErr) throw new Error(`scoped call status: ${scopedErr.message}`);
+
+                const { error: globalErr } = await admin
+                  .from("call_statuses")
+                  .insert({ status: globalCall, category: "open", campus_id: null });
+                if (globalErr) throw new Error(`global call status: ${globalErr.message}`);
+
+                const { error: retiredErr } = await admin
+                  .from("call_statuses")
+                  .insert({
+                    status: retiredCall,
+                    category: "open",
+                    campus_id: campusA,
+                    is_active: false,
+                  });
+                if (retiredErr) throw new Error(`retired call status: ${retiredErr.message}`);
+
+                const { data: scopedField, error: scopedFieldErr } = await admin
+                  .from("call_status_fields")
+                  .insert({
+                    call_status: scopedCall,
+                    field_name: `${TAG} campus-A call field`,
+                    field_type: "text",
+                    is_required: true,
+                  })
+                  .select("id")
+                  .single();
+                if (scopedFieldErr) throw new Error(`scoped call field: ${scopedFieldErr.message}`);
+                scopedCallField = scopedField!.id as string;
+
+                const { data: globalField, error: globalFieldErr } = await admin
+                  .from("call_status_fields")
+                  .insert({
+                    call_status: globalCall,
+                    field_name: `${TAG} global call field`,
+                    field_type: "text",
+                    is_required: true,
+                  })
+                  .select("id")
+                  .single();
+                if (globalFieldErr) throw new Error(`global call field: ${globalFieldErr.message}`);
+                globalCallField = globalField!.id as string;
+
+                // A lead on campus B: their own campus sees NOTHING of campus
+                // A's status until they supervise somebody there (0061).
+                lead = await makeMember("team_lead", "call-status-lead", campusB);
+              });
+
+              afterAll(async () => {
+                // Drop the cross-campus link before the members are torn down,
+                // so nothing this suite did outlives it.
+                if (lead) await boss.db.rpc("assign_rep_to_team", { p_rep: alice.id, p_lead: null });
+                await admin
+                  .from("call_statuses")
+                  .delete()
+                  .in("status", [scopedCall, globalCall, retiredCall]);
+              });
+
+              it("shows the campus-A rep the scoped, the global and the retired status", async () => {
+                const { data } = await alice.db
+                  .from("call_statuses")
+                  .select("status")
+                  .in("status", [scopedCall, globalCall, retiredCall]);
+                expect((data ?? []).map((r) => r.status).sort()).toEqual(
+                  [globalCall, retiredCall, scopedCall].sort(),
+                );
+              });
+
+              it("hides the campus-A status from the campus-B rep, keeps the global one", async () => {
+                const { data } = await bob.db
+                  .from("call_statuses")
+                  .select("status")
+                  .in("status", [scopedCall, globalCall, retiredCall]);
+                expect((data ?? []).map((r) => r.status)).toEqual([globalCall]);
+              });
+
+              it("shows the admin all three", async () => {
+                const { data } = await boss.db
+                  .from("call_statuses")
+                  .select("status")
+                  .in("status", [scopedCall, globalCall, retiredCall]);
+                expect((data ?? []).map((r) => r.status).sort()).toEqual(
+                  [globalCall, retiredCall, scopedCall].sort(),
+                );
+              });
+
+              it("gives a cross-campus team lead a supervised rep's status — clause four", async () => {
+                const before = await lead.db
+                  .from("call_statuses")
+                  .select("status")
+                  .in("status", [scopedCall, globalCall]);
+                expect((before.data ?? []).map((r) => r.status), "not yet supervising campus A")
+                  .toEqual([globalCall]);
+
+                const { error } = await boss.db.rpc("assign_rep_to_team", {
+                  p_rep: alice.id,
+                  p_lead: lead.id,
+                });
+                expect(error, error?.message).toBeNull();
+
+                const after = await lead.db
+                  .from("call_statuses")
+                  .select("status")
+                  .in("status", [scopedCall, globalCall]);
+                expect((after.data ?? []).map((r) => r.status).sort()).toEqual(
+                  [globalCall, scopedCall].sort(),
+                );
+              });
+
+              it("scopes call_status_fields by the status they belong to", async () => {
+                const aliceFields = await alice.db
+                  .from("call_status_fields")
+                  .select("id")
+                  .in("id", [scopedCallField, globalCallField]);
+                expect((aliceFields.data ?? []).map((r) => r.id).sort()).toEqual(
+                  [globalCallField, scopedCallField].sort(),
+                );
+
+                // By id, the way a server action validating a submitted status
+                // would ask — not through whatever list the UI happened to show.
+                const bobField = await bob.db
+                  .from("call_status_fields")
+                  .select("id")
+                  .eq("id", scopedCallField);
+                expect(bobField.data).toEqual([]);
+                const bobGlobal = await bob.db
+                  .from("call_status_fields")
+                  .select("id")
+                  .eq("id", globalCallField);
+                expect(bobGlobal.data?.length).toBe(1);
+              });
+
+              it("lets an admin add a call status and refuses a rep (42501)", async () => {
+                const added = await boss.db
+                  .from("call_statuses")
+                  .insert({ status: `${TAG} admin call status`, category: "open" });
+                expect(added.error, added.error?.message).toBeNull();
+
+                const refused = await alice.db
+                  .from("call_statuses")
+                  .insert({ status: `${TAG} rep call status`, category: "open" });
+                expect(refused.error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+
+                await admin
+                  .from("call_statuses")
+                  .delete()
+                  .eq("status", `${TAG} admin call status`);
+              });
+
+              it("has no DELETE path at all — retiring is the only removal", async () => {
+                // Not granted to authenticated, admin or not: a status that
+                // institutes and history rows already name must not vanish.
+                const gone = await boss.db
+                  .from("call_statuses")
+                  .delete()
+                  .eq("status", scopedCall)
+                  .select("status");
+                expect(gone.error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+
+                const { data: still } = await admin
+                  .from("call_statuses")
+                  .select("status")
+                  .eq("status", scopedCall);
+                expect(still?.length, "the row survives the refused delete").toBe(1);
+              });
+
+              it("lets an admin manage dynamic fields and keeps them admin-only", async () => {
+                const added = await boss.db
+                  .from("call_status_fields")
+                  .insert({
+                    call_status: globalCall,
+                    field_name: `${TAG} admin field`,
+                    field_type: "text",
+                  })
+                  .select("id")
+                  .single();
+                expect(added.error, added.error?.message).toBeNull();
+
+                const repAdd = await alice.db
+                  .from("call_status_fields")
+                  .insert({
+                    call_status: globalCall,
+                    field_name: `${TAG} rep field`,
+                    field_type: "text",
+                  });
+                expect(repAdd.error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+
+                const repDelete = await alice.db
+                  .from("call_status_fields")
+                  .delete()
+                  .eq("id", added.data!.id)
+                  .select("id");
+                // RLS on DELETE hides the row from a rep rather than refusing
+                // the statement, so the shape is [] and not an error.
+                expect(repDelete.data ?? []).toEqual([]);
+
+                const adminDelete = await boss.db
+                  .from("call_status_fields")
+                  .delete()
+                  .eq("id", added.data!.id)
+                  .select("id");
+                expect(adminDelete.data?.length).toBe(1);
+              });
+            },
+          );
         },
       );
     },
@@ -6660,9 +6933,23 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(task?.follow_up_date).toBe(iso(1));
       expect(task?.call_notes).toBe(`${TAG} spoke to the principal`);
 
+      // The status lands on the CALL track (0072/0073) and leaves the visit
+      // track alone — the two vocabularies are independent.
       const { data: institute } = await admin
-        .from("institutes").select("status").eq("id", mine).single();
-      expect(institute?.status).toBe(openStatus);
+        .from("institutes").select("status, call_status").eq("id", mine).single();
+      expect(institute?.call_status).toBe(openStatus);
+      expect(institute?.status, "a call never moves the visit track").toBeNull();
+
+      const { data: callHistory } = await admin
+        .from("institute_call_status_history")
+        .select("status, changed_by, call_id")
+        .eq("institute_id", mine)
+        .order("changed_at", { ascending: false })
+        .limit(1)
+        .single();
+      expect(callHistory?.status).toBe(openStatus);
+      expect(callHistory?.changed_by).toBe(repA.id);
+      expect(callHistory?.call_id, "attributed to this call").toBe(created!.id);
     });
 
     it("refuses a call that belongs to another rep", async () => {
@@ -6844,22 +7131,24 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(task?.next_action).toBeNull();
 
       // THE STATUS CHANGE APPEARS ELSEWHERE: this call was the institute's
-      // only, hence most recent, status-setting event, so the institute's
-      // own status moved with it — same trigger cascade as a fresh filing.
+      // only, hence most recent, status-setting event, so the CALL track moved
+      // with it — same trigger cascade as a fresh filing, without touching the
+      // visit track.
       const { data: institute } = await admin
-        .from("institutes").select("status").eq("id", instituteId).single();
-      expect(institute?.status).toBe(closedStatus);
+        .from("institutes").select("status, call_status").eq("id", instituteId).single();
+      expect(institute?.call_status).toBe(closedStatus);
+      expect(institute?.status, "an admin call edit never moves the visit track").toBeNull();
 
       const { data: history } = await admin
-        .from("institute_status_history")
-        .select("status, changed_by, visit_id")
+        .from("institute_call_status_history")
+        .select("status, changed_by, call_id")
         .eq("institute_id", instituteId)
         .order("changed_at", { ascending: false })
         .limit(1)
         .single();
       expect(history?.status).toBe(closedStatus);
       expect(history?.changed_by).toBe(boss.id);
-      expect(history?.visit_id, "a direct update, not attributed to a visit").toBeNull();
+      expect(history?.call_id, "attributed to the corrected call").toBe(taskId);
     });
 
     it("persists a follow-up-only edit, leaving the status and institute untouched", async () => {
@@ -6879,8 +7168,9 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(task?.status_set_to).toBe(openStatus);
 
       const { data: institute } = await admin
-        .from("institutes").select("status").eq("id", instituteId).single();
-      expect(institute?.status).toBe(openStatus);
+        .from("institutes").select("status, call_status").eq("id", instituteId).single();
+      expect(institute?.call_status).toBe(openStatus);
+      expect(institute?.status, "the visit track stays untouched").toBeNull();
     });
 
     it("does NOT move the institute's status when a later call has already decided it", async () => {
@@ -6911,8 +7201,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(newerLog.error, newerLog.error?.message).toBeNull();
 
       const { data: before } = await admin
-        .from("institutes").select("status").eq("id", mine).single();
-      expect(before?.status, "the newer call decided it").toBe(closedStatus);
+        .from("institutes").select("call_status").eq("id", mine).single();
+      expect(before?.call_status, "the newer call decided it").toBe(closedStatus);
 
       // Correcting the OLDER call must not drag the institute backwards.
       const { error } = await boss.db.rpc("admin_update_call_report", {
@@ -6929,8 +7219,8 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(olderTask?.follow_up_date).toBe(iso(9));
 
       const { data: after } = await admin
-        .from("institutes").select("status").eq("id", mine).single();
-      expect(after?.status, "the institute stays on the newer call's word").toBe(closedStatus);
+        .from("institutes").select("call_status").eq("id", mine).single();
+      expect(after?.call_status, "the institute stays on the newer call's word").toBe(closedStatus);
     });
 
     it("never inserts a new follow_up_tasks row", async () => {
@@ -7008,6 +7298,183 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
   });
 
   /**
+   * ★ audit_open_follow_ups (0073) — "still owed" is decided by EITHER track ★
+   *
+   * The view used to answer one question: does this institute's VISIT status
+   * say a loop is open? Since 0070/0072 a call can leave the institute open on
+   * its own track, so the view now reports both tracks, picks a governing one
+   * and says whether anything at all is still owed.
+   *
+   * Why a view test rather than only the RPC suites above: `getOpenFollowUps()`
+   * and every Pending/Overview counter read THIS view's `is_open` column, so a
+   * governing rule that quietly preferred the visit track would show a closed
+   * institute as owed — or, worse, hide a call the rep has not delivered yet.
+   *
+   * Both tracks are written through REAL paths: calls through log_call(), and
+   * visits by direct insert (with the arrival FO009 requires) plus an explicit
+   * institute update, because a direct visit insert does not move
+   * `institutes.status` the way log_visit() does. Ordering is the view's own
+   * `created_at` vs `reported_at`, so writing one after the other is enough to
+   * decide which track is later.
+   */
+  describe.skipIf(!has0073 || !has0072)(
+    "audit_open_follow_ups — either track is enough (0073)",
+    () => {
+      const openVisit = "First meeting done";
+      const closedVisit = "Session done";
+      const openCall = "First meeting done";
+      const closedCall = "RSVP received";
+
+      const viewRow = async (institute: string) => {
+        // A LITERAL select string — concatenating it would hand supabase-js a
+        // GenericStringError instead of a row type, the trap this codebase has
+        // hit before (see VISIT_SELECT).
+        const { data, error } = await admin
+          .from("audit_open_follow_ups")
+          .select("institute_id, status, status_source, is_open, visit_status, call_status, attribution_id, attribution_source, member, follow_up_date")
+          .eq("institute_id", institute)
+          .single();
+        expect(error, error?.message).toBeNull();
+        return data!;
+      };
+
+      /** A filed call through the real RPC, the way a rep files one. */
+      const filedCall = async (institute: string, status: string) => {
+        const { data } = await repA.db
+          .from("follow_up_tasks")
+          .insert({ member: repA.id, institute_id: institute, kind: "call" })
+          .select("id")
+          .single();
+        const { error } = await repA.db.rpc("log_call", {
+          p_task_id: data!.id,
+          p_status_set_to: status,
+          p_follow_up_date: status === openCall ? iso(1) : null,
+          p_notes: `${TAG} two-track call`,
+        });
+        expect(error, error?.message).toBeNull();
+        return data!.id as string;
+      };
+
+      /**
+       * A visit row, then the institute's status put where log_visit() would
+       * have put it. The insert alone records the event the view's attribution
+       * lateral looks for; the update is what makes it the CURRENT status.
+       */
+      const loggedVisit = async (institute: string, status: string) => {
+        await ensureArrival(repA.id, institute, iso());
+        const { data, error } = await admin
+          .from("visits")
+          .insert(
+            visitRow({
+              member: repA.id,
+              institute_id: institute,
+              date: iso(),
+              status_set_to: status,
+              follow_up_date: status === openVisit ? iso(7) : null,
+            }),
+          )
+          .select("id")
+          .single();
+        if (error) throw new Error(`two-track visit: ${error.message}`);
+        await admin.from("institutes").update({ status }).eq("id", institute);
+        return data!.id as string;
+      };
+
+      it("reports a call-only institute as open, governed by the call", async () => {
+        const mine = await makeInstitute(repA.id, campusA, "two-track-call");
+        const callId = await filedCall(mine, openCall);
+
+        const row = await viewRow(mine);
+        expect(row.is_open).toBe(true);
+        expect(row.status_source).toBe("call");
+        expect(row.status).toBe(openCall);
+        expect(row.visit_status, "a call never writes the visit track").toBeNull();
+        expect(row.call_status).toBe(openCall);
+        expect(row.attribution_source).toBe("call");
+        expect(row.attribution_id, "attributed to the call that set it").toBe(callId);
+        expect(row.member).toBe(repA.id);
+
+        // And a signed-in rep can read it: security_invoker keeps the view on
+        // the caller's RLS rather than the definer's.
+        const { data: asRep, error } = await repA.db
+          .from("audit_open_follow_ups")
+          .select("institute_id, is_open")
+          .eq("institute_id", mine)
+          .maybeSingle();
+        expect(error, error?.message).toBeNull();
+        expect(asRep?.is_open).toBe(true);
+      });
+
+      it("reports a visit-only institute as open, governed by the visit", async () => {
+        const mine = await makeInstitute(repA.id, campusA, "two-track-visit");
+        const visitId = await loggedVisit(mine, openVisit);
+
+        const row = await viewRow(mine);
+        expect(row.is_open).toBe(true);
+        expect(row.status_source).toBe("visit");
+        expect(row.status).toBe(openVisit);
+        expect(row.call_status, "a visit never writes the call track").toBeNull();
+        expect(row.attribution_source).toBe("visit");
+        expect(row.attribution_id, "attributed to the visit that set it").toBe(visitId);
+        expect(row.follow_up_date).toBe(iso(7));
+      });
+
+      it("with both tracks open, the later call governs", async () => {
+        const mine = await makeInstitute(repA.id, campusA, "two-track-call-later");
+        await loggedVisit(mine, openVisit);
+        const callId = await filedCall(mine, openCall);
+
+        const row = await viewRow(mine);
+        expect(row.is_open).toBe(true);
+        expect(row.status_source).toBe("call");
+        expect(row.status).toBe(openCall);
+        expect(row.visit_status, "the visit track is still open, not forgotten").toBe(
+          openVisit,
+        );
+        expect(row.call_status).toBe(openCall);
+        expect(row.attribution_id).toBe(callId);
+      });
+
+      it("with both tracks open, the later visit governs", async () => {
+        const mine = await makeInstitute(repA.id, campusA, "two-track-visit-later");
+        await filedCall(mine, openCall);
+        const visitId = await loggedVisit(mine, openVisit);
+
+        const row = await viewRow(mine);
+        expect(row.is_open).toBe(true);
+        expect(row.status_source).toBe("visit");
+        expect(row.status).toBe(openVisit);
+        expect(row.visit_status).toBe(openVisit);
+        expect(row.call_status, "the call track is still open, not forgotten").toBe(
+          openCall,
+        );
+        expect(row.attribution_id).toBe(visitId);
+      });
+
+      it("reports both tracks closed as NOT open", async () => {
+        const mine = await makeInstitute(repA.id, campusA, "two-track-closed");
+        await filedCall(mine, closedCall);
+        await loggedVisit(mine, closedVisit);
+
+        const row = await viewRow(mine);
+        expect(row.is_open, "nothing is owed once both tracks are closed").toBe(false);
+        expect(row.visit_status).toBe(closedVisit);
+        expect(row.call_status).toBe(closedCall);
+      });
+
+      it("reports an institute with no status at all as NOT open and empty", async () => {
+        const mine = await makeInstitute(repA.id, campusA, "two-track-none");
+
+        const row = await viewRow(mine);
+        expect(row.is_open).toBe(false);
+        expect(row.status).toBeNull();
+        expect(row.visit_status).toBeNull();
+        expect(row.call_status).toBeNull();
+      });
+    },
+  );
+
+  /**
    * call_activity_report() (migration 0064) — one row per rep, call counts by
    * CURRENT status, Open/Closed split. Part 2 of the Call Report review
    * feature. No Call Activity column/filter (client decision) — a call has
@@ -7023,28 +7490,29 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       subject = await makeMember("rep", "call-activity-subject", campusA);
       const institute = await makeInstitute(subject.id, campusA, "call-activity-institute");
       calls = [];
-      for (let i = 0; i < 5; i += 1) {
+      // All eight tasks are created BEFORE any is filed. Filing the first
+      // closed call moves the institute's call status to closed, and FO038
+      // then refuses a new follow-up task against it - so creating them
+      // interleaved would leave the later inserts failing.
+      for (let i = 0; i < 8; i += 1) {
         const { data } = await subject.db
           .from("follow_up_tasks")
           .insert({ member: subject.id, institute_id: institute, kind: "call" })
           .select("id").single();
+        calls.push(data!.id as string);
+      }
+      for (let i = 0; i < 5; i += 1) {
         const { error } = await subject.db.rpc("log_call", {
-          p_task_id: data!.id, p_status_set_to: statusA,
+          p_task_id: calls[i], p_status_set_to: statusA,
           p_follow_up_date: iso(1), p_notes: `${TAG} a-${i}`,
         });
         expect(error, error?.message).toBeNull();
-        calls.push(data!.id as string);
       }
       for (let i = 0; i < 3; i += 1) {
-        const { data } = await subject.db
-          .from("follow_up_tasks")
-          .insert({ member: subject.id, institute_id: institute, kind: "call" })
-          .select("id").single();
         const { error } = await subject.db.rpc("log_call", {
-          p_task_id: data!.id, p_status_set_to: statusB, p_notes: `${TAG} b-${i}`,
+          p_task_id: calls[5 + i], p_status_set_to: statusB, p_notes: `${TAG} b-${i}`,
         });
         expect(error, error?.message).toBeNull();
-        calls.push(data!.id as string);
       }
     });
 
@@ -7201,10 +7669,12 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
    * THREE READERS, ONE STATUS: `institute_statuses` directly (what
    * `listStatusCatalogue()`/`pipelineOf()` run on), `audit_institute_activity()`
    * (0060, the institute-wise activity report), and `call_activity_report()`
-   * (0064). All three join or select from `institute_statuses` under RLS: if
-   * the lead could not see this status there, each would show it with the
-   * wrong (or no) category while the raw visit/call counts kept it — exactly
-   * the "total does not reconcile" failure mode Part 5 asks to rule out.
+   * (0064). The first two read `institute_statuses`; since 0073 the call report
+   * reads `call_statuses` (same campus-scoping clauses, 0070), so the fixture
+   * seeds the status on both tracks. All three read under RLS: if the lead
+   * could not see this status there, each would show it with the wrong (or no)
+   * category while the raw visit/call counts kept it — exactly the "total does
+   * not reconcile" failure mode Part 5 asks to rule out.
    */
   describe("campus-wise statuses — reports and counts (Part 5)", () => {
     let leadCampus: string;
@@ -7248,6 +7718,17 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         campus_id: repCampus,
       });
       if (statusError) throw new Error(`status: ${statusError.message}`);
+
+      // Since 0070/0073 the Call Activity Report joins call_statuses, not
+      // institute_statuses: the two vocabularies are independent, so the same
+      // scoped status is created on both tracks.
+      const { error: callStatusError } = await admin.from("call_statuses").insert({
+        status: scopedStatus,
+        category: "open",
+        tone: "warning",
+        campus_id: repCampus,
+      });
+      if (callStatusError) throw new Error(`call status: ${callStatusError.message}`);
 
       const { data: inst, error: instError } = await admin
         .from("institutes")
@@ -7298,6 +7779,7 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       await admin.from("institute_status_history").delete().eq("institute_id", instituteId);
       if (instituteId) await admin.from("institutes").delete().eq("id", instituteId);
       await admin.from("institute_statuses").delete().eq("status", scopedStatus);
+      await admin.from("call_statuses").delete().eq("status", scopedStatus);
       if (rep) await admin.from("profiles").update({ team_lead_id: null }).eq("id", rep.id);
       // Members (and their auth users) are cleaned by the suite's own
       // afterAll via createdMembers; campuses are this describe's to clean,

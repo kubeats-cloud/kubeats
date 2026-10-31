@@ -163,6 +163,74 @@ export async function listStatusRows(): Promise<StatusAdminRow[]> {
   }));
 }
 
+/**
+ * The CALL vocabulary, RETIRED ONES INCLUDED — the call-track twin of
+ * `listStatusRows()` (0070).
+ *
+ * WHY THREE SOURCES AND NOT THE VISIT THREE'S. A visit status is "used" when it
+ * is on an institute, a visit, or the visit history. A call status is used when
+ * it is on an INSTITUTE'S CALL TRACK (`institutes.call_status`), on a filed CALL
+ * REPORT (`follow_up_tasks.status_set_to` where `kind = 'call'`), or in the call
+ * history. Counting the same three visit sources here would report every call
+ * status as unused on day one — the visit tables do not carry call statuses —
+ * and would let an admin rename a status that calls already depend on.
+ *
+ * `follow_up_tasks` is restricted to filed calls (`reported_at is not null`)
+ * for the same reason the call register is: an unlogged task has no status yet,
+ * and its `status_set_to` is the one it was raised with, not one a rep chose.
+ *
+ * Read the same way as the visit list — through the caller's own client, so
+ * `call_statuses_select` (0070, mirroring 0065/0067) decides which rows an
+ * admin sees. An admin sees every campus; the function adds no filter.
+ */
+export async function listCallStatusRows(): Promise<StatusAdminRow[]> {
+  const supabase = await createClient();
+
+  const [statuses, institutes, calls, history] = await Promise.all([
+    supabase
+      .from("call_statuses")
+      .select(
+        "status, category, tone, sort_order, is_active, asks_expected_date, asks_session_detail, asks_head_count, campus_id",
+      )
+      .order("sort_order")
+      .order("status"),
+    supabase.from("institutes").select("call_status").not("call_status", "is", null),
+    supabase
+      .from("follow_up_tasks")
+      .select("status_set_to")
+      .eq("kind", "call")
+      .not("reported_at", "is", null)
+      .not("status_set_to", "is", null),
+    supabase.from("institute_call_status_history").select("status"),
+  ]);
+
+  if (statuses.error) {
+    logError("admin:call-statuses", statuses.error);
+    return [];
+  }
+
+  const used = new Map<string, number>();
+  const bump = (status: string | null) => {
+    if (status) used.set(status, (used.get(status) ?? 0) + 1);
+  };
+  for (const row of institutes.data ?? []) bump(row.call_status);
+  for (const row of calls.data ?? []) bump(row.status_set_to);
+  for (const row of history.data ?? []) bump(row.status);
+
+  return (statuses.data ?? []).map((row) => ({
+    status: row.status,
+    category: row.category,
+    tone: row.tone ?? "neutral",
+    sortOrder: row.sort_order ?? 100,
+    isActive: row.is_active ?? true,
+    asksExpectedDate: row.asks_expected_date ?? false,
+    asksSessionDetail: row.asks_session_detail ?? false,
+    asksHeadCount: row.asks_head_count ?? false,
+    usedBy: used.get(row.status) ?? 0,
+    campusId: row.campus_id ?? null,
+  }));
+}
+
 export interface PurposeRow {
   id: string;
   label: string;

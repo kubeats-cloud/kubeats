@@ -5,11 +5,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 import { requireAdmin } from "@/lib/admin";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { listCallStatusCatalogue } from "@/lib/statuses";
 import { makeReportSchema, feedbackFormDataToInput } from "@/lib/validation/feedback";
 import { eventDateRequired, followUpRequired, nextActionShown, visitFieldErrors, makeAdminCallEditSchema } from "@/lib/validation/visit";
 import { selectableStatuses } from "@/lib/validation/institute";
-import { listStatusFields } from "@/lib/status-fields";
+import { listCallStatusFields } from "@/lib/status-fields";
 import { fieldErrorsFrom, textOf } from "@/lib/validation/admin";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import type { FormState } from "@/lib/visit-form-state";
@@ -18,7 +18,7 @@ import type { AdminState } from "@/lib/admin-form-state";
 export async function submitCallReport(formData: FormData): Promise<FormState & { ok?: boolean }> {
   const user = await getCurrentUser();
   if (!user || user.role !== "rep") return { error: "Only a Rep can log a call.", fieldErrors: {} };
-  const catalogue = await listStatusCatalogue();
+  const catalogue = await listCallStatusCatalogue();
   const text = (key: string) => String(formData.get(key) ?? "").trim();
   const status = text("status_set_to");
   const schema = z.object({
@@ -56,7 +56,7 @@ export async function submitCallReport(formData: FormData): Promise<FormState & 
   }
 
   // Validate required status fields
-  const dynamicFields = await listStatusFields(status);
+  const dynamicFields = await listCallStatusFields(status);
   const dynamicErrors: Record<string, string> = {};
   for (const df of dynamicFields) {
     if (df.isRequired && (!customFields[df.fieldName] || customFields[df.fieldName].trim() === "")) {
@@ -105,7 +105,7 @@ export async function adminUpdateCallReport(
   const gate = await requireAdmin();
   if (!gate.ok) return { error: gate.error, fieldErrors: {} };
 
-  const catalogue = await listStatusCatalogue();
+  const catalogue = await listCallStatusCatalogue();
   const optional = (key: string) => textOf(formData, key) || null;
 
   const parsed = makeAdminCallEditSchema(catalogue).safeParse({

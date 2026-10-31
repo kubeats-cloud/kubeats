@@ -36,9 +36,33 @@ import {
  * migration set exists to end.
  */
 export async function listStatusCatalogue(): Promise<StatusCatalogue> {
+  return readCatalogue("institute_statuses");
+}
+
+/**
+ * The CALL vocabulary (0070), read from `public.call_statuses`.
+ *
+ * Column-for-column the same as `institute_statuses`, so every helper, schema
+ * and badge takes it without a translation — and the same seed fallback, for
+ * the same reason: a blank call-status picker would stop every rep booking a
+ * call rather than merely showing it uncoloured.
+ *
+ * A SEPARATE FUNCTION, NOT A PARAMETER ON THE CALLER'S SIDE. Call sites that
+ * currently read the visit list must keep doing so; the seven that render a
+ * CALL — Log Call, the call report action, the Review call register, the Call
+ * Activity report — read this one. The tables are copies today and diverge
+ * only when an admin edits one of them.
+ */
+export async function listCallStatusCatalogue(): Promise<StatusCatalogue> {
+  return readCatalogue("call_statuses");
+}
+
+async function readCatalogue(
+  table: "institute_statuses" | "call_statuses",
+): Promise<StatusCatalogue> {
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("institute_statuses")
+    .from(table)
     .select(
       "status, category, tone, sort_order, is_active, asks_expected_date, asks_session_detail, asks_head_count",
     )
@@ -59,7 +83,7 @@ export async function listStatusCatalogue(): Promise<StatusCatalogue> {
      * carrying one would render its badge as "no status yet" until the read
      * recovers. That is the cost, and it is smaller than the alternative.
      */
-    logError("statuses:list", error);
+    logError(`statuses:list:${table}`, error);
     return SEED_STATUS_CATALOGUE;
   }
 

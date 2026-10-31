@@ -62,7 +62,11 @@ export function MeetingPrompts({
             instituteName: task.instituteName,
             city: null,
             status: "",
+            // A stub only StartFollowUp reads, and it reads neither of these.
+            // Visit is the honest default: this path starts a VISIT.
+            statusSource: "visit",
             visitId: null,
+            callId: null,
             member: null,
             memberName: null,
             setOn: null,

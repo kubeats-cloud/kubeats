@@ -57,6 +57,7 @@ export function FollowUpList({
   items,
   purposes,
   catalogue,
+  callCatalogue,
   readOnly,
   preview,
 }: {
@@ -64,6 +65,13 @@ export function FollowUpList({
   /** Offered when starting a follow-up. Empty for an admin, who cannot. */
   purposes: PurposeOption[];
   catalogue: StatusCatalogue;
+  /**
+   * The CALL vocabulary (0070). A follow-up can be owed because a CALL left
+   * the institute open (0073), and its status belongs to that list — not to
+   * the visit one. The two are copies today and admin-editable separately, so
+   * the badge must be coloured by `statusSource`.
+   */
+  callCatalogue: StatusCatalogue;
   /** True for an admin: the whole team's list, and nothing to tap. */
   readOnly: boolean;
   /**
@@ -151,7 +159,8 @@ export function FollowUpList({
         // be dragged across a day boundary by whichever timezone the code is
         // running in. dates.ts is the only thing that formats one.
         const overdue = item.followUpDate !== null && item.followUpDate < today;
-        const row = statusRow(catalogue, item.status);
+        const vocabulary = item.statusSource === "call" ? callCatalogue : catalogue;
+        const row = statusRow(vocabulary, item.status);
 
         return (
           <li key={item.instituteId}>
@@ -174,9 +183,15 @@ export function FollowUpList({
                     {!item.mine && item.memberName ? ` · ${item.memberName}` : ""}
                   </p>
                 </div>
-                <Badge variant={row?.tone ?? "neutral"} className="shrink-0">
-                  {item.status}
-                </Badge>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Badge variant={row?.tone ?? "neutral"}>{item.status}</Badge>
+                  {/* Which track left this open. A visit needs no label — it
+                      was the only track until 0072 — but a call does, or the
+                      row reads as though a visit set a status it did not. */}
+                  {item.statusSource === "call" && (
+                    <Badge variant="neutral">Call</Badge>
+                  )}
+                </div>
               </div>
 
               <p

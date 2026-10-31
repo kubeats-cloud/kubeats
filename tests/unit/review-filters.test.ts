@@ -87,12 +87,19 @@ describe("the review row carries what the hubs need", () => {
   });
 });
 
-describe("the status badge links to the VISIT filter", () => {
+describe("the status badge links to the matching register's filter", () => {
   const review = src("components/admin/visit-review.tsx");
 
-  /** ?status= here would silently answer the institute question instead. */
-  it("uses ?visitStatus= on the visit's own status cell", () => {
-    expect(review).toContain("/review?visitStatus=");
+  /**
+   * ?status= here would silently answer the institute question instead. Since
+   * 0070 the two registers have a filter each, so a CALL row must key
+   * ?callStatus= and a VISIT row ?visitStatus= — never the other's, and never
+   * the institute's.
+   */
+  it("keys the visit's own filter on a visit, the call's on a call", () => {
+    expect(review).toContain(
+      'visit.kind === "call" ? "callStatus" : "visitStatus"',
+    );
     expect(review).not.toContain("/review?status=");
   });
 

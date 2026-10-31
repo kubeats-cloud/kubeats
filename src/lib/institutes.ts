@@ -4,6 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { logError } from "@/lib/errors";
 import { istDayAfter, istDayStart } from "@/lib/dates";
 import { signVisitPhotos, type VisitPhoto } from "@/lib/photos";
+import {
+  mergeStatusHistories,
+  type CallHistoryRow,
+  type StatusChange,
+  type VisitHistoryRow,
+} from "@/lib/status-history";
 import type { InstituteType } from "@/lib/validation/institute";
 
 export interface Institute {
@@ -26,6 +32,20 @@ export interface Institute {
   class12: Record<string, number>;
   status: string | null;
   status_updated_at: string | null;
+  /**
+   * The CALL track's current status (0072), independent of `status`.
+   *
+   * Two tracks, not two views of one fact: a visit and a call can leave the
+   * same school in different places, and each has its own vocabulary
+   * (`institute_statuses` vs `call_statuses`) with its own badge. The detail
+   * page renders both; the registry deliberately keeps ONE status column,
+   * because that list is scanned for "where does this school stand" and two
+   * badges per row would make that harder, not truer. `status` remains the
+   * visit track — every existing screen and report keys on it.
+   */
+  call_status: string | null;
+  /** When `call_status` last actually CHANGED, maintained by 0072's trigger. */
+  call_status_updated_at: string | null;
   created_at: string;
   /**
    * WHO REGISTERED IT — and, once rep-owned institutes ship, who can SEE it.
@@ -71,6 +91,7 @@ const COLUMNS = `
   principal_name, principal_mobile,
   decision_maker_name, decision_maker_designation, decision_maker_mobile,
   class11, class12, status, status_updated_at, created_at,
+  call_status, call_status_updated_at,
   registered_by, campus_id,
   rep_edits_used, rep_edited_at, rep_edited_by
 `;
@@ -370,48 +391,56 @@ export async function getInstituteVisits(
   };
 }
 
-export interface StatusChange {
-  id: string;
-  status: string;
-  changedAt: string;
-  changedBy: string | null;
-  /** Null when RLS hides that profile — a rep may only read their own. */
-  changedByName: string | null;
-  /** The visit that caused it, when one did. */
-  visitId: string | null;
-}
-
 /**
- * The institute's status journey, newest first (migration 0011).
+ * The institute's status journey, newest first (0011, extended by 0072).
  *
- * Readable by everyone: institute_status_history_select is `using (true)`,
- * like the registry itself. "This school went cold in March" is a fact about
- * the school, not about the rep who recorded it, and the next person to pick
- * it up needs it.
+ * TWO TABLES, ONE TIMELINE. Visit changes live in `institute_status_history`
+ * and call changes in `institute_call_status_history`; they are parallel rather
+ * than polymorphic because a foreign key cannot point at two parents. Merged by
+ * `mergeStatusHistories()` so the screen tells one story, each line carrying
+ * `source` so the renderer picks the right vocabulary.
  *
- * The open/closed category is deliberately not selected — it is not stored.
- * Derive it with statusCategory() from the shared catalogue, so this feature
- * cannot become a second opinion about which statuses are closed.
+ * Readable by everyone: both history tables' select policies are `using (true)`,
+ * like the registry itself. "This school went cold in March" is a fact about the
+ * school, not about the rep who recorded it.
  */
 export async function getInstituteStatusHistory(
   instituteId: string,
 ): Promise<{ ok: true; changes: StatusChange[] } | { ok: false }> {
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("institute_status_history")
-    .select("id, status, changed_at, changed_by, visit_id")
-    .eq("institute_id", instituteId)
-    .order("changed_at", { ascending: false });
+  const [visitResult, callResult] = await Promise.all([
+    supabase
+      .from("institute_status_history")
+      .select("id, status, changed_at, changed_by, visit_id")
+      .eq("institute_id", instituteId),
+    supabase
+      .from("institute_call_status_history")
+      .select("id, status, changed_at, changed_by, call_id")
+      .eq("institute_id", instituteId),
+  ]);
 
-  if (error) {
-    logError("institutes:status-history", error);
+  if (visitResult.error) {
+    logError("institutes:status-history", visitResult.error);
     return { ok: false };
   }
 
-  const rows = data ?? [];
+  // Degrades rather than failing the page on a database where 0072 is not
+  // applied yet: the visit journey is still a true answer without the calls.
+  if (callResult.error) {
+    logError("institutes:call-status-history", callResult.error);
+  }
+  const callRows = callResult.error
+    ? []
+    : ((callResult.data ?? []) as unknown as CallHistoryRow[]);
+
+  const rows = mergeStatusHistories(
+    (visitResult.data ?? []) as unknown as VisitHistoryRow[],
+    callRows,
+  );
+
   const changerIds = [
-    ...new Set(rows.map((r) => r.changed_by).filter((id): id is string => Boolean(id))),
+    ...new Set(rows.map((r) => r.changedBy).filter((id): id is string => Boolean(id))),
   ];
 
   const names = new Map<string, string>();
@@ -431,12 +460,8 @@ export async function getInstituteStatusHistory(
   return {
     ok: true,
     changes: rows.map((r) => ({
-      id: r.id,
-      status: r.status,
-      changedAt: r.changed_at,
-      changedBy: r.changed_by,
-      changedByName: r.changed_by ? (names.get(r.changed_by) ?? null) : null,
-      visitId: r.visit_id,
+      ...r,
+      changedByName: r.changedBy ? (names.get(r.changedBy) ?? null) : null,
     })),
   };
 }

@@ -29,7 +29,7 @@ import { CounsellorsPanel } from "@/components/institutes/counsellors-panel";
 import { SlabsPanel } from "@/components/institutes/slabs-panel";
 import { listSlabSets, isEmpanelled } from "@/lib/slabs";
 import { activityLabel } from "@/lib/activities";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { listStatusCatalogue, listCallStatusCatalogue } from "@/lib/statuses";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { getOpenFollowUps } from "@/lib/visits";
 import { instituteCounts, workedItBy } from "@/lib/institute-hub";
@@ -117,11 +117,21 @@ export default async function InstituteDetailPage(
   // Independent reads, so the slower one does not hold up the others. The reps
   // list is fetched for an ADMIN only: it is the reassign picker's, and a rep
   // has nothing to reassign.
-  const [history, statusHistory, catalogue, reps, counsellorList, slabList] =
-    await Promise.all([
+  const [
+    history,
+    statusHistory,
+    catalogue,
+    callCatalogue,
+    reps,
+    counsellorList,
+    slabList,
+  ] = await Promise.all([
       getInstituteVisits(id),
       getInstituteStatusHistory(id),
       listStatusCatalogue(),
+      // The second vocabulary. The detail page is the ONE place both tracks are
+      // shown side by side, so it needs both lists to colour and order them.
+      listCallStatusCatalogue(),
       admin ? listAllReps() : Promise.resolve([]),
       // Scoped by RLS through the parent institute (0037), so this needs no
       // ownership test of its own — a rep who cannot see the institute has
@@ -184,14 +194,20 @@ export default async function InstituteDetailPage(
    * Reused rather than reimplemented so this panel and /pending cannot
    * disagree about what is owed: they are the same computation, filtered.
    */
+  /*
+   * EITHER TRACK BEING OPEN IS ENOUGH. The same rule Pending uses
+   * (`audit_open_follow_ups.is_open`, 0073), asked locally first so the
+   * expensive shared read only runs when it can return something. A school
+   * whose last call left the loop open is owed a follow-up even if its last
+   * visit closed one, and vice versa.
+   */
   const statusIsOpen = isOpenStatus(catalogue, institute.status);
-  const openStatuses = catalogue
-    .filter((row) => row.category === "open")
-    .map((row) => row.status);
+  const callStatusIsOpen = isOpenStatus(callCatalogue, institute.call_status);
+  const anyStatusOpen = statusIsOpen || callStatusIsOpen;
 
   const followUps =
-    statusIsOpen && user
-      ? await getOpenFollowUps(openStatuses, user.id, undefined, {instituteId:id})
+    anyStatusOpen && user
+      ? await getOpenFollowUps(user.id, undefined, {instituteId:id})
       : ({ ok: true, items: [] } as const);
   const owed = followUps.ok
     ? (followUps.items.find((item) => item.instituteId === id) ?? null)
@@ -236,6 +252,22 @@ export default async function InstituteDetailPage(
 
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <InstituteStatusBadge status={institute.status} catalogue={catalogue} />
+        {/*
+          THE CALL TRACK'S OWN BADGE (0072). Shown only when it exists: most
+          schools have never had a call filed against them, and a second "No
+          status yet" beside the first would read as a duplicate rather than as
+          a second track. Labelled because an unlabelled pair of status badges
+          a reader cannot tell apart would be worse than one.
+        */}
+        {institute.call_status && (
+          <span className="flex items-center gap-1.5">
+            <span className="text-muted-foreground text-xs">Call status</span>
+            <InstituteStatusBadge
+              status={institute.call_status}
+              catalogue={callCatalogue}
+            />
+          </span>
+        )}
         <Badge variant="secondary">{TYPE_LABELS[institute.type]}</Badge>
         {/*
           EMPANELLED, COMPUTED. At least one APPROVED slab set — derived from
@@ -297,14 +329,18 @@ export default async function InstituteDetailPage(
         it is not owed anything, and saying so would put this screen at odds
         with Pending.
       */}
-      {statusIsOpen && (
+      {anyStatusOpen && (
         <div className="mb-6">
           <SectionTitle>Follow-up owed</SectionTitle>
           <Card className="p-4">
             <p className="text-sm">
               This institute is{" "}
-              <span className="font-medium">{institute.status}</span>, which is
-              an open status — someone still owes it a visit.
+              <span className="font-medium">
+                {owed?.status ??
+                  (statusIsOpen ? institute.status : institute.call_status)}
+              </span>
+              , which is an open status — someone still owes it a follow-up
+              {owed?.statusSource === "call" ? " (left open by a call report)" : ""}.
             </p>
             <dl className="mt-3 space-y-1.5">
               <FollowUpFact
@@ -518,7 +554,9 @@ export default async function InstituteDetailPage(
           <StatusTimeline
             changes={statusHistory.changes}
             currentStatus={institute.status}
+            currentCallStatus={institute.call_status}
             catalogue={catalogue}
+            callCatalogue={callCatalogue}
           />
         )}
       </div>

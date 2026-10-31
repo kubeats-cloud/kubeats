@@ -6,7 +6,7 @@ import {
   type StatusCategory,
   statusCategory,
 } from "@/lib/validation/institute";
-import type { StatusChange } from "@/lib/institutes";
+import type { StatusChange } from "@/lib/status-history";
 
 /**
  * The status journey (feature C), newest first.
@@ -35,19 +35,35 @@ const DOT: Record<StatusCategory, string> = {
 export function StatusTimeline({
   changes,
   currentStatus,
+  currentCallStatus,
   catalogue,
+  callCatalogue,
 }: {
   changes: StatusChange[];
-  /** Used only to mark the newest entry as where things stand now. */
+  /** Used only to mark the newest VISIT entry as where things stand now. */
   currentStatus: string | null;
-  /** The vocabulary, loaded from the database by the page. */
+  /** The same question for the CALL track (0072). */
+  currentCallStatus: string | null;
+  /** The visit vocabulary, loaded from the database by the page. */
   catalogue: StatusCatalogue;
+  /** The call vocabulary — a second list since 0070, not an alias. */
+  callCatalogue: StatusCatalogue;
 }) {
   return (
     <ol className="border-border ml-1 space-y-4 border-l pl-5">
       {changes.map((change, index) => {
-        const category = statusCategory(catalogue, change.status);
-        const isCurrent = index === 0 && change.status === currentStatus;
+        /*
+         * THE CATALOGUE FOLLOWS THE TRACK, not the newest entry. A call status
+         * and a visit status may share a spelling today and mean different
+         * things after an admin edits one list, so colouring (and the
+         * open/closed word) must come from the vocabulary this line belongs to.
+         */
+        const vocabulary = change.source === "call" ? callCatalogue : catalogue;
+        const category = statusCategory(vocabulary, change.status);
+        const isCurrent =
+          change.status ===
+            (change.source === "call" ? currentCallStatus : currentStatus) &&
+          changes.findIndex((c) => c.source === change.source) === index;
 
         return (
           <li key={change.id} className="relative">
@@ -59,7 +75,13 @@ export function StatusTimeline({
             />
 
             <div className="flex flex-wrap items-center gap-2">
-              <InstituteStatusBadge status={change.status} catalogue={catalogue} />
+              <InstituteStatusBadge status={change.status} catalogue={vocabulary} />
+              {/* Which track a line came from. Without it the two histories
+                  interleave into one list in which a Call and a Visit status
+                  are indistinguishable. */}
+              <Badge variant="neutral">
+                {change.source === "call" ? "Call" : "Visit"}
+              </Badge>
               {isCurrent && <Badge variant="secondary">Current</Badge>}
             </div>
 

@@ -47,8 +47,10 @@ describe("/api/export/call-activity", () => {
     expect(route).toContain('from "@/lib/exports/call-activity-export"');
   });
 
-  it("validates filters against the live catalogue before building the file", () => {
-    expect(route).toContain("listStatusCatalogue()");
+  it("validates filters against the live CATALOGUE before building the file", () => {
+    // The call track's vocabulary since 0070 — the visit list would validate a
+    // call status against the wrong table the moment an admin renames one.
+    expect(route).toContain("listCallStatusCatalogue()");
     expect(route).toContain("parseCallActivityFilters(");
   });
 });

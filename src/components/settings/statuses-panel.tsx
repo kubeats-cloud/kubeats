@@ -16,8 +16,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
-import { addStatus, setStatusActive, setStatusCampus } from "@/lib/admin-actions";
-import { addStatusField, deleteStatusField } from "@/lib/status-field-actions";
+import {
+  addCallStatus,
+  addStatus,
+  setCallStatusActive,
+  setCallStatusCampus,
+  setStatusActive,
+  setStatusCampus,
+} from "@/lib/admin-actions";
+import {
+  addCallStatusField,
+  addStatusField,
+  deleteCallStatusField,
+  deleteStatusField,
+} from "@/lib/status-field-actions";
 import type { StatusField } from "@/lib/status-fields";
 import { EMPTY_ADMIN_STATE, type AdminState } from "@/lib/admin-form-state";
 import { fieldErrorsFrom, statusSchema } from "@/lib/validation/admin";
@@ -43,7 +55,13 @@ import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
 const ALL_CAMPUSES = "__all__";
 
 /**
- * The status vocabulary, which an admin maintains from here.
+ * A status vocabulary, which an admin maintains from here.
+ *
+ * TWO PANELS, ONE COMPONENT (0070). `scope="visit"` edits institute_statuses
+ * and `scope="call"` edits call_statuses; the lists are independent, the rules
+ * are identical, and the panel picks its actions by scope. Everything below
+ * about why this is possible, what the columns mean and why there is no
+ * delete applies to both tables unchanged.
  *
  * THIS PANEL ONLY BECAME POSSIBLE IN MIGRATION 0026. Until then the nine
  * statuses were written into two CHECK constraints as literals, so a row added
@@ -68,16 +86,49 @@ const ALL_CAMPUSES = "__all__";
  * out of the rep's picker and leaves every existing visit readable.
  */
 export function StatusesPanel({
+  scope,
   statuses,
   fields = [],
   campuses = [],
 }: {
+  /**
+   * WHICH VOCABULARY THIS PANEL EDITS (0070). The two lists are independent
+   * from the moment an admin changes one, so the panel is told explicitly
+   * which actions to call rather than being given a table name by a request.
+   * It also keys the DOM ids, because both panels sit on one Settings page and
+   * the two lists hold identical status names on day one — duplicate ids
+   * would make every label point at whichever input rendered first.
+   */
+  scope: "visit" | "call";
   statuses: StatusAdminRow[];
   fields?: StatusField[];
   campuses?: Campus[];
 }) {
+  const isCall = scope === "call";
+  const actions = isCall
+    ? {
+        add: addCallStatus,
+        setActive: setCallStatusActive,
+        setCampus: setCallStatusCampus,
+        addField: addCallStatusField,
+        deleteField: deleteCallStatusField,
+        title: "Call statuses",
+        emptyHint:
+          "A rep has to say where every call leaves the institute, so add at least one.",
+      }
+    : {
+        add: addStatus,
+        setActive: setStatusActive,
+        setCampus: setStatusCampus,
+        addField: addStatusField,
+        deleteField: deleteStatusField,
+        title: "Institute statuses",
+        emptyHint:
+          "A rep has to say where every visit leaves the institute, so add at least one.",
+      };
+
   const [serverState, formAction, isPending] = useActionState(
-    addStatus,
+    actions.add,
     EMPTY_ADMIN_STATE,
   );
   const [clientState, setClientState] = useState<AdminState>(EMPTY_ADMIN_STATE);
@@ -107,7 +158,7 @@ export function StatusesPanel({
     const form = event.currentTarget;
     const formData = new FormData(form);
     formData.set("status", statusName);
-    const result = await addStatusField(formData);
+    const result = await actions.addField(formData);
     setFieldMessage(result);
     if (result.ok) {
       form.reset();
@@ -115,7 +166,7 @@ export function StatusesPanel({
   }
 
   async function handleDeleteField(fieldId: string) {
-    const result = await deleteStatusField(fieldId);
+    const result = await actions.deleteField(fieldId);
     setFieldMessage(result);
   }
   /*
@@ -191,14 +242,11 @@ export function StatusesPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Institute statuses</CardTitle>
+        <CardTitle className="text-base">{actions.title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {statuses.length === 0 ? (
-          <EmptyState
-            title="No statuses yet"
-            description="A rep has to say where every visit leaves the institute, so add at least one."
-          />
+          <EmptyState title="No statuses yet" description={actions.emptyHint} />
         ) : (
           <ul className="space-y-2">
             {statuses.map((row) => (
@@ -244,7 +292,7 @@ export function StatusesPanel({
                     onClick={() =>
                       startRetiring(async () => {
                         setRetireState(
-                          await setStatusActive(row.status, !row.isActive),
+                          await actions.setActive(row.status, !row.isActive),
                         );
                       })
                     }
@@ -263,7 +311,7 @@ export function StatusesPanel({
                       this does not touch category, tone or the asks_* flags: the
                       action updates campus_id alone. */}
                   <div className="flex items-center gap-1.5">
-                    <Label htmlFor={`campus-${row.status}`} className="text-muted-foreground text-xs">
+                    <Label htmlFor={`campus-${scope}-${row.status}`} className="text-muted-foreground text-xs">
                       Campus
                     </Label>
                     <Select
@@ -272,13 +320,13 @@ export function StatusesPanel({
                       onValueChange={(value) => {
                         const nextCampusId = value === ALL_CAMPUSES ? null : value;
                         startCampusEditing(async () => {
-                          const result = await setStatusCampus(row.status, nextCampusId);
+                          const result = await actions.setCampus(row.status, nextCampusId);
                           setCampusEditState({ ...result, status: row.status });
                         });
                       }}
                     >
                       <SelectTrigger
-                        id={`campus-${row.status}`}
+                        id={`campus-${scope}-${row.status}`}
                         className="h-8 w-auto min-w-[9rem] text-xs"
                         aria-label={`Campus for ${row.status}`}
                       >
@@ -383,8 +431,8 @@ export function StatusesPanel({
                               />
                             </div>
                             <div className="flex items-center gap-2">
-                              <Checkbox id={`req-${row.status}`} name="is_required" />
-                              <Label htmlFor={`req-${row.status}`} className="text-xs cursor-pointer">
+                              <Checkbox id={`req-${scope}-${row.status}`} name="is_required" />
+                              <Label htmlFor={`req-${scope}-${row.status}`} className="text-xs cursor-pointer">
                                 Mark as required field
                               </Label>
                             </div>
@@ -440,9 +488,9 @@ export function StatusesPanel({
         */}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-2">
-            <Label htmlFor="status-label">Add a status</Label>
+            <Label htmlFor={`status-label-${scope}`}>Add a status</Label>
             <Input
-              id="status-label"
+              id={`status-label-${scope}`}
               name="status"
               className="h-11"
               maxLength={80}
@@ -560,19 +608,19 @@ export function StatusesPanel({
               value={asksCount ? "yes" : "no"}
             />
             <Ask
-              id="asks-date"
+              id={`asks-date-${scope}`}
               label="The session or campus-visit date"
               checked={asksDate}
               onChange={setAsksDate}
             />
             <Ask
-              id="asks-session"
+              id={`asks-session-${scope}`}
               label="The session topic and who took it"
               checked={asksSession}
               onChange={setAsksSession}
             />
             <Ask
-              id="asks-count"
+              id={`asks-count-${scope}`}
               label="The number of students"
               checked={asksCount}
               onChange={setAsksCount}

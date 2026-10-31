@@ -21,6 +21,28 @@ export type StatusFieldActionResult = {
 };
 
 export async function addStatusField(formData: FormData): Promise<StatusFieldActionResult> {
+  return addField(formData, "status_fields", "institute_statuses", "status");
+}
+
+/**
+ * The call twin of `addStatusField` (0071), writing `call_status_fields`.
+ *
+ * A separate function rather than a kind argument, for the same reason the
+ * four call-status actions are separate: the table is chosen by this code, not
+ * by a string arriving from a request. The owning-status column is
+ * `call_status` rather than `status`, which is the only difference in the
+ * INSERT; validation, key checking and revalidation are the same rules.
+ */
+export async function addCallStatusField(formData: FormData): Promise<StatusFieldActionResult> {
+  return addField(formData, "call_status_fields", "call_statuses", "call_status");
+}
+
+async function addField(
+  formData: FormData,
+  table: "status_fields" | "call_status_fields",
+  statusTable: "institute_statuses" | "call_statuses",
+  statusColumn: "status" | "call_status",
+): Promise<StatusFieldActionResult> {
   const gate = await requireAdmin();
   if (!gate.ok) {
     return { error: gate.error, fieldErrors: {} };
@@ -75,17 +97,17 @@ export async function addStatusField(formData: FormData): Promise<StatusFieldAct
 
   // Check if status exists
   const { data: statusRow, error: statusError } = await supabase
-    .from("institute_statuses")
-    .select("status")
-    .eq("status", status)
+    .from(statusTable)
+    .select(statusColumn)
+    .eq(statusColumn, status)
     .maybeSingle();
 
   if (statusError || !statusRow) {
     return { error: `Status "${status}" does not exist.`, fieldErrors: { status: "Unknown status" } };
   }
 
-  const { error: insertError } = await supabase.from("status_fields").insert({
-    status,
+  const { error: insertError } = await supabase.from(table).insert({
+    [statusColumn]: status,
     field_name: fieldName,
     field_type: fieldType,
     options,
@@ -112,13 +134,25 @@ export async function addStatusField(formData: FormData): Promise<StatusFieldAct
 }
 
 export async function deleteStatusField(fieldId: string): Promise<StatusFieldActionResult> {
+  return deleteField(fieldId, "status_fields");
+}
+
+/** The call twin of `deleteStatusField` (0071). */
+export async function deleteCallStatusField(fieldId: string): Promise<StatusFieldActionResult> {
+  return deleteField(fieldId, "call_status_fields");
+}
+
+async function deleteField(
+  fieldId: string,
+  table: "status_fields" | "call_status_fields",
+): Promise<StatusFieldActionResult> {
   const gate = await requireAdmin();
   if (!gate.ok) {
     return { error: gate.error };
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.from("status_fields").delete().eq("id", fieldId);
+  const { error } = await supabase.from(table).delete().eq("id", fieldId);
 
   if (error) {
     logError("status-fields:delete", error);

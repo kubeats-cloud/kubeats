@@ -21,7 +21,7 @@ import {
   AdminFollowUpCards,
   RepFollowUpCards,
 } from "@/components/visits/follow-up-cards";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { listStatusCatalogue, listCallStatusCatalogue } from "@/lib/statuses";
 import { activityLabelFor, listedFollowUpCount } from "@/lib/validation/visit";
 import { formatDate, todayISO } from "@/lib/dates";
 import { getFollowUpCardModel } from "@/lib/follow-up-cards";
@@ -84,15 +84,18 @@ export default async function PendingPage(props: PageProps<"/pending">) {
   // supervision-shaped VIEW over the rep's own-day view, same as `admin` used
   // to before a third role existed.
   const staff = isStaff(user);
-  const catalogue = await listStatusCatalogue();
+  const [catalogue, callCatalogue] = await Promise.all([
+    listStatusCatalogue(),
+    listCallStatusCatalogue(),
+  ]);
 
-  // The category is the managed vocabulary's to decide, never a list in here.
-  const openStatuses = catalogue
-    .filter((row) => row.category === "open")
-    .map((row) => row.status);
+  // The category is the managed vocabularies' to decide, never a list in
+  // here — and since 0073 the union of the two tracks lives in the view, so
+  // `getOpenFollowUps()` asks it directly. `catalogue` is still fetched for
+  // the badges this page renders.
 
   const [result, unreported, purposes, tasks, plan, followUpCards] = await Promise.all([
-    getOpenFollowUps(openStatuses, user.id, first(searchParams.page), {owner:first(searchParams.owner)}),
+    getOpenFollowUps(user.id, first(searchParams.page), {owner:first(searchParams.owner)}),
     // Staff have no half-finished visits of their own: neither role logs any.
     staff ? Promise.resolve([]) : getUnreportedVisits(user.id),
     listPurposes(),
@@ -266,6 +269,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
           items={result.items}
           purposes={purposes}
           catalogue={catalogue}
+          callCatalogue={callCatalogue}
           // D10 — staff have no campus and do not do field visits, so a
           // launch would put the visit on their own day. Read-only, and the
           // action refuses them too rather than trusting this prop.

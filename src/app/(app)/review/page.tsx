@@ -4,7 +4,7 @@ import { VisitReview } from "@/components/admin/visit-review";
 import { requireStaff } from "@/lib/admin";
 import { listTeamVisits, REVIEW_PAGE_SIZE } from "@/lib/admin-workspace";
 import { listReps } from "@/lib/closing-report";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { listStatusCatalogue, listCallStatusCatalogue } from "@/lib/statuses";
 import { listInstitutesForPicker } from "@/lib/visits";
 import { listCallReports } from "@/lib/call-reports";
 import { mergeReviewFeed, reviewKinds } from "@/lib/review-feed";
@@ -43,15 +43,19 @@ export default async function ReviewPage(props: PageProps<"/review">) {
     reported: first(searchParams.reported),
     instituteStatus: first(searchParams.status),
     /*
-     * TWO STATUS PARAMS, DELIBERATELY UNMERGED.
+     * THREE STATUS PARAMS, DELIBERATELY UNMERGED.
      *
      * `?status=` has always meant the INSTITUTE's current status and keeps
      * meaning exactly that — every link already in the wild still resolves the
-     * same way. `?visitStatus=` is the new one and means the visit's own. See
-     * VisitFilters for why aliasing them would answer the wrong question
+     * same way. On the visit register it reads `institutes.status`; on the call
+     * register it reads `institutes.call_status`, because that is the badge a
+     * call moved (0073). `?visitStatus=` means the visit's own
+     * `status_set_to`; `?callStatus=` means the call's own. See VisitFilters
+     * for why aliasing any two of them would answer the wrong question
      * quietly.
      */
     visitStatus: first(searchParams.visitStatus),
+    callStatus: first(searchParams.callStatus),
     lifecycle: first(searchParams.lifecycle),
     statusCategory:
       first(searchParams.category) === "open" ||
@@ -82,7 +86,7 @@ export default async function ReviewPage(props: PageProps<"/review">) {
   };
   const emptyCalls = { ok: true as const, reports: [], total: 0 };
 
-  const [result, reps, institutes, catalogue, calls] = await Promise.all([
+  const [result, reps, institutes, catalogue, callCatalogue, calls] = await Promise.all([
     kinds.visits
       ? listTeamVisits(filters, 1, REVIEW_PAGE_SIZE)
       : Promise.resolve(emptyVisits),
@@ -100,6 +104,13 @@ export default async function ReviewPage(props: PageProps<"/review">) {
      * admin added last week has to be filterable this week.
      */
     listStatusCatalogue(),
+    /*
+     * The CALL vocabulary, read separately since 0070. It is a copy of the visit
+     * list today, so the two dropdowns look identical — and that is the point:
+     * they stop being identical the moment an admin edits one in Settings, and
+     * the register has to offer the list its rows were actually filed under.
+     */
+    listCallStatusCatalogue(),
     kinds.calls
       ? listCallReports(filters, REVIEW_PAGE_SIZE)
       : Promise.resolve(emptyCalls),
@@ -166,6 +177,10 @@ export default async function ReviewPage(props: PageProps<"/review">) {
         reps={reps.map((r) => ({ id: r.id, name: r.name }))}
         institutes={institutes.map((i) => ({ id: i.id, name: i.name }))}
         statuses={catalogue.map((s) => ({
+          status: s.status,
+          isActive: s.isActive,
+        }))}
+        callStatuses={callCatalogue.map((s) => ({
           status: s.status,
           isActive: s.isActive,
         }))}

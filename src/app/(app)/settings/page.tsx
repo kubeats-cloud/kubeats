@@ -13,12 +13,17 @@ import { SignInSecurityPanel } from "@/components/settings/sign-in-security-pane
 import { TargetStatusesPanel } from "@/components/weekly/target-statuses-panel";
 import { ErrorState } from "@/components/states";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
-import { listPurposeRows, listStatusRows, listTeamMembers } from "@/lib/admin";
+import {
+  listCallStatusRows,
+  listPurposeRows,
+  listStatusRows,
+  listTeamMembers,
+} from "@/lib/admin";
 import { listAdminFactorStates, viewerHasFactor } from "@/lib/mfa-admin";
 import { getLocationTree } from "@/lib/locations";
 import { settled } from "@/lib/errors";
 import { listCampuses } from "@/lib/campuses";
-import { listStatusFields } from "@/lib/status-fields";
+import { listCallStatusFields, listStatusFields } from "@/lib/status-fields";
 import { listTargetStatusRows } from "@/lib/target-statuses";
 
 export const metadata = { title: "Settings" };
@@ -49,14 +54,27 @@ export default async function SettingsPage() {
    * panels. One unreachable list should empty its own card, not replace the
    * team, the shared lists, the locations and the security panel with an error.
    */
-  const [purposes, statuses, tree, members, campuses, enrolled, statusFields, targetStatuses] = await Promise.all([
+  const [
+    purposes,
+    statuses,
+    callStatuses,
+    tree,
+    members,
+    campuses,
+    enrolled,
+    statusFields,
+    callStatusFields,
+    targetStatuses,
+  ] = await Promise.all([
     settled(listPurposeRows(), [], "settings:purposes"),
     settled(listStatusRows(), [], "settings:statuses"),
+    settled(listCallStatusRows(), [], "settings:call-statuses"),
     settled(getLocationTree(), [], "settings:locations"),
     settled(listTeamMembers(), [], "settings:team"),
     settled(listCampuses(), [], "settings:campuses"),
     settled(viewerHasFactor(), false, "settings:viewer-factor"),
     settled(listStatusFields(), [], "settings:status-fields"),
+    settled(listCallStatusFields(), [], "settings:call-status-fields"),
     // The same read the Targets tab makes. `{ ok: false }` is the shape the
     // card already understands, so a failure empties this card and says so
     // rather than pretending the vocabulary is empty.
@@ -107,7 +125,24 @@ export default async function SettingsPage() {
       <LocationsPanel tree={tree} />
 
       <SectionTitle className="mt-8">Status Management</SectionTitle>
-      <StatusesPanel statuses={statuses} fields={statusFields} campuses={campuses} />
+      <StatusesPanel
+        scope="visit"
+        statuses={statuses}
+        fields={statusFields}
+        campuses={campuses}
+      />
+
+      {/* A SECOND, INDEPENDENT LIST (0070). Both start as copies of each other
+          and diverge only when an admin edits one here; keeping them on one
+          screen is what makes that divergence deliberate rather than a
+          surprise discovered when a rep's picker changes. */}
+      <SectionTitle className="mt-8">Call Status Management</SectionTitle>
+      <StatusesPanel
+        scope="call"
+        statuses={callStatuses}
+        fields={callStatusFields}
+        campuses={campuses}
+      />
 
       {/* THE SAME COMPONENT AS THE TARGETS TAB, deliberately. It reads the same
           table through the same server actions and has no client state of its

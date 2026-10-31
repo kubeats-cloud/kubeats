@@ -89,6 +89,14 @@ export interface VisitRow {
 /** "No status yet" for the visit filter — `status_set_to IS NULL`. */
 export const VISIT_STATUS_NONE = "__none__";
 
+/**
+ * "No status yet" for the CALL filter — `follow_up_tasks.status_set_to IS
+ * NULL` on a call. Same sentinel, different column and different vocabulary,
+ * so it gets its own name rather than borrowing one whose doc points at
+ * `visits`.
+ */
+export const CALL_STATUS_NONE = "__none__";
+
 export interface VisitFilters {
   member?: string;
   institute?: string;
@@ -118,6 +126,22 @@ export interface VisitFilters {
    * they are found.
    */
   visitStatus?: string;
+  /**
+   * WHERE THIS CALL LEFT THE INSTITUTE — `follow_up_tasks.status_set_to` on a
+   * `kind = 'call'` row, read from `public.call_statuses` (0070).
+   *
+   * THE CALL REGISTER'S OWN THIRD FILTER and the counterpart of `visitStatus`.
+   * A call has one status and a visit has another; the two vocabularies are
+   * copies today and diverge from the moment an admin edits one list in
+   * Settings. So Visit's status filter must not be used to narrow Calls, and
+   * this one narrows nothing else: `reviewKinds()` sends a callStatus filter
+   * to the call register alone, exactly as visitStatus sends its own to
+   * visits.
+   *
+   * `CALL_STATUS_NONE` selects calls filed before FO024 (0027) made a status
+   * compulsory, which is how those rows are found.
+   */
+  callStatus?: string;
   /**
    * "Set" — an OPEN loop — or "Done".
    *

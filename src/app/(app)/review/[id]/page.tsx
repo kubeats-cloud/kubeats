@@ -14,7 +14,7 @@ import { activityLabelFor } from "@/lib/validation/visit";
 import { getCallReport } from "@/lib/call-reports";
 import { CallReportDetails } from "@/components/admin/call-reports";
 import { CallReportEdit } from "@/components/admin/call-report-edit";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { listCallStatusCatalogue } from "@/lib/statuses";
 
 export const metadata = { title: "Visit" };
 
@@ -56,7 +56,7 @@ export default async function ReviewVisitPage(props: PageProps<"/review/[id]">) 
         <div className="mt-4">
           <CallReportEdit
             taskId={call.id}
-            statuses={(await listStatusCatalogue()).map((s) => ({
+            statuses={(await listCallStatusCatalogue()).map((s) => ({
               status: s.status,
               isActive: s.isActive,
             }))}

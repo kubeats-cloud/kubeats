@@ -92,6 +92,7 @@ export function VisitReview({
   reps,
   institutes,
   statuses,
+  callStatuses,
   pageSize,
 }: {
   visits: ReviewRow[];
@@ -105,6 +106,8 @@ export function VisitReview({
   institutes: Option[];
   /** The whole vocabulary in display order, retired statuses included. */
   statuses: StatusOption[];
+  /** The CALL vocabulary — a second list since 0070, not an alias. */
+  callStatuses: StatusOption[];
   pageSize: number;
 }) {
   const router = useRouter();
@@ -183,6 +186,7 @@ export function VisitReview({
     "reported",
     "status",
     "visitStatus",
+    "callStatus",
     "lifecycle",
   ].filter((k) => params.get(k)).length;
 
@@ -288,7 +292,10 @@ export function VisitReview({
 
             This filters on `institutes.status` — where the school stands today,
             the same value the badge on /institutes shows and the same one
-            Pending keys on. The register's own "Status" column is
+            Pending keys on. On the CALL register it reads
+            `institutes.call_status` instead, the call track's own badge since
+            0072: a call moves that one, not the visit status, and the two can
+            differ once an admin lets the vocabularies diverge. The register's own "Status" column is
             `visits.status_set_to`: where THAT visit left the institute, which a
             later visit may since have superseded. Two different questions, and
             a filter labelled plain "Status" beside a column labelled "Status"
@@ -345,6 +352,43 @@ export function VisitReview({
                     is how those visits are found. */}
                 <SelectItem value={NONE}>No status set</SelectItem>
                 {statuses.map((entry) => (
+                  <SelectItem key={entry.status} value={entry.status}>
+                    {entry.isActive ? entry.status : `${entry.status} (retired)`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          {/*
+            "CALL STATUS" — the third status control, and the reason there are
+            three is that there are three different columns.
+
+            The two above read `visits` and `institutes` on the VISIT side. Calls
+            have their own vocabulary since 0070 and their own institute column
+            since 0072 (`institutes.call_status`), because a call and a visit can
+            leave the same school in different places. So this one narrows the
+            CALL register and nothing else — `reviewKinds()` sends a callStatus
+            filter to calls alone, the mirror image of what visitStatus does.
+
+            A call's own status is `follow_up_tasks.status_set_to`, which is what
+            the Status column on a Call Report row shows, so a drill-down from
+            that badge lands here. Retired statuses are offered for the same
+            reason as above: the register is a history, and they are how the
+            calls that carry them are found.
+          */}
+          <Field label="Call status">
+            <Select
+              value={value("callStatus") || ALL}
+              onValueChange={(v) => apply("callStatus", v)}
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="Any" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any</SelectItem>
+                <SelectItem value={NONE}>No status set</SelectItem>
+                {callStatuses.map((entry) => (
                   <SelectItem key={entry.status} value={entry.status}>
                     {entry.isActive ? entry.status : `${entry.status} (retired)`}
                   </SelectItem>
@@ -655,17 +699,22 @@ export function VisitReview({
                       {view.shows("status") && (
                         <td className="text-muted-foreground px-5 py-3">
                           {/*
-                            ?visitStatus=, NOT ?status=. This cell is
-                            `status_set_to` — what THIS visit decided — so the
-                            link must narrow to the visits that decided the same.
-                            ?status= would have answered "every visit to a school
-                            sitting there today", a different set and a different
-                            number than the column implies.
+                            A VISIT ROW KEYS ?visitStatus=, A CALL ROW ?callStatus=.
+                            Both cells render the row's own `status_set_to`, but
+                            the two columns belong to two vocabularies and two
+                            query parameters. Sending a call row to
+                            ?visitStatus= would filter the VISIT register by a
+                            status the call happened to share the spelling of —
+                            a different set and a different number than the
+                            column implies, which is the one failure a
+                            drill-down cannot survive.
                           */}
                           {visit.status ? (
                             <Link
-                              href={`/review?visitStatus=${encodeURIComponent(visit.status)}`}
-                              aria-label={`Show every visit that set ${visit.status}`}
+                              href={`/review?${
+                                visit.kind === "call" ? "callStatus" : "visitStatus"
+                              }=${encodeURIComponent(visit.status)}`}
+                              aria-label={`Show every ${visit.kind === "call" ? "call" : "visit"} that set ${visit.status}`}
                               className="focus-visible:ring-ring rounded-sm hover:underline focus-visible:ring-2 focus-visible:outline-none"
                             >
                               {visit.standing ?? visit.status}

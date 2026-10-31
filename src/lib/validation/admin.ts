@@ -206,6 +206,21 @@ export const statusCampusSchema = z.object({
   campus_id: campusIdField,
 });
 
+/*
+ * THE CALL VOCABULARY'S SCHEMAS (0070).
+ *
+ * `call_statuses` was created column-for-column from `institute_statuses`, so
+ * the rules are identical and these are ALIASES rather than copies. A copy
+ * would be free to drift from the visit schema — and the whole point of 0070 is
+ * that the two tables stay shape-identical even as their rows diverge. When a
+ * rule really does differ (a call never asks for students attended, say), that
+ * is the moment to write a real schema, not before.
+ */
+export const callStatusSchema = statusSchema;
+export const callStatusUpdateSchema = statusUpdateSchema;
+export const callStatusRenameSchema = statusRenameSchema;
+export const callStatusCampusSchema = statusCampusSchema;
+
 /**
  * Moving an institute to another rep — any rep, on any campus (0062).
  *

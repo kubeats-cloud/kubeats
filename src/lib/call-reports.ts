@@ -1,8 +1,8 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { istDayStart, istDayAfter } from "@/lib/dates";
-import type { VisitFilters } from "@/lib/admin-workspace";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { CALL_STATUS_NONE, type VisitFilters } from "@/lib/admin-workspace";
+import { listCallStatusCatalogue } from "@/lib/statuses";
 
 export interface CallReport {
   id:string; member:string; institute_id:string; reported_at:string;
@@ -12,10 +12,10 @@ export interface CallReport {
   /** How this task ended: done / no_answer / rescheduled / cancelled. Admin-editable (0063). */
   outcome:string|null;
   custom_fields?: Record<string, string> | null;
-  profiles:{name:string|null}|null; institutes:{name:string;status:string|null}|null;
+  profiles:{name:string|null}|null; institutes:{name:string;call_status:string|null}|null;
 }
 
-const columns = "id, member, institute_id, reported_at, status_set_to, expected_date, follow_up_date, students_attended, session_topic, session_taken_by, call_notes, next_action, note, due_date, outcome, custom_fields, profiles!follow_up_tasks_member_fkey(name), institutes!inner(name,status)";
+const columns = "id, member, institute_id, reported_at, status_set_to, expected_date, follow_up_date, students_attended, session_topic, session_taken_by, call_notes, next_action, note, due_date, outcome, custom_fields, profiles!follow_up_tasks_member_fkey(name), institutes!inner(name,call_status)";
 
 export interface CallReportPage {
   reports: CallReport[];
@@ -30,8 +30,8 @@ export async function listCallReports(
     return { ok: true, reports: [], total: 0 };
   }
   const db=await createClient();
-  const categoryStatuses = filters.statusCategory && !filters.visitStatus
-    ? (await listStatusCatalogue()).filter(s=>s.category===filters.statusCategory).map(s=>s.status) : null;
+  const categoryStatuses = filters.statusCategory && !filters.callStatus
+    ? (await listCallStatusCatalogue()).filter(s=>s.category===filters.statusCategory).map(s=>s.status) : null;
   if(categoryStatuses?.length===0)return { ok: true, reports: [], total: 0 };
   const build=(head:boolean)=>{
     let query=db.from("follow_up_tasks").select(columns,{count:"exact",head}).eq("kind","call")
@@ -40,10 +40,10 @@ export async function listCallReports(
     if(filters.institute)query=query.eq("institute_id",filters.institute);
     if(filters.from)query=query.gte("reported_at",istDayStart(filters.from)!);
     if(filters.to)query=query.lt("reported_at",istDayAfter(filters.to)!);
-    if(filters.visitStatus==="__none__")query=query.is("status_set_to",null);
-    else if(filters.visitStatus)query=query.eq("status_set_to",filters.visitStatus);
+    if(filters.callStatus===CALL_STATUS_NONE)query=query.is("status_set_to",null);
+    else if(filters.callStatus)query=query.eq("status_set_to",filters.callStatus);
     else if(categoryStatuses)query=query.in("status_set_to",categoryStatuses);
-    if(filters.instituteStatus)query=query.eq("institutes.status",filters.instituteStatus);
+    if(filters.instituteStatus)query=query.eq("institutes.call_status",filters.instituteStatus);
     return query;
   };
   const counted=await build(true);

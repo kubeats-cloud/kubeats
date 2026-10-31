@@ -48,7 +48,7 @@ function call(id: string, reportedAt: string): CallReport {
     outcome: "done",
     custom_fields: null,
     profiles: { name: "Rep One" },
-    institutes: { name: "Institute One", status: "Session scheduled" },
+    institutes: { name: "Institute One", call_status: "Session scheduled" },
   };
 }
 
@@ -83,6 +83,31 @@ describe("the Review feed's kind filter", () => {
 
   it("shows both when no kind is chosen", () => {
     expect(reviewKinds({})).toEqual({ visits: true, calls: true });
+  });
+
+  /*
+   * The two status filters are per-register since 0070. Neither may leave the
+   * other register on screen unfiltered, because its rows would not satisfy the
+   * filter the user just chose.
+   */
+  it("narrows to visits for the visit-status filter", () => {
+    expect(reviewKinds({ visitStatus: "Session scheduled" })).toEqual({
+      visits: true,
+      calls: false,
+    });
+  });
+
+  it("narrows to calls for the call-status filter", () => {
+    expect(reviewKinds({ callStatus: "Session scheduled" })).toEqual({
+      visits: false,
+      calls: true,
+    });
+  });
+
+  it("lets the call-status filter win when both status filters are set", () => {
+    expect(
+      reviewKinds({ visitStatus: "Session scheduled", callStatus: "Connected" }),
+    ).toEqual({ visits: false, calls: true });
   });
 });
 

@@ -275,10 +275,24 @@ export interface FollowUp {
   instituteId: string;
   instituteName: string;
   city: string | null;
-  /** The institute's CURRENT status, which is what makes it open. */
+  /**
+   * The status that makes this row open — the GOVERNING status, read from
+   * `audit_open_follow_ups` (0073) rather than assumed to be the visit one.
+   *
+   * Since institutes carry two tracks (0072), a row can be owed because its
+   * VISIT status is open, because its CALL status is open, or because both
+   * are. The view picks the track with the later latest event when both are
+   * open and stamps it in `status_source`, so this value always belongs to
+   * `statusSource`'s vocabulary — which is why the badge below must be
+   * coloured from the matching catalogue.
+   */
   status: string;
-  /** From the visit that set it. Null when nothing visible explains it. */
+  /** Which track `status` — and therefore `member`/`setOn` — came from. */
+  statusSource: "visit" | "call";
+  /** From the event that set it. Null when nothing visible explains it. */
   visitId: string | null;
+  /** The call report that set it, when the CALL track governs the row. */
+  callId: string | null;
   member: string | null;
   memberName: string | null;
   setOn: string | null;
@@ -365,10 +379,10 @@ export function attributeToCurrentStatus<
  * invitation with no RSVP. Those are exactly the statuses the vocabulary calls
  * OPEN, so that is what this asks now.
  *
- * DRIVEN OFF `institutes.status`, NOT OFF EACH VISIT, and the difference
- * matters three times over:
+ * DRIVEN OFF THE INSTITUTE'S CURRENT TRACKS, NOT OFF EACH EVENT, and the
+ * difference matters three times over:
  *
- *   * it is the same value as the badge on /institutes, so the two screens
+ *   * it is the same value as the badges on /institutes, so the two screens
  *     cannot disagree about whether a school is still in play;
  *   * it collapses correctly — an institute visited five times is ONE row, not
  *     five;
@@ -377,9 +391,20 @@ export function attributeToCurrentStatus<
  *     done", the loop is closed and it must leave Pending. Reading each visit
  *     would leave A's row sitting there for ever.
  *
- * OPEN COMES FROM THE MANAGED VOCABULARY, never from a list here. A status an
+ * EITHER TRACK IS ENOUGH, since 0072. An institute has a visit status and a
+ * call status, and either one being open means somebody still owes work — a
+ * call that left the school waiting is not less owed because the last visit
+ * happened to close its loop. `audit_open_follow_ups` is where that union
+ * lives (0073): it exposes `is_open`, the governing `status` and the
+ * `status_source` it came from, so this reader asks one question instead of
+ * deciding a union here. When both tracks are open the later event governs,
+ * and the row reports which vocabulary its status belongs to.
+ *
+ * OPEN COMES FROM THE MANAGED VOCABULARIES, never from a list here. A status an
  * admin adds and marks open appears in Pending on the next request, with no
- * code change — which is the whole point of stages 4a and 4b.
+ * code change — which is the whole point of stages 4a and 4b. Each track's
+ * open/closed flags are the ones in ITS OWN table, so the two lists can be
+ * edited independently.
  *
  * SCOPING IS RLS'S, TWICE OVER AND FOR TWO DIFFERENT REASONS:
  *
@@ -396,15 +421,14 @@ export function attributeToCurrentStatus<
  * because somebody else touched it last would be a gap nobody could see.
  */
 export async function getOpenFollowUps(
-  openStatuses: readonly string[], viewerId: string, requestedPage?: string,
+  viewerId: string, requestedPage?: string,
   filters: {instituteId?: string; owner?: string} = {},
 ): Promise<{ok:true;items:FollowUp[];total:number;page:number;pages:number} | {ok:false}> {
-  if (!openStatuses.length) return {ok:true,items:[],total:0,page:1,pages:1};
   const supabase = await createClient();
   const build = (head: boolean) => {
     let q = supabase.from('audit_open_follow_ups').select(
-      'institute_id,institute_name,city,status,owner,owner_name,attribution_id,attribution_source,member,member_name,set_on,follow_up_date,expected_date,notes',
-      {count:'exact',head}).in('status',openStatuses);
+      'institute_id,institute_name,city,status,status_source,visit_status,call_status,owner,owner_name,attribution_id,attribution_source,member,member_name,set_on,follow_up_date,expected_date,notes',
+      {count:'exact',head}).eq('is_open',true);
     if (filters.instituteId) q = q.eq('institute_id',filters.instituteId);
     if (filters.owner) q = q.eq('owner',filters.owner);
     return q;
@@ -418,7 +442,9 @@ export async function getOpenFollowUps(
   if (result.error) {logError('visits:open-follow-ups-page',result.error); return {ok:false};}
   const items: FollowUp[] = (result.data ?? []).map(row => ({
     instituteId:row.institute_id,instituteName:row.institute_name,city:row.city,status:row.status,
+    statusSource:row.status_source === 'call' ? 'call' : 'visit',
     visitId:row.attribution_source === 'visit' ? row.attribution_id : null,
+    callId:row.attribution_source === 'call' ? row.attribution_id : null,
     member:row.member,memberName:row.member_name,setOn:row.set_on,followUpDate:row.follow_up_date,
     expectedDate:row.expected_date,notes:row.notes,mine:row.member === viewerId,
     owner:row.owner,ownerName:row.owner_name,

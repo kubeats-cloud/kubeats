@@ -26,7 +26,7 @@ import { listReps } from "@/lib/closing-report";
 import { getActivityReport } from "@/lib/activity-report";
 import { getWeekSummary, memberName } from "@/lib/week-summary";
 import { listInstitutes } from "@/lib/institutes";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { listStatusCatalogue, listCallStatusCatalogue } from "@/lib/statuses";
 import { getOpenFollowUps } from "@/lib/visits";
 import { getMemberToday, pipelineOf } from "@/lib/team-hub";
 import { settled } from "@/lib/errors";
@@ -172,9 +172,19 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
    * of the hub. Each fallback is the helper's OWN, so nothing downstream can
    * tell the two routes apart.
    */
-  const [catalogue, week, report, visits, registry, today, openCheckIns, reps] =
-    await Promise.all([
+  const [
+    catalogue,
+    callCatalogue,
+    week,
+    report,
+    visits,
+    registry,
+    today,
+    openCheckIns,
+    reps,
+  ] = await Promise.all([
       settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "team-hub:statuses"),
+      settled(listCallStatusCatalogue(), SEED_STATUS_CATALOGUE, "team-hub:call-statuses"),
       settled(getWeekSummary(memberId, weekStart), { ok: false as const }, "team-hub:week"),
       settled(
         getActivityReport(memberId, member.name, period, periodStart),
@@ -214,12 +224,10 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
    * owner is the only rep who can act on it. "What does this rep owe" is the
    * second question, so `owner` is the right key.
    */
-  const openStatuses = catalogue
-    .filter((row) => row.category === "open")
-    .map((row) => row.status);
-
+  // No open-status list is passed: since 0073 the union of the visit and call
+  // tracks is `audit_open_follow_ups.is_open`, so one question covers both.
   const followUps = await settled(
-    getOpenFollowUps(openStatuses, gate.user.id, undefined, {owner:memberId}),
+    getOpenFollowUps(gate.user.id, undefined, {owner:memberId}),
     { ok: false as const },
     "team-hub:follow-ups",
   );
@@ -376,6 +384,7 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
              `startFollowUp()` refuses them itself rather than trusting a view. */
           purposes={[]}
           catalogue={catalogue}
+          callCatalogue={callCatalogue}
           readOnly
           preview={FOLLOW_UPS_SHOWN}
         />

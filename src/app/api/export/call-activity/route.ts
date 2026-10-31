@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { requireStaff } from "@/lib/admin";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { listCallStatusCatalogue } from "@/lib/statuses";
 import { parseCallActivityFilters } from "@/lib/call-activity-report";
 import { buildCallActivityExport } from "@/lib/exports/call-activity-export";
 
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
   }
 
   const params = request.nextUrl.searchParams;
-  const catalogue = await listStatusCatalogue();
+  const catalogue = await listCallStatusCatalogue();
   const { filters } = parseCallActivityFilters(
     {
       from: params.get("from") ?? undefined,

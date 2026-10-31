@@ -26,6 +26,14 @@ export function reviewKinds(filters: VisitFilters): {
   if (filters.activity === "call") return { visits: false, calls: true };
   if (filters.activity) return { visits: true, calls: false };
   if (filters.reported === "calls") return { visits: false, calls: true };
+  // THE TWO STATUS FILTERS ARE PER-REGISTER, and this is what enforces it. A
+  // visit has a visit status and a call has a call status; showing the other
+  // register unfiltered beneath a status filter would leave rows on screen
+  // that the filter plainly did not match. Call status wins if both are set
+  // on a hand-edited URL — it is the only one that can apply to a call, and
+  // the wrong answer here is a wider list, not a missing one.
+  if (filters.callStatus) return { visits: false, calls: true };
+  if (filters.visitStatus) return { visits: true, calls: false };
   if (filters.lifecycle || filters.reported === "unreported") {
     return { visits: true, calls: false };
   }

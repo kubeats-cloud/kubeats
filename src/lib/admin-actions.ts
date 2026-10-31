@@ -25,6 +25,10 @@ import {
   purposeSchema,
   purposeUpdateSchema,
   reassignSchema,
+  callStatusCampusSchema,
+  callStatusRenameSchema,
+  callStatusSchema,
+  callStatusUpdateSchema,
   removeSchema,
   statusCampusSchema,
   statusRenameSchema,
@@ -420,6 +424,214 @@ export async function renameStatus(
     fieldErrors: {},
     ok: true,
     message: `Renamed to “${parsed.data.renameTo}”.`,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Call statuses (0070)                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The call vocabulary's four writes: add, retire/restore, re-scope, rename.
+ *
+ * DELIBERATELY FOUR SEPARATE ACTIONS, not one action taking a table name.
+ * A table name is a string a request can choose, and the whole point of the
+ * fork is that the two lists are edited INDEPENDENTLY — one function serving
+ * both would make "did the admin mean the visit list or the call list?" a
+ * runtime question. `call_statuses` here, `institute_statuses` above, and the
+ * Settings panel picks between the pairs by its own `scope` prop.
+ *
+ * The rules are the visit rules in full, because the tables are identical:
+ * `status` is the primary key, renaming is refused by the FKs once a call has
+ * used it, and retiring is the only removal path (0070 grants no DELETE).
+ */
+
+const CALL_STATUS_IN_USE =
+  "That call status is already recorded on call reports, so it cannot be renamed. " +
+  "Add the corrected one and retire this.";
+
+export async function addCallStatus(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = callStatusSchema.safeParse({
+    status: textOf(formData, "status"),
+    category: textOf(formData, "category"),
+    tone: textOf(formData, "tone"),
+    asks_expected_date: textOf(formData, "asks_expected_date") === "yes",
+    asks_session_detail: textOf(formData, "asks_session_detail") === "yes",
+    asks_head_count: textOf(formData, "asks_head_count") === "yes",
+    campus_id: textOf(formData, "campus_id"),
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELDS, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+
+  if (!(await campusIsActiveOrAll(gate.supabase, parsed.data.campus_id))) {
+    return {
+      error: CHECK_FIELDS,
+      fieldErrors: { campus_id: CHOOSE_LISTED_CAMPUS },
+    };
+  }
+
+  const { error } = await gate.supabase.from("call_statuses").insert({
+    status: parsed.data.status,
+    category: parsed.data.category,
+    tone: parsed.data.tone,
+    asks_expected_date: parsed.data.asks_expected_date,
+    asks_session_detail: parsed.data.asks_session_detail,
+    asks_head_count: parsed.data.asks_head_count,
+    campus_id: parsed.data.campus_id,
+  });
+
+  if (error) {
+    logError("admin:call-status-add", error);
+    if (error.code === UNIQUE_VIOLATION) {
+      return denied("A call status with that name already exists.");
+    }
+    if (error.code === FOREIGN_KEY_VIOLATION) {
+      return denied(CHOOSE_LISTED_CAMPUS);
+    }
+    return denied(toFriendlyMessage(error, "We could not add that call status."));
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: `Added call status “${parsed.data.status}”.`,
+  };
+}
+
+export async function setCallStatusActive(
+  status: string,
+  isActive: boolean,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = callStatusUpdateSchema.safeParse({ status });
+  if (!parsed.success) {
+    return denied("That call status could not be identified.");
+  }
+
+  const { error } = await gate.supabase
+    .from("call_statuses")
+    .update({ is_active: isActive })
+    .eq("status", parsed.data.status);
+
+  if (error) {
+    logError("admin:call-status-retire", error);
+    return denied(
+      toFriendlyMessage(
+        error,
+        isActive
+          ? "We could not restore that call status."
+          : "We could not retire that call status.",
+      ),
+    );
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: isActive
+      ? `“${parsed.data.status}” is available again for calls.`
+      : `“${parsed.data.status}” is retired for calls. Call reports that already carry it are unchanged.`,
+  };
+}
+
+export async function setCallStatusCampus(
+  status: string,
+  campusId: string | null,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = callStatusCampusSchema.safeParse({ status, campus_id: campusId });
+  if (!parsed.success) {
+    return { error: CHECK_FIELDS, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+
+  if (!(await campusIsActiveOrAll(gate.supabase, parsed.data.campus_id))) {
+    return { error: CHECK_FIELDS, fieldErrors: { campus_id: CHOOSE_LISTED_CAMPUS } };
+  }
+
+  const { error } = await gate.supabase
+    .from("call_statuses")
+    .update({ campus_id: parsed.data.campus_id })
+    .eq("status", parsed.data.status);
+
+  if (error) {
+    logError("admin:call-status-campus", error);
+    if (error.code === FOREIGN_KEY_VIOLATION) {
+      return denied(CHOOSE_LISTED_CAMPUS);
+    }
+    return denied(
+      toFriendlyMessage(error, "We could not change that call status's campus."),
+    );
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message:
+      parsed.data.campus_id === null
+        ? `“${parsed.data.status}” is visible to every campus for calls again.`
+        : `“${parsed.data.status}” is now scoped to one campus for calls.`,
+  };
+}
+
+export async function renameCallStatus(
+  _prev: AdminState,
+  formData: FormData,
+): Promise<AdminState> {
+  const gate = await requireAdmin();
+  if (!gate.ok) return denied(gate.error);
+
+  const parsed = callStatusRenameSchema.safeParse({
+    status: textOf(formData, "status"),
+    renameTo: textOf(formData, "rename_to"),
+  });
+  if (!parsed.success) {
+    return { error: CHECK_FIELD, fieldErrors: fieldErrorsFrom(parsed.error) };
+  }
+  if (parsed.data.status === parsed.data.renameTo) {
+    return { error: null, fieldErrors: {}, ok: true, message: "Nothing to change." };
+  }
+
+  const { error } = await gate.supabase
+    .from("call_statuses")
+    .update({ status: parsed.data.renameTo })
+    .eq("status", parsed.data.status);
+
+  if (error) {
+    logError("admin:call-status-rename", error);
+    if (error.code === FOREIGN_KEY_VIOLATION) return denied(CALL_STATUS_IN_USE);
+    if (error.code === UNIQUE_VIOLATION) {
+      return denied("A call status with that name already exists.");
+    }
+    return denied(toFriendlyMessage(error, "We could not rename that call status."));
+  }
+
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+  return {
+    error: null,
+    fieldErrors: {},
+    ok: true,
+    message: `Renamed call status to “${parsed.data.renameTo}”.`,
   };
 }
 

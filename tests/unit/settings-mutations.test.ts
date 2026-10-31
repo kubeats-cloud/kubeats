@@ -125,7 +125,13 @@ describe("a schema that is behind the build names itself", () => {
 describe("every Settings mutation reports what happened", () => {
   const PANELS: [string, string][] = [
     [PURPOSES, "setPurposeActive"],
-    [STATUSES, "setStatusActive"],
+    /*
+     * The statuses panel is shared by BOTH vocabularies since 0070, so the
+     * retire handler calls whichever action its `scope` selected. What the
+     * guard is about — capturing the result instead of dropping it — is
+     * unchanged, and so is the shape it looks for.
+     */
+    [STATUSES, "actions.setActive"],
   ];
 
   /** Formatting is not the subject here, so it is taken out of the question. */

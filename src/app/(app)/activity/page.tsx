@@ -2,7 +2,7 @@ import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
 import { requireAdmin } from "@/lib/admin";
 import { listReps } from "@/lib/closing-report";
-import { listStatusCatalogue } from "@/lib/statuses";
+import { listCallStatusCatalogue } from "@/lib/statuses";
 import { exportRangeSchema } from "@/lib/validation/export";
 import { getActivityReportModel } from "@/lib/exports/activity-export";
 import {
@@ -141,7 +141,7 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
   // The catalogue is read once and reused for both Call Activity's filter
   // validation and its rep-facing status list — asking twice would be the
   // performance mistake review/page.tsx's own comment calls out.
-  const [reps, catalogue] = await Promise.all([listReps(), listStatusCatalogue()]);
+  const [reps, catalogue] = await Promise.all([listReps(), listCallStatusCatalogue()]);
 
   const { filters: callFilters, notices: callNotices } = parseCallActivityFilters(
     {
