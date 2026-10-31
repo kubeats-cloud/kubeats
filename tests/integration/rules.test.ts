@@ -489,6 +489,20 @@ const has0066 = configured
       .then(({ error }) => !error)
   : false;
 
+/**
+ * 0069 adds rep_daily_status and its three RPCs. Probed by table existence in
+ * the same style as 0065/0066 — the service role has no auth.uid(), so calling
+ * a function to probe would answer 42501 and would not distinguish a missing
+ * function from a resolved one without also checking its code.
+ */
+const has0069 = configured
+  ? await admin
+      .from("rep_daily_status")
+      .select("rep_id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
 if (configured && !has0038) {
   console.warn(
     [
@@ -8853,6 +8867,441 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(other ?? [], "a lead read an unassigned rep").toHaveLength(0);
     });
   });
+
+  /* ---------------------------------------------------------------- */
+  /* 0069 — the rep's daily status, and who may set or read it         */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * One rep on a team, one rep on nobody's, one team lead and the file's admin.
+   *
+   * FIXED DATES IN 2027 for the counted range. They are outside every other
+   * suite's fixtures and outside today, so the report's totals can be asserted
+   * exactly rather than as an "at least" — the only rows in the range are the
+   * six this suite seeds. Today's own rows (set through the RPC) land on the
+   * real IST day and are outside it.
+   *
+   * THE THREE STATUSES AND ONE GAP PER REP is the shape that proves the
+   * exclusion rule: recorded is less than the 7 days in range times the reps
+   * in scope, and the missing days appear in no count.
+   */
+  describe.skipIf(!has0069)("0069 - rep daily status", () => {
+    let lead: Member;
+    let repTeam: Member;
+    let repOther: Member;
+
+    const START = "2027-01-04";
+    const END = "2027-01-10";
+
+    const seed = (rep_id: string, status_date: string, status: string) =>
+      admin.from("rep_daily_status").insert({ rep_id, status_date, status });
+
+    const report = async (
+      who: Member,
+      args: {
+        start?: string;
+        end?: string;
+        member?: string | null;
+        page?: number;
+      } = {},
+    ) =>
+      who.db.rpc("rep_daily_status_report", {
+        p_start: args.start ?? START,
+        p_to: args.end ?? END,
+        p_member: args.member ?? null,
+        p_page: args.page ?? 1,
+      });
+
+    const rowsIn = async (who: Member) =>
+      who.db
+        .from("rep_daily_status")
+        .select("rep_id, status_date, status, set_by")
+        .gte("status_date", START)
+        .lte("status_date", END);
+
+    beforeAll(async () => {
+      lead = await makeMember("team_lead", "0069-lead", campusA);
+      repTeam = await makeMember("rep", "0069-rep-team", campusA);
+      repOther = await makeMember("rep", "0069-rep-other", campusA);
+
+      // FO033 exempts the service role, which is how an admin staffs a team.
+      const link = await admin
+        .from("profiles")
+        .update({ team_lead_id: lead.id })
+        .eq("id", repTeam.id);
+      if (link.error) throw new Error(`0069 link: ${link.error.message}`);
+
+      // repTeam recorded 4 of 7 days; repOther 2 of 7. Both have gaps.
+      const writes = await Promise.all([
+        seed(repTeam.id, "2027-01-04", "in_field"),
+        seed(repTeam.id, "2027-01-05", "in_field"),
+        seed(repTeam.id, "2027-01-07", "on_leave"),
+        seed(repTeam.id, "2027-01-09", "in_office"),
+        seed(repOther.id, "2027-01-04", "in_office"),
+        seed(repOther.id, "2027-01-06", "on_leave"),
+      ]);
+      const failed = writes.find((write) => write.error);
+      if (failed) throw new Error(`0069 seed: ${failed.error?.message}`);
+    });
+
+    /**
+     * This suite's OWN rows, deleted by rep id.
+     *
+     * The file's cleanup deletes profiles and relies on rep_daily_status's
+     * ON DELETE CASCADE for these. On a database where 0063 is applied that
+     * delete is currently refused by call_report_edits' append-only trigger
+     * (its edited_by FK's SET NULL fires a statement-level UPDATE), so profiles
+     * leak — pre-existing, unrelated to this table, and reported separately.
+     * Removing the rows here keeps the counted range deterministic regardless
+     * of whether that cascade ever gets to run.
+     */
+    afterAll(async () => {
+      for (const member of [lead, repTeam, repOther]) {
+        if (!member) continue;
+        const { error } = await admin
+          .from("rep_daily_status")
+          .delete()
+          .eq("rep_id", member.id);
+        if (error) console.warn(`  ! could not clear 0069 rows: ${error.message}`);
+      }
+    });
+
+    /* ---- the rep's own write ---------------------------------------- */
+
+    it("lets a rep set today, and a second choice replaces it", async () => {
+      const first = await repTeam.db.rpc("set_my_daily_status", {
+        p_status: "in_field",
+      });
+      expect(first.error, first.error?.message).toBeNull();
+      const today = (first.data as { statusDate: string }).statusDate;
+
+      const second = await repTeam.db.rpc("set_my_daily_status", {
+        p_status: "in_office",
+      });
+      expect(second.error, second.error?.message).toBeNull();
+      expect((second.data as { status: string }).status).toBe("in_office");
+
+      const { data } = await admin
+        .from("rep_daily_status")
+        .select("status, set_by, set_at")
+        .eq("rep_id", repTeam.id)
+        .eq("status_date", today);
+      expect(data, "the upsert left more than one row for the day").toHaveLength(1);
+      expect(data![0].status).toBe("in_office");
+      // Stamped by the trigger from the session, not carried in the payload.
+      expect(data![0].set_by).toBe(repTeam.id);
+    });
+
+    it("ignores a client-supplied byline and time on the rep's own row", async () => {
+      // TODAY by the database's own definition, not whichever of this rep's
+      // in_office rows an unordered select happened to return first — one of
+      // the seeded 2027 rows also carries in_office.
+      const today = iso();
+
+      const forged = await repTeam.db
+        .from("rep_daily_status")
+        .update({ set_by: boss.id, set_at: "2000-01-01T00:00:00.000Z" })
+        .eq("rep_id", repTeam.id)
+        .eq("status_date", today);
+      // An update the policy allows (own row, today) succeeds; the stamp
+      // overrides both columns regardless of what the request body said.
+      expect(forged.error, forged.error?.message).toBeNull();
+
+      const { data: after } = await admin
+        .from("rep_daily_status")
+        .select("set_by, set_at")
+        .eq("rep_id", repTeam.id)
+        .eq("status_date", today)
+        .single();
+      expect(after!.set_by, "a rep forged set_by").toBe(repTeam.id);
+      expect(
+        Date.parse(after!.set_at as string),
+        "a rep forged set_at",
+      ).toBeGreaterThan(Date.parse("2020-01-01T00:00:00.000Z"));
+    });
+
+    it("refuses a rep a past date", async () => {
+      const { error } = await repTeam.db
+        .from("rep_daily_status")
+        .insert({ rep_id: repTeam.id, status_date: "2027-01-01", status: "in_field" });
+      expect(error?.code, "a rep wrote a past day").toBe(INSUFFICIENT_PRIVILEGE);
+    });
+
+    it("refuses a rep another rep's row, on insert and on update", async () => {
+      // The IST day, which is what app_today() compares against — a UTC day
+      // would be yesterday for the last 5.5 hours before IST midnight, and the
+      // policy's today-only clause would refuse for the wrong reason.
+      const today = iso();
+
+      const insert = await repTeam.db
+        .from("rep_daily_status")
+        .insert({ rep_id: repOther.id, status_date: today, status: "in_field" });
+      expect(insert.error?.code, "a rep wrote somebody else's day")
+        .toBe(INSUFFICIENT_PRIVILEGE);
+
+      // The seeded row is in the past, so the USING half refuses it; an update
+      // that matches no row reports success and changes nothing.
+      const update = await repTeam.db
+        .from("rep_daily_status")
+        .update({ status: "on_leave" })
+        .eq("rep_id", repOther.id)
+        .eq("status_date", "2027-01-04");
+      expect(update.error, update.error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("rep_daily_status")
+        .select("status")
+        .eq("rep_id", repOther.id)
+        .eq("status_date", "2027-01-04")
+        .single();
+      expect(data!.status, "a rep changed another rep's day").toBe("in_office");
+    });
+
+    it("shows a rep their own rows and nobody else's", async () => {
+      const { data, error } = await rowsIn(repTeam);
+      expect(error, error?.message).toBeNull();
+      // The four seeded days in range. Today's own row (set through the RPC)
+      // is on the real IST day and therefore outside this window.
+      expect(data?.length, "the rep's four recorded days").toBe(4);
+      expect(new Set((data ?? []).map((row) => row.rep_id))).toEqual(
+        new Set([repTeam.id]),
+      );
+
+      const { data: other } = await repTeam.db
+        .from("rep_daily_status")
+        .select("rep_id")
+        .eq("rep_id", repOther.id);
+      expect(other ?? [], "a rep read another rep's rows").toHaveLength(0);
+    });
+
+    /* ---- the team lead: read-only ------------------------------------ */
+
+    it("lets a team lead read their team's rows and nobody else's", async () => {
+      const { data, error } = await rowsIn(lead);
+      expect(error, error?.message).toBeNull();
+      expect(data, "the team's four recorded days").toHaveLength(4);
+      expect(new Set((data ?? []).map((row) => row.rep_id))).toEqual(
+        new Set([repTeam.id]),
+      );
+
+      const { data: outside } = await lead.db
+        .from("rep_daily_status")
+        .select("rep_id")
+        .eq("rep_id", repOther.id);
+      expect(outside ?? [], "a lead read a rep on no team").toHaveLength(0);
+    });
+
+    it("refuses a team lead every write, including their own day", async () => {
+      const own = await lead.db.rpc("set_my_daily_status", {
+        p_status: "in_office",
+      });
+      // The RPC's own role check answers first, with a sentence.
+      expect(own.error?.code, "a lead used the rep toggle")
+        .toBe(INSUFFICIENT_PRIVILEGE);
+
+      // The IST day, which is what app_today() compares against — a UTC day
+      // would be yesterday for the last 5.5 hours before IST midnight, and the
+      // policy's today-only clause would refuse for the wrong reason.
+      const today = iso();
+      const ownRow = await lead.db
+        .from("rep_daily_status")
+        .insert({ rep_id: lead.id, status_date: today, status: "in_office" });
+      expect(ownRow.error?.code, "a lead wrote their own day")
+        .toBe(INSUFFICIENT_PRIVILEGE);
+
+      const teamRow = await lead.db
+        .from("rep_daily_status")
+        .insert({ rep_id: repTeam.id, status_date: today, status: "in_office" });
+      expect(teamRow.error?.code, "a lead wrote a rep's day")
+        .toBe(INSUFFICIENT_PRIVILEGE);
+    });
+
+    /* ---- the admin: any rep, any date -------------------------------- */
+
+    it("lets an admin set any rep on any date, and read everyone", async () => {
+      const write = await boss.db.rpc("admin_set_rep_daily_status", {
+        p_rep_id: repOther.id,
+        p_status_date: "2027-01-03",
+        p_status: "on_leave",
+      });
+      expect(write.error, write.error?.message).toBeNull();
+
+      // A second call for the same day replaces the value, still one row.
+      const again = await boss.db.rpc("admin_set_rep_daily_status", {
+        p_rep_id: repOther.id,
+        p_status_date: "2027-01-03",
+        p_status: "in_field",
+      });
+      expect(again.error, again.error?.message).toBeNull();
+
+      const { data } = await admin
+        .from("rep_daily_status")
+        .select("status, set_by")
+        .eq("rep_id", repOther.id)
+        .eq("status_date", "2027-01-03");
+      expect(data).toHaveLength(1);
+      expect(data![0].status).toBe("in_field");
+      expect(data![0].set_by, "the correction was not bylined to the admin")
+        .toBe(boss.id);
+
+      // Everything in the counted range, from both reps.
+      const { data: all, error } = await rowsIn(boss);
+      expect(error, error?.message).toBeNull();
+      expect(all).toHaveLength(6);
+    });
+
+    it("refuses the admin RPC to a rep and to a team lead", async () => {
+      for (const who of [repTeam, lead]) {
+        const { error } = await who.db.rpc("admin_set_rep_daily_status", {
+          p_rep_id: repOther.id,
+          p_status_date: "2027-01-08",
+          p_status: "on_leave",
+        });
+        expect(error?.code, "a non-admin used the correction RPC")
+          .toBe(INSUFFICIENT_PRIVILEGE);
+      }
+
+      const { data } = await admin
+        .from("rep_daily_status")
+        .select("rep_id")
+        .eq("rep_id", repOther.id)
+        .eq("status_date", "2027-01-08");
+      expect(data ?? [], "the refused correction wrote a row").toHaveLength(0);
+    });
+
+    /* ---- the constraints --------------------------------------------- */
+
+    it("refuses a fourth status value", async () => {
+      // The IST day, which is what app_today() compares against — a UTC day
+      // would be yesterday for the last 5.5 hours before IST midnight, and the
+      // policy's today-only clause would refuse for the wrong reason.
+      const today = iso();
+      const { error } = await repOther.db
+        .from("rep_daily_status")
+        .insert({ rep_id: repOther.id, status_date: today, status: "at_lunch" });
+      expect(error?.code, "a fourth status was accepted").toBe(CHECK_VIOLATION);
+    });
+
+    it("refuses a second row for the same rep and day", async () => {
+      // repTeam already has today's row from the upsert tests; a plain insert
+      // for the same key is the duplicate the primary key refuses.
+      // The IST day, which is what app_today() compares against — a UTC day
+      // would be yesterday for the last 5.5 hours before IST midnight, and the
+      // policy's today-only clause would refuse for the wrong reason.
+      const today = iso();
+      const { error } = await repTeam.db
+        .from("rep_daily_status")
+        .insert({ rep_id: repTeam.id, status_date: today, status: "in_field" });
+      expect(error?.code, "a duplicate rep+day was accepted").toBe(UNIQUE_VIOLATION);
+    });
+
+    /* ---- the report --------------------------------------------------- */
+
+    it("counts recorded days only, and excludes the gaps", async () => {
+      const { data, error } = await report(boss);
+      expect(error, error?.message).toBeNull();
+      const payload = data as {
+        start: string;
+        end: string;
+        totals: Record<string, number>;
+        total: number;
+      };
+      expect(payload.start).toBe(START);
+      expect(payload.end).toBe(END);
+
+      // 4 + 2 recorded days across the two reps. The range is 7 days each, so
+      // 14 slots exist and only 6 carry a value — the eight unset days are in
+      // no count.
+      expect(payload.totals).toEqual({
+        inField: 2,
+        inOffice: 2,
+        onLeave: 2,
+        recorded: 6,
+      });
+      // Every rep is in an admin's scope, not just the two with rows.
+      expect(payload.total).toBeGreaterThanOrEqual(2);
+    });
+
+    it("gives one rep their own counts and their gaps' dates only", async () => {
+      const { data, error } = await report(boss, { member: repTeam.id });
+      expect(error, error?.message).toBeNull();
+      const payload = data as {
+        total: number;
+        rows: Array<{
+          id: string;
+          inField: number;
+          inOffice: number;
+          onLeave: number;
+          recorded: number;
+          days: Array<{ date: string; status: string }>;
+        }>;
+      };
+      expect(payload.total).toBe(1);
+      expect(payload.rows).toHaveLength(1);
+      expect(payload.rows[0]).toMatchObject({
+        id: repTeam.id,
+        inField: 2,
+        inOffice: 1,
+        onLeave: 1,
+        recorded: 4,
+      });
+      expect(payload.rows[0].days.map((day) => day.date)).toEqual([
+        "2027-01-04",
+        "2027-01-05",
+        "2027-01-07",
+        "2027-01-09",
+      ]);
+    });
+
+    it("scopes the report to the caller — rep, team lead, admin", async () => {
+      // A rep sees themselves; p_member narrows, never widens.
+      const own = (await report(repTeam)).data as {
+        total: number;
+        totals: Record<string, number>;
+      };
+      expect(own.total).toBe(1);
+      expect(own.totals.recorded).toBe(4);
+
+      const widened = (await report(repTeam, { member: repOther.id })).data as {
+        total: number;
+        rows: unknown[];
+      };
+      expect(widened.total, "a rep named another rep").toBe(0);
+      expect(widened.rows).toHaveLength(0);
+
+      // A team lead sees their team only: repTeam's 4 days, not repOther's 2.
+      const team = (await report(lead)).data as {
+        total: number;
+        totals: Record<string, number>;
+      };
+      expect(team.total).toBe(1);
+      expect(team.totals).toEqual({
+        inField: 2,
+        inOffice: 1,
+        onLeave: 1,
+        recorded: 4,
+      });
+
+      const outside = (await report(lead, { member: repOther.id })).data as {
+        total: number;
+        rows: unknown[];
+      };
+      expect(outside.total, "a lead named a rep on no team").toBe(0);
+      expect(outside.rows).toHaveLength(0);
+    });
+
+    it("refuses the report without a session", async () => {
+      const { error } = await admin.rpc("rep_daily_status_report", {
+        p_start: START,
+        p_to: END,
+        p_member: null,
+        p_page: 1,
+      });
+      expect(error?.code, "the service role read an unattributed report")
+        .toBe(INSUFFICIENT_PRIVILEGE);
+    });
+  });
+
   /* ---------------------------------------------------------------- */
   /* H2 — two teams on one campus, and no leak between them            */
   /* ---------------------------------------------------------------- */

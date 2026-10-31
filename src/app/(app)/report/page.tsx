@@ -10,6 +10,9 @@ import { getActivityReport } from "@/lib/activity-report";
 import { getInstituteActivityModel } from "@/lib/institute-activity-report";
 import { sumInstituteActivityRows } from "@/lib/institute-activity-counts";
 import { ActivityPages } from '@/components/report/activity-pages';
+import { DailyStatusToggle } from '@/components/report/daily-status-toggle';
+import { DailyStatusHistory } from '@/components/report/daily-status-history';
+import { getDailyStatusReport, getMyTodayStatus } from '@/lib/rep-daily-status';
 import { instituteActivityExportHref, instituteActivityExportRangeProblem } from '@/lib/institute-activity-links';
 import {
   REPORT_PERIODS,
@@ -98,14 +101,28 @@ export default async function ReportPage(props: PageProps<"/report">) {
 
   const memberId = user.id;
   const range = periodRange(period, periodStart);
+  // Only a rep has a daily status to set; a team lead reaches this page by URL
+  // and is refused by 0069's RPC and policies, so neither block is rendered.
+  const isRep = user.role === "rep";
 
-  const [result, instituteActivityResult] = await Promise.all([
-    getActivityReport(memberId, "", period, periodStart),
-    // R7's institute-wise table, same model A1 and R1 read. No member filter
-    // to pass: this page only ever runs as the signed-in rep, and RLS is what
-    // narrows `getInstituteActivityModel()` to their own institutes.
-    getInstituteActivityModel({ range: { from: range.start, to: range.end }, page: first(searchParams.page) }),
-  ]);
+  const [result, instituteActivityResult, todayResult, historyResult] =
+    await Promise.all([
+      getActivityReport(memberId, "", period, periodStart),
+      // R7's institute-wise table, same model A1 and R1 read. No member filter
+      // to pass: this page only ever runs as the signed-in rep, and RLS is what
+      // narrows `getInstituteActivityModel()` to their own institutes.
+      getInstituteActivityModel({ range: { from: range.start, to: range.end }, page: first(searchParams.page) }),
+      isRep ? getMyTodayStatus(memberId) : Promise.resolve(null),
+      // The same period the rest of the page shows, so "your daily status"
+      // below PeriodControls answers about the days on screen.
+      isRep
+        ? getDailyStatusReport({
+            start: range.start,
+            end: range.end,
+            member: memberId,
+          })
+        : Promise.resolve(null),
+    ]);
   const displayName = user.name;
   const presenceExportProblem = instituteActivityExportRangeProblem({
     from: range.start,
@@ -118,6 +135,22 @@ export default async function ReportPage(props: PageProps<"/report">) {
         title="Activity report"
         description="Your visits and what came of them, by day, month or year."
       />
+
+      {/*
+        TODAY'S STATUS SITS ABOVE THE REPORT because it is the one thing on
+        this page a rep comes here to WRITE, and it is about today rather than
+        the selected period. Only a rep gets it: an admin was redirected above,
+        and a team lead is read-only for 0069 (their table lives on
+        /team/report).
+      */}
+      {isRep &&
+        (todayResult && !todayResult.ok ? (
+          <p className="text-destructive mt-4 text-sm">{todayResult.error}</p>
+        ) : (
+          <DailyStatusToggle
+            initial={todayResult?.ok ? todayResult.today?.status ?? null : null}
+          />
+        ))}
 
       {/*
         THE CHIP GRID IS GONE — ~47 name buttons above a report about one of
@@ -135,6 +168,17 @@ export default async function ReportPage(props: PageProps<"/report">) {
         options={REPORT_PERIODS}
         basePath="/report"
       />
+
+      {/* Below the period controls, so this history follows the range on
+          screen. Read-only; the three buttons above are the only write. */}
+      {isRep &&
+        (historyResult?.ok ? (
+          <DailyStatusHistory report={historyResult.report} repId={memberId} />
+        ) : (
+          <p className="text-muted-foreground mt-4 text-sm">
+            {historyResult?.error}
+          </p>
+        ))}
 
       {/* ADMIN ONLY, because the endpoint is. A rep would get a 403 saved as a
           .xlsx, which is a worse answer than no button.

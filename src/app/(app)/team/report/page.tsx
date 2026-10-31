@@ -7,8 +7,10 @@ import { ErrorState } from "@/components/states";
 import { CustomisableGrid } from "@/components/report/customisable-grid";
 import { RangeControls } from "@/components/report/range-controls";
 import { ExportExcel } from "@/components/report/export-excel";
+import { DailyStatusReportTable } from "@/components/report/daily-status-report-table";
 import { requireStaff } from "@/lib/admin";
 import { getActivityReportModel } from "@/lib/exports/activity-export";
+import { getDailyStatusReport } from "@/lib/rep-daily-status";
 import { exportRangeSchema } from "@/lib/validation/export";
 import { formatDate } from "@/lib/dates";
 
@@ -71,7 +73,27 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
   }
 
   const { start, end } = parsed.data;
-  const result = await getActivityReportModel({ start, end }, null);
+
+  // Lenient, like the rest of the app's page params: a stale or hand-edited
+  // `?page=` lands on page 1 rather than on an error. The RPC clamps a page
+  // past the end to the last one, so only the lower bound needs saying here.
+  const rawPage = Number.parseInt(first(searchParams.page) ?? "1", 10);
+  const page = Number.isFinite(rawPage) && rawPage >= 1 ? rawPage : 1;
+
+  const [result, daily] = await Promise.all([
+    getActivityReportModel({ start, end }, null),
+    // Same range as the activity report above, and the same RLS scope: an
+    // admin gets every rep, a team lead only their own (supervises()). No
+    // member filter — this section is about the whole scope, not one rep.
+    getDailyStatusReport({ start, end, page }),
+  ]);
+
+  const dailyPageHref = (next: number) =>
+    `/team/report?${new URLSearchParams({
+      start,
+      end,
+      page: String(next),
+    }).toString()}`;
 
   return (
     <>
@@ -171,6 +193,85 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
             where each visit left the institute. The Excel export also includes
             the six activity columns, which the Team and report screens show.
           </p>
+        </>
+      )}
+
+      {/*
+        DAILY STATUS IS A SEPARATE FACT FROM ACTIVITY, so it is a separate
+        block rather than more columns on the grid above: where a rep declared
+        they were working is not derivable from their visits, and a rep with a
+        quiet week can still have been in the office every day.
+
+        NO EXPORT BUTTON. The client asked for the counts on screen and nothing
+        else; adding a file would be a new report with its own columns and
+        notes, not a one-line reuse of the field-visit export.
+      */}
+      <SectionTitle className="mt-8">
+        Daily status
+        <span className="text-muted-foreground ml-2 text-xs font-normal">
+          {formatDate(start)} – {formatDate(end)}
+        </span>
+      </SectionTitle>
+
+      <p className="text-muted-foreground mb-3 text-xs">
+        What each rep declared for themselves, one status per day
+        {gate.isAdmin
+          ? ", across the whole team."
+          : ", for the reps on your team."}{" "}
+        Recorded Total is the number of days that carry a status, not the number
+        of calendar days in the range.
+      </p>
+
+      {!daily.ok ? (
+        <ErrorState message={daily.error} />
+      ) : (
+        <>
+          <DailyStatusReportTable report={daily.report} />
+
+          <p className="text-muted-foreground mt-2 text-xs">
+            Days with no entry are not recorded: they are not inferred from
+            check-ins, they appear in none of the three status counts, and they
+            are not in Recorded Total. A day that was recorded and later
+            changed keeps only its latest value — the table is not an edit
+            history.
+          </p>
+
+          {daily.report.pages > 1 && (
+            <nav
+              aria-label="Daily status pages"
+              className="mt-3 flex items-center justify-between gap-2"
+            >
+              {daily.report.page > 1 ? (
+                <Button asChild variant="outline" className="h-11">
+                  <Link prefetch={false} href={dailyPageHref(daily.report.page - 1)}>
+                    Previous
+                  </Link>
+                </Button>
+              ) : (
+                <Button variant="outline" className="h-11" disabled>
+                  Previous
+                </Button>
+              )}
+
+              <p className="text-muted-foreground text-xs">
+                Page {daily.report.page} of {daily.report.pages} ·{" "}
+                {daily.report.total}{" "}
+                {daily.report.total === 1 ? "rep" : "reps"}
+              </p>
+
+              {daily.report.page < daily.report.pages ? (
+                <Button asChild variant="outline" className="h-11">
+                  <Link prefetch={false} href={dailyPageHref(daily.report.page + 1)}>
+                    Next
+                  </Link>
+                </Button>
+              ) : (
+                <Button variant="outline" className="h-11" disabled>
+                  Next
+                </Button>
+              )}
+            </nav>
+          )}
         </>
       )}
     </>
