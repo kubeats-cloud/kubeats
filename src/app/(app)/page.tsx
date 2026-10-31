@@ -13,7 +13,7 @@ import { AdminOverview } from "@/components/admin/overview";
 import { CustomisableGrid } from "@/components/report/customisable-grid";
 import { ExportExcel } from "@/components/report/export-excel";
 import { RangeControls } from "@/components/report/range-controls";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getCurrentUser, isAdmin, isStaff } from "@/lib/auth";
 import { countMyInstitutes } from "@/lib/institutes";
 import { listStatusCatalogue } from "@/lib/statuses";
 import { SEED_STATUS_CATALOGUE } from "@/lib/validation/institute";
@@ -46,12 +46,21 @@ const first = (value: string | string[] | undefined) =>
 export default async function DashboardPage(props: PageProps<"/">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  if (user.role === "team_lead") redirect("/team");
 
+  /*
+   * `admin` still means exactly "may change what the whole company shares" —
+   * the two Go-to shortcuts AdminOverview hides behind it (/data,
+   * /materials/manage) stay admin-only for that reason. Every other branch
+   * on this page is the admin-shaped SUPERVISION view versus a rep's own day,
+   * and a team lead supervises too — so those branch on `staff`, and
+   * getOverview()/listTeamVisits()/getActivityReportModel() narrow themselves
+   * to `supervises()` via RLS once a lead is the caller.
+   */
   const admin = isAdmin(user);
+  const staff = isStaff(user);
   const weekStart = mondayOf();
   const searchParams = await props.searchParams;
-  const parsedRepRange = admin
+  const parsedRepRange = staff
     ? exportRangeSchema.safeParse({
         start: first(searchParams.start),
         end: first(searchParams.end),
@@ -118,21 +127,21 @@ export default async function DashboardPage(props: PageProps<"/">) {
     alerts,
     totalInstitutes,
   ] = await Promise.all([
-    admin
+    staff
       ? Promise.resolve({ ok: true as const, entries: [] })
       : settled(getTodayPlan(user.id), { ok: false as const }, "dashboard:plan"),
-    admin
+    staff
       ? Promise.resolve([])
       : settled(listInstitutesForPicker(), [], "dashboard:institutes"),
-    admin ? Promise.resolve([]) : settled(listPurposes(), [], "dashboard:purposes"),
-    admin
+    staff ? Promise.resolve([]) : settled(listPurposes(), [], "dashboard:purposes"),
+    staff
       ? Promise.resolve(null)
       : settled(getWeekSummary(user.id, weekStart), null, "dashboard:week"),
-    admin ? settled(getOverview(), null, "dashboard:overview") : Promise.resolve(null),
+    staff ? settled(getOverview(), null, "dashboard:overview") : Promise.resolve(null),
     // The status vocabulary. Cheap, and needed by the plan picker to say when an
     // institute is being re-opened after a closed loop.
     catalogueRead,
-    admin && repRange
+    staff && repRange
       ? (async () => {
           const loaded = await catalogueRead;
           return settled(
@@ -166,7 +175,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
      * the cause of. The empty answer is the one the admin branch already
      * returns, so the component below needs no third case.
      */
-    admin
+    staff
       ? Promise.resolve({ ok: true as const, tasks: [] })
       : settled(
           listFollowUpTasks(user.id, todayISO()),
@@ -184,10 +193,11 @@ export default async function DashboardPage(props: PageProps<"/">) {
      * `member = auth.uid() or is_admin()`, and this asks for its own id.
      */
     settled(listUnseenAlerts(user.id), { ok: false as const }, "dashboard:alerts"),
-    // Rep's own registered-institutes count for the Today snapshot. Not an
-    // admin figure — countMyInstitutes() relies on institutes_select already
-    // narrowing a rep to their own rows, which is not true for an admin.
-    admin
+    // Rep's own registered-institutes count for the Today snapshot. Not a
+    // staff figure — countMyInstitutes() relies on institutes_select already
+    // narrowing a rep to their own rows, which is not true for an admin or a
+    // team lead.
+    staff
       ? Promise.resolve(null)
       : settled(countMyInstitutes(), null, "dashboard:institute-count"),
   ]);
@@ -254,9 +264,9 @@ export default async function DashboardPage(props: PageProps<"/">) {
   return (
     <>
       <PageHeader
-        title={admin ? "Overview" : `Hello, ${user.name.split(" ")[0]}`}
+        title={staff ? "Overview" : `Hello, ${user.name.split(" ")[0]}`}
         description={
-          admin
+          staff
             ? "What the team has been doing, and what is still open."
             : "Plan today's visits here, then log them as they happen."
         }
@@ -269,9 +279,10 @@ export default async function DashboardPage(props: PageProps<"/">) {
           the plan below. */}
       {alerts.ok && <AlertBanner alerts={alerts.alerts} />}
 
-      {/* Fieldwork belongs to reps. An admin's landing screen is supervision:
-          what the team did, who was out, what is still open. */}
-      {!admin && (
+      {/* Fieldwork belongs to reps. A staff member's (admin's or team lead's)
+          landing screen is supervision: what the team did, who was out, what
+          is still open. */}
+      {!staff && (
         <>
           <SectionTitle>Today</SectionTitle>
           <TodaySnapshot
@@ -297,7 +308,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
         </>
       )}
 
-      {admin ? (
+      {staff ? (
         <>
           {overview?.ok ? (
             /* `todayISO()` read once and shared: the tile's counts and the
@@ -307,6 +318,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
               today={todayISO()}
               weekStart={weekStart}
               weekEnd={weekCountEnd(weekStart)}
+              isAdmin={admin}
             />
           ) : (
             <ErrorState message="We could not load the team's activity just now. Please try again in a moment." />

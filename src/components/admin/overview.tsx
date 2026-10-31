@@ -40,6 +40,7 @@ export function AdminOverview({
   today,
   weekStart,
   weekEnd,
+  isAdmin,
 }: {
   data: OverviewData;
   /**
@@ -61,6 +62,14 @@ export function AdminOverview({
    */
   weekStart: string;
   weekEnd: string;
+  /**
+   * This landing screen is now shared with a team lead (who supervises with
+   * `supervises()`-scoped data, same as everything else below it). The two
+   * Go-to shortcuts that lead to screens with no team dimension — /data and
+   * /materials/manage — stay behind this flag; every other shortcut here
+   * already narrows itself by RLS once a lead is the one following it.
+   */
+  isAdmin: boolean;
 }) {
   const stuck = data.openCheckIns.filter((v) => v.stale).length;
 
@@ -274,21 +283,29 @@ export function AdminOverview({
                 icon={Building2Icon}
                 label="Pipeline by Rep"
               />
-              <Shortcut href="/data" icon={DatabaseIcon} label="Data and backups" />
+              {/* /data and /materials/manage have no team dimension to scope
+                  to — they manage something the whole company shares — so
+                  they stay admin-only, same as ADMIN_ONLY_PATHS in nav.ts.
+                  A team lead following either link would be redirected. */}
+              {isAdmin && (
+                <Shortcut href="/data" icon={DatabaseIcon} label="Data and backups" />
+              )}
               {/* /team/report, NOT /report. /report is a rep's own activity and
-                  an admin has none — following it only to be redirected would
+                  staff have none — following it only to be redirected would
                   work, but pointing at the destination is what stops the
-                  Overview implying an admin has activity of their own. */}
+                  Overview implying staff have activity of their own. */}
               <Shortcut
                 href="/team/report"
                 icon={ChartColumnIcon}
                 label="Activity report"
               />
-              <Shortcut
-                href="/materials/manage"
-                icon={FileTextIcon}
-                label="Materials library"
-              />
+              {isAdmin && (
+                <Shortcut
+                  href="/materials/manage"
+                  icon={FileTextIcon}
+                  label="Materials library"
+                />
+              )}
             </div>
           </div>
         </div>

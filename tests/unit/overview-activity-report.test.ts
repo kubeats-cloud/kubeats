@@ -151,15 +151,20 @@ describe("the Overview section uses the Team report's model and grid", () => {
     expect(text).toContain("repPageHref");
   });
 
-  it("fetches only for an admin, and never for a team lead or rep", () => {
+  it("fetches for staff (admin or team lead), and never for a rep", () => {
     const text = page();
-    expect(text).toContain('if (user.role === "team_lead") redirect("/team");');
+    // The dashboard no longer turns a team lead away at the door — they get
+    // the same supervision-shaped Overview an admin does, scoped to their
+    // own reps by `supervises()` underneath `getOverview()` and
+    // `getActivityReportModel()`.
+    expect(text).not.toContain('if (user.role === "team_lead") redirect("/team");');
+    expect(text).toContain("isStaff");
 
     const call = text.indexOf("getActivityReportModel(repRange");
     expect(call).toBeGreaterThan(-1);
-    // The call sits immediately behind the admin-and-range guard in the
-    // Promise.all; a rep or team lead never reaches it.
-    expect(text.slice(call - 160, call)).toContain("admin && repRange");
+    // The call sits immediately behind the staff-and-range guard in the
+    // Promise.all; a rep never reaches it.
+    expect(text.slice(call - 160, call)).toContain("staff && repRange");
     expect((text.match(/<CustomisableGrid/g) ?? []).length).toBe(1);
     expect((text.match(/<ExportExcel/g) ?? []).length).toBe(1);
     // And the page never uses an elevated key to widen the rows RLS returns.
