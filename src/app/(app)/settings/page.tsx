@@ -10,6 +10,8 @@ import { PurposesPanel } from "@/components/settings/purposes-panel";
 import { StatusesPanel } from "@/components/settings/statuses-panel";
 import { TeamPanel } from "@/components/settings/team-panel";
 import { SignInSecurityPanel } from "@/components/settings/sign-in-security-panel";
+import { TargetStatusesPanel } from "@/components/weekly/target-statuses-panel";
+import { ErrorState } from "@/components/states";
 import { getCurrentUser, isAdmin } from "@/lib/auth";
 import { listPurposeRows, listStatusRows, listTeamMembers } from "@/lib/admin";
 import { listAdminFactorStates, viewerHasFactor } from "@/lib/mfa-admin";
@@ -17,6 +19,7 @@ import { getLocationTree } from "@/lib/locations";
 import { settled } from "@/lib/errors";
 import { listCampuses } from "@/lib/campuses";
 import { listStatusFields } from "@/lib/status-fields";
+import { listTargetStatusRows } from "@/lib/target-statuses";
 
 export const metadata = { title: "Settings" };
 
@@ -46,7 +49,7 @@ export default async function SettingsPage() {
    * panels. One unreachable list should empty its own card, not replace the
    * team, the shared lists, the locations and the security panel with an error.
    */
-  const [purposes, statuses, tree, members, campuses, enrolled, statusFields] = await Promise.all([
+  const [purposes, statuses, tree, members, campuses, enrolled, statusFields, targetStatuses] = await Promise.all([
     settled(listPurposeRows(), [], "settings:purposes"),
     settled(listStatusRows(), [], "settings:statuses"),
     settled(getLocationTree(), [], "settings:locations"),
@@ -54,6 +57,10 @@ export default async function SettingsPage() {
     settled(listCampuses(), [], "settings:campuses"),
     settled(viewerHasFactor(), false, "settings:viewer-factor"),
     settled(listStatusFields(), [], "settings:status-fields"),
+    // The same read the Targets tab makes. `{ ok: false }` is the shape the
+    // card already understands, so a failure empties this card and says so
+    // rather than pretending the vocabulary is empty.
+    settled(listTargetStatusRows(), { ok: false } as const, "settings:target-statuses"),
   ]);
 
   // Sequenced after `members` because it needs the admin rows. Only admins are
@@ -90,16 +97,34 @@ export default async function SettingsPage() {
         admins={adminFactors}
       />
 
-      <SectionTitle className="mt-8">Shared lists</SectionTitle>
-      {/* Side by side once there is room: two independent lists an admin edits
-          in either order, so stacking them on a monitor only adds scrolling. */}
-      <div className="space-y-4 md:grid md:grid-cols-2 md:items-start md:gap-5 md:space-y-0">
-        <PurposesPanel purposes={purposes} />
-        <LocationsPanel tree={tree} />
-      </div>
+      {/* Its own section rather than half of "Shared lists": this is the
+          vocabulary a rep picks from on the Daily Plan, and the header should
+          say what the card is for, not where its table happens to live. */}
+      <SectionTitle className="mt-8">Add a Purpose</SectionTitle>
+      <PurposesPanel purposes={purposes} />
+
+      <SectionTitle className="mt-8">Locations</SectionTitle>
+      <LocationsPanel tree={tree} />
 
       <SectionTitle className="mt-8">Status Management</SectionTitle>
       <StatusesPanel statuses={statuses} fields={statusFields} campuses={campuses} />
+
+      {/* THE SAME COMPONENT AS THE TARGETS TAB, deliberately. It reads the same
+          table through the same server actions and has no client state of its
+          own, so the two placements cannot disagree about the vocabulary; the
+          only thing they can disagree about is when each last rendered, which
+          is why the actions now revalidate /settings as well as /targets. */}
+      <SectionTitle className="mt-8">Target Status</SectionTitle>
+      <TargetStatusesPanel
+        statuses={targetStatuses.ok ? targetStatuses.statuses : []}
+        // Settings is admin-only (the redirect above), so the add form is
+        // always the right half of this component here.
+        canAdd
+        campuses={campuses}
+      />
+      {!targetStatuses.ok && (
+        <ErrorState message="Target statuses could not be loaded." />
+      )}
 
       <SectionTitle className="mt-8">Storage</SectionTitle>
       <Card>

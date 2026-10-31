@@ -92,8 +92,10 @@ export async function addTargetStatus(
   }
 
   // Uncached read, so a rep's next request already sees it — see
-  // listTargetStatusRows()'s own comment.
+  // listTargetStatusRows()'s own comment. Settings now renders this same
+  // vocabulary too, so its cached router entry has to be refreshed as well.
   revalidatePath("/targets");
+  revalidatePath("/settings");
   return {
     error: null,
     fieldErrors: {},
@@ -142,6 +144,7 @@ export async function setTargetStatusCampus(
   }
 
   revalidatePath("/targets");
+  revalidatePath("/settings");
   return {
     error: null,
     fieldErrors: {},

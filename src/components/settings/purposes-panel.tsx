@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CollapsibleSection } from "@/components/activity/collapsible-section";
 import { EmptyState } from "@/components/states";
 import { addPurpose, setPurposeActive } from "@/lib/admin-actions";
 import { EMPTY_ADMIN_STATE, type AdminState } from "@/lib/admin-form-state";
@@ -29,6 +30,15 @@ import {
 } from "@/lib/validation/visit";
 import type { PurposeRow } from "@/lib/admin";
 import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
+
+/**
+ * How many purposes stay visible before the rest fold away.
+ *
+ * Three, because that is the preview depth `list-preview.ts` already gives the
+ * member hub — and because the card sits above a form an admin is usually
+ * opening it to use, not to read.
+ */
+const PURPOSES_PREVIEW = 3;
 
 /**
  * The purposes a rep picks from when planning today's visits — and, as of
@@ -165,6 +175,66 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
     setLifecycle("");
   }
 
+  /**
+   * One purpose row, used by both halves of the compact list — the three shown
+   * outright and the remainder behind "View all". Shared so retiring still
+   * looks and behaves the same wherever a purpose happens to sit.
+   */
+  function purposeRow(purpose: PurposeRow) {
+    return (
+      <li
+        key={purpose.id}
+        className="border-border space-y-2 rounded-md border px-3 py-2"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm">
+            {purpose.label}
+          </span>
+          {/* What this purpose counts as. "Not set" is only reachable on
+              a database where migration 0024 has not been applied — the
+              column is NOT NULL once it has, so this is a deploy-order
+              warning rather than a state an admin can create. */}
+          <Badge variant={purpose.activity ? "secondary" : "danger"}>
+            {purpose.activity ? activityLabelFor(purpose.activity) : "Not set"}
+          </Badge>
+          {/* And which end of it. Only the two lifecycle activities
+              carry one, so most rows show nothing here. */}
+          {purpose.lifecycle && (
+            <Badge
+              variant={purpose.lifecycle === "Done" ? "success" : "warning"}
+            >
+              {purpose.lifecycle}
+            </Badge>
+          )}
+          {!purpose.isActive && <Badge variant="neutral">Retired</Badge>}
+        </div>
+
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-9"
+          disabled={retiring}
+          onClick={() =>
+            startRetiring(async () => {
+              setRetireState(
+                await setPurposeActive(purpose.id, !purpose.isActive),
+              );
+            })
+          }
+        >
+          {purpose.isActive ? (
+            "Retire"
+          ) : (
+            <>
+              <RotateCcwIcon className="size-4" aria-hidden />
+              Restore
+            </>
+          )}
+        </Button>
+      </li>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -177,62 +247,23 @@ export function PurposesPanel({ purposes }: { purposes: PurposeRow[] }) {
             description="Reps choose from this list when they plan a visit, so add at least one."
           />
         ) : (
-          <ul className="space-y-2">
-            {purposes.map((purpose) => (
-              <li
-                key={purpose.id}
-                className="border-border space-y-2 rounded-md border px-3 py-2"
+          <div className="space-y-2">
+            <ul className="space-y-2">
+              {purposes.slice(0, PURPOSES_PREVIEW).map(purposeRow)}
+            </ul>
+            {purposes.length > PURPOSES_PREVIEW && (
+              <CollapsibleSection
+                label="purposes"
+                defaultCollapsed
+                showLabel={`View all ${purposes.length} purposes`}
+                hideLabel="Show less"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {purpose.label}
-                  </span>
-                  {/* What this purpose counts as. "Not set" is only reachable on
-                      a database where migration 0024 has not been applied — the
-                      column is NOT NULL once it has, so this is a deploy-order
-                      warning rather than a state an admin can create. */}
-                  <Badge variant={purpose.activity ? "secondary" : "danger"}>
-                    {purpose.activity
-                      ? activityLabelFor(purpose.activity)
-                      : "Not set"}
-                  </Badge>
-                  {/* And which end of it. Only the two lifecycle activities
-                      carry one, so most rows show nothing here. */}
-                  {purpose.lifecycle && (
-                    <Badge
-                      variant={purpose.lifecycle === "Done" ? "success" : "warning"}
-                    >
-                      {purpose.lifecycle}
-                    </Badge>
-                  )}
-                  {!purpose.isActive && <Badge variant="neutral">Retired</Badge>}
-                </div>
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-9"
-                  disabled={retiring}
-                  onClick={() =>
-                    startRetiring(async () => {
-                      setRetireState(
-                        await setPurposeActive(purpose.id, !purpose.isActive),
-                      );
-                    })
-                  }
-                >
-                  {purpose.isActive ? (
-                    "Retire"
-                  ) : (
-                    <>
-                      <RotateCcwIcon className="size-4" aria-hidden />
-                      Restore
-                    </>
-                  )}
-                </Button>
-              </li>
-            ))}
-          </ul>
+                <ul className="space-y-2">
+                  {purposes.slice(PURPOSES_PREVIEW).map(purposeRow)}
+                </ul>
+              </CollapsibleSection>
+            )}
+          </div>
         )}
 
         {/* Retire and restore answer here rather than inside a row: the list

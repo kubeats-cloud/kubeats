@@ -13,12 +13,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CollapsibleSection } from "@/components/activity/collapsible-section";
 import { RemoveButton } from "@/components/settings/remove-button";
 import { addArea, addCity, addState } from "@/lib/admin-actions";
 import { EMPTY_ADMIN_STATE, type AdminState } from "@/lib/admin-form-state";
 import { nameLooksValid } from "@/lib/validation/admin";
-import type { StateNode } from "@/lib/locations";
+import type { AreaNode, StateNode } from "@/lib/locations";
 import { FormNotice } from "@/components/form-notice";
+
+/** Areas shown in a city before the list folds, matching the purposes card. */
+const AREAS_PREVIEW = 3;
 
 /**
  * The State → City → Area tree, one level at a time.
@@ -42,6 +46,19 @@ export function LocationsPanel({ tree }: { tree: StateNode[] }) {
 
   const count = (n: number, one: string, many: string) =>
     `${n} ${n === 1 ? one : many}`;
+
+  /** One area row, shared by the preview and the folded remainder. */
+  function areaRow(area: AreaNode) {
+    return (
+      <li
+        key={area.id}
+        className="border-border flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
+      >
+        <span className="min-w-0 flex-1 truncate text-sm">{area.name}</span>
+        <RemoveButton kind="area" id={area.id} name={area.name} />
+      </li>
+    );
+  }
 
   return (
     <Card>
@@ -158,19 +175,26 @@ export function LocationsPanel({ tree }: { tree: StateNode[] }) {
                 institute.
               </p>
             ) : (
-              <ul className="space-y-2">
-                {city.areas.map((area) => (
-                  <li
-                    key={area.id}
-                    className="border-border flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
+              <div className="space-y-2">
+                <ul className="space-y-2">
+                  {city.areas.slice(0, AREAS_PREVIEW).map(areaRow)}
+                </ul>
+                {city.areas.length > AREAS_PREVIEW && (
+                  // Keyed by city: switching city must not carry the previous
+                  // city's expanded state into the new one.
+                  <CollapsibleSection
+                    key={city.id}
+                    label="areas"
+                    defaultCollapsed
+                    showLabel={`View all ${city.areas.length} areas`}
+                    hideLabel="Show less"
                   >
-                    <span className="min-w-0 flex-1 truncate text-sm">
-                      {area.name}
-                    </span>
-                    <RemoveButton kind="area" id={area.id} name={area.name} />
-                  </li>
-                ))}
-              </ul>
+                    <ul className="space-y-2">
+                      {city.areas.slice(AREAS_PREVIEW).map(areaRow)}
+                    </ul>
+                  </CollapsibleSection>
+                )}
+              </div>
             )}
             <AddRow
               action={addArea}
