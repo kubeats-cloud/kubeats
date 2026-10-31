@@ -13,6 +13,16 @@ export type StatusField = {
   sortOrder: number;
 };
 
+/**
+ * CAMPUS-SCOPED SINCE 0067, with no filter of this function's own — same
+ * stance as `listStatusCatalogue()`. `status_fields_select` used to be
+ * `using (true)`, so a field belonging to another campus's status came back
+ * regardless of whether that status was visible; 0067 rewrote the policy to
+ * ask institute_statuses_select's own visibility for the status each field
+ * belongs to. That is what makes the no-arg calls on `/log` and `/log-call`
+ * safe to ship straight to the client: the full row set they fetch is already
+ * trimmed to what the signed-in caller may see.
+ */
 export async function listStatusFields(status?: string): Promise<StatusField[]> {
   const supabase = await createClient();
   let query = supabase

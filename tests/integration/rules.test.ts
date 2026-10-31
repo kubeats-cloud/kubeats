@@ -460,6 +460,31 @@ const has0064 = configured
       .then(({ error }) => error?.code !== "PGRST202")
   : false;
 
+/**
+ * 0065 adds institute_statuses.campus_id and campus-scopes its select
+ * policy. Probed by column existence, the same style has0010 uses for the
+ * table itself — there is no new function to call instead.
+ */
+const has0065 = configured
+  ? await admin
+      .from("institute_statuses")
+      .select("campus_id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
+/**
+ * 0066 gives target_statuses the matching column and select policy (plus an
+ * admin-only update policy, which this probe does not need to distinguish).
+ */
+const has0066 = configured
+  ? await admin
+      .from("target_statuses")
+      .select("campus_id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
 if (configured && !has0038) {
   console.warn(
     [
@@ -4612,6 +4637,234 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
           expect(error).toBeNull();
         });
       });
+
+      /*
+       * PART 4 of campus-wise statuses: a rep's log-visit and target forms
+       * show only their own campus's statuses, with the right dynamic
+       * fields. 0065 and 0066 scope institute_statuses and target_statuses
+       * themselves; this is the suite that proves it live, plus the one gap
+       * those two migrations did not cover — status_fields, closed by 0067.
+       *
+       * alice (campus A) and bob (campus B) from the fixture above are reused
+       * rather than a new pair, on purpose: this is exactly the boundary that
+       * describe is already named for.
+       */
+      describe.skipIf(!has0065 || !has0066)(
+        "institute_statuses, status_fields and target_statuses — campus scoping (0065/0066/0067)",
+        () => {
+          /**
+           * One status scoped to campus A and one left global (campus_id
+           * null), each with its own dynamic field — so every clause of
+           * 0065's and 0067's policies gets exercised: the global branch,
+           * the caller's-own-campus branch, and the other campus's rep
+           * seeing neither the scoped status nor its field.
+           */
+          const scopedStatus = `${TAG} campus-A status`;
+          const globalStatus = `${TAG} global status`;
+          let scopedFieldId: string;
+          let globalFieldId: string;
+
+          beforeAll(async () => {
+            const { error: scopedErr } = await admin.from("institute_statuses").insert({
+              status: scopedStatus,
+              category: "open",
+              campus_id: campusA,
+            });
+            if (scopedErr) throw new Error(`scoped status: ${scopedErr.message}`);
+
+            const { error: globalErr } = await admin.from("institute_statuses").insert({
+              status: globalStatus,
+              category: "open",
+              campus_id: null,
+            });
+            if (globalErr) throw new Error(`global status: ${globalErr.message}`);
+
+            const { data: scopedField, error: scopedFieldErr } = await admin
+              .from("status_fields")
+              .insert({
+                status: scopedStatus,
+                field_name: `${TAG} campus-A field`,
+                field_type: "text",
+                is_required: true,
+              })
+              .select("id")
+              .single();
+            if (scopedFieldErr) throw new Error(`scoped field: ${scopedFieldErr.message}`);
+            scopedFieldId = scopedField!.id as string;
+
+            const { data: globalField, error: globalFieldErr } = await admin
+              .from("status_fields")
+              .insert({
+                status: globalStatus,
+                field_name: `${TAG} global field`,
+                field_type: "text",
+                is_required: true,
+              })
+              .select("id")
+              .single();
+            if (globalFieldErr) throw new Error(`global field: ${globalFieldErr.message}`);
+            globalFieldId = globalField!.id as string;
+          });
+
+          afterAll(async () => {
+            // status_fields_status_fkey is ON DELETE CASCADE (0054), so
+            // deleting the two statuses is the whole cleanup.
+            await admin
+              .from("institute_statuses")
+              .delete()
+              .in("status", [scopedStatus, globalStatus]);
+          });
+
+          describe("institute_statuses_select (0065)", () => {
+            it("shows the campus-A rep both the scoped and the global status", async () => {
+              const { data } = await alice.db
+                .from("institute_statuses")
+                .select("status")
+                .in("status", [scopedStatus, globalStatus]);
+              expect((data ?? []).map((r) => r.status).sort()).toEqual(
+                [globalStatus, scopedStatus].sort(),
+              );
+            });
+
+            it("hides the scoped status from the campus-B rep, keeps the global one", async () => {
+              const { data } = await bob.db
+                .from("institute_statuses")
+                .select("status")
+                .in("status", [scopedStatus, globalStatus]);
+              expect((data ?? []).map((r) => r.status)).toEqual([globalStatus]);
+            });
+
+            it("shows the admin both, same as before 0065", async () => {
+              const { data } = await boss.db
+                .from("institute_statuses")
+                .select("status")
+                .in("status", [scopedStatus, globalStatus]);
+              expect((data ?? []).map((r) => r.status).sort()).toEqual(
+                [globalStatus, scopedStatus].sort(),
+              );
+            });
+          });
+
+          describe("status_fields_select (0067)", () => {
+            it("gives the campus-A rep both fields", async () => {
+              const { data } = await alice.db
+                .from("status_fields")
+                .select("id, status")
+                .in("id", [scopedFieldId, globalFieldId]);
+              expect((data ?? []).map((r) => r.id).sort()).toEqual(
+                [scopedFieldId, globalFieldId].sort(),
+              );
+            });
+
+            it("hides the scoped status's field from the campus-B rep by id — not just from the picker", async () => {
+              // The exact shape of the bypass 0067 closed: asking for the
+              // field DIRECTLY by its id, the way a server action validating
+              // a submitted status would, rather than through whatever list
+              // the UI happened to render.
+              const { data, error } = await bob.db
+                .from("status_fields")
+                .select("id, field_name, options")
+                .eq("id", scopedFieldId);
+              expect(error).toBeNull();
+              expect(data).toEqual([]);
+            });
+
+            it("still gives the campus-B rep the global status's field", async () => {
+              const { data } = await bob.db
+                .from("status_fields")
+                .select("id")
+                .eq("id", globalFieldId);
+              expect(data?.length).toBe(1);
+            });
+
+            it("gives the admin both, same as before 0067", async () => {
+              const { data } = await boss.db
+                .from("status_fields")
+                .select("id")
+                .in("id", [scopedFieldId, globalFieldId]);
+              expect((data ?? []).map((r) => r.id).sort()).toEqual(
+                [scopedFieldId, globalFieldId].sort(),
+              );
+            });
+          });
+
+          describe("listStatusFields()'s own no-filter read (src/lib/status-fields.ts)", () => {
+            // The library function reads with no filter of its own and trusts
+            // RLS — this is that same shape, through a rep's own session
+            // client, the way /log and /log-call actually call it.
+            it("returns only what the signed-in caller may see", async () => {
+              const { data: aliceAll } = await alice.db
+                .from("status_fields")
+                .select("id, status, field_name, options, is_required, sort_order")
+                .order("sort_order")
+                .order("field_name");
+              const aliceIds = (aliceAll ?? []).map((r) => r.id);
+              expect(aliceIds).toContain(scopedFieldId);
+              expect(aliceIds).toContain(globalFieldId);
+
+              const { data: bobAll } = await bob.db
+                .from("status_fields")
+                .select("id, status, field_name, options, is_required, sort_order")
+                .order("sort_order")
+                .order("field_name");
+              const bobIds = (bobAll ?? []).map((r) => r.id);
+              expect(bobIds).not.toContain(scopedFieldId);
+              expect(bobIds).toContain(globalFieldId);
+            });
+          });
+
+          describe("target_statuses_select (0066)", () => {
+            const scopedTarget = `${TAG} campus-A target status`;
+            const globalTarget = `${TAG} global target status`;
+
+            beforeAll(async () => {
+              const { error: e1 } = await admin
+                .from("target_statuses")
+                .insert({ name: scopedTarget, campus_id: campusA });
+              if (e1) throw new Error(`scoped target status: ${e1.message}`);
+              const { error: e2 } = await admin
+                .from("target_statuses")
+                .insert({ name: globalTarget, campus_id: null });
+              if (e2) throw new Error(`global target status: ${e2.message}`);
+            });
+
+            afterAll(async () => {
+              await admin
+                .from("target_statuses")
+                .delete()
+                .in("name", [scopedTarget, globalTarget]);
+            });
+
+            it("shows the campus-A rep both", async () => {
+              const { data } = await alice.db
+                .from("target_statuses")
+                .select("name")
+                .in("name", [scopedTarget, globalTarget]);
+              expect((data ?? []).map((r) => r.name).sort()).toEqual(
+                [globalTarget, scopedTarget].sort(),
+              );
+            });
+
+            it("hides the scoped one from the campus-B rep, keeps the global one", async () => {
+              const { data } = await bob.db
+                .from("target_statuses")
+                .select("name")
+                .in("name", [scopedTarget, globalTarget]);
+              expect((data ?? []).map((r) => r.name)).toEqual([globalTarget]);
+            });
+
+            it("shows the admin both", async () => {
+              const { data } = await boss.db
+                .from("target_statuses")
+                .select("name")
+                .in("name", [scopedTarget, globalTarget]);
+              expect((data ?? []).map((r) => r.name).sort()).toEqual(
+                [globalTarget, scopedTarget].sort(),
+              );
+            });
+          });
+        },
+      );
     },
   );
 
@@ -10033,29 +10286,57 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       ).toBe(CHECK_VIOLATION);
     });
 
-    it("has no UPDATE or DELETE grant reachable from the client, even for an admin", async () => {
-      // THROUGH boss.db — the point is that the `authenticated` Postgres
-      // role holds no grant for either verb at all, which an admin's own
-      // is_admin() status cannot work around, because there is no policy
-      // checking it for these two commands in the first place.
+    /**
+     * UPDATED FOR 0066. This used to assert that NEITHER verb was reachable
+     * at all — true from 0047 until 0066, which added target_statuses_update
+     * (both halves admin-gated) so an admin has a door to re-scope an
+     * existing row's campus_id. 0066's own header is explicit that the
+     * policy does not single out campus_id: "the application is the only
+     * caller, and its own action only ever sends campus_id" — so a rename
+     * through the policy is technically reachable too, same as
+     * institute_statuses (0026 lets a status's PK rename cascade). DELETE
+     * stays unreachable by anyone; 0066 deliberately did not add it.
+     */
+    it("lets an admin UPDATE (even rename) but never DELETE; a rep can do neither", async () => {
       const name = named("immutable");
       await admin.from("target_statuses").insert({ name });
 
-      const updated = await boss.db
-        .from("target_statuses").update({ name: `${name}-renamed` }).eq("name", name);
-      expect(
-        updated.error,
-        "renaming was never asked for and must not be reachable",
-      ).not.toBeNull();
+      /*
+       * A REP'S UPDATE IS GRANTED AT THE SQL LEVEL (0066 grants UPDATE to
+       * `authenticated` as a whole) but target_statuses_update's USING
+       * clause is is_admin() — so this is not refused with an error, it
+       * matches zero rows. Same shape the "institutes_update hole" test
+       * above asserts: RLS filters rows, it does not raise.
+       */
+      const repAttempt = await repA.db
+        .from("target_statuses")
+        .update({ name: `${name}-rep-tried` })
+        .eq("name", name)
+        .select("name");
+      expect(repAttempt.error, repAttempt.error?.message).toBeNull();
+      expect(repAttempt.data, "a rep's update must match no rows").toEqual([]);
 
-      const deleted = await boss.db.from("target_statuses").delete().eq("name", name);
+      const { data: stillOriginal } = await admin
+        .from("target_statuses").select("name").eq("name", name);
+      expect(stillOriginal, "the rep's update must not have changed anything").toHaveLength(1);
+
+      const renamed = `${name}-renamed`;
+      names.push(renamed); // the row now lives under this name - afterAll must find it here, not under `name`
+      const updated = await boss.db
+        .from("target_statuses").update({ name: renamed }).eq("name", name);
+      expect(updated.error, updated.error?.message).toBeNull();
+
+      // DELETE, unlike UPDATE, was never GRANTed to `authenticated` at all
+      // (0047 granted select+insert, 0066 added update) - this fails at the
+      // privilege check before RLS even runs, so it IS a real error.
+      const deleted = await boss.db.from("target_statuses").delete().eq("name", renamed);
       expect(
         deleted.error,
         "deleting was never asked for and must not be reachable",
       ).not.toBeNull();
 
-      const { data } = await admin.from("target_statuses").select("name").eq("name", name);
-      expect(data, "the row must be exactly as it was added").toHaveLength(1);
+      const { data } = await admin.from("target_statuses").select("name").eq("name", renamed);
+      expect(data, "the row must still be there, under its new name").toHaveLength(1);
     });
   });
 });

@@ -21,9 +21,13 @@ import {
  * an admin can extend it — so the app has to ask rather than assume. This is
  * where it asks, and it is the only place that does.
  *
- * READABLE BY EVERYONE. `institute_statuses_select` is `using (true)`: it is a
- * vocabulary, not anyone's data, and a rep needs it to render a badge. Writing
- * one is admin-only and arrives with the panel in stage 4b.
+ * READABLE BY EVERY CALLER, CAMPUS-SCOPED SINCE 0065. `institute_statuses_select`
+ * used to be `using (true)` — a vocabulary, not anyone's data, and a rep needs it
+ * to render a badge. Migration 0065 narrowed that to global-or-admin-or-own-campus
+ * -or-a-supervised-rep's-campus, so this function now returns a different row set
+ * per caller with no filter of its own: the policy is the only thing that changed,
+ * which is why no call site below needed touching. Writing one is admin-only and
+ * arrived with the panel in stage 4b.
  *
  * NOT CACHED, deliberately. Every screen that needs it is already dynamic — the
  * whole app is — and ten rows on a request that is fetching visits anyway is
