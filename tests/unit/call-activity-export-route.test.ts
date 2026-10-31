@@ -9,13 +9,14 @@ import { describe, expect, it } from "vitest";
  * NO DOM, NO SUPABASE HERE (vitest.config.mts documents the split), so this
  * reads the source rather than calling the route: the gate must be
  * `requireStaff()` (the SAME permission the on-screen table already has,
- * Part 2), not `requireAdmin()` — which is what `/api/export/activity`
- * uses and is exactly the wrong gate for a report a team lead can see on
- * screen. "A team lead sees only their own reps" is proven at the SQL
- * level (tests/integration/rules.test.ts's call_activity_report() Team
- * Lead scoping block, and the rehearsal-DB check in this part's evidence)
- * because that is RLS/`supervises()`'s property, not this route's — this
- * file only proves the route does not reach around it.
+ * Part 2), not `requireAdmin()`. `/api/export/activity` and
+ * `/api/export/institute-activity` now use the same `requireStaff()` gate —
+ * see activity-export-route.test.ts for that route's own assertion. "A team
+ * lead sees only their own reps" is proven at the SQL level
+ * (tests/integration/rules.test.ts's call_activity_report() Team Lead
+ * scoping block, and the rehearsal-DB check in this part's evidence) because
+ * that is RLS/`supervises()`'s property, not this route's — this file only
+ * proves the route does not reach around it.
  */
 
 const route = readFileSync(

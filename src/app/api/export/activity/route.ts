@@ -1,35 +1,39 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { buildActivityExport } from "@/lib/exports/activity-export";
 import { buildFieldVisitExport } from "@/lib/exports/field-visit-export";
 import { exportRangeSchema } from "@/lib/validation/export";
 
 /**
- * The admin activity export, as an .xlsx download.
+ * The staff (admin or team lead) activity export, as an .xlsx download.
  *
- * ADMIN-ONLY, AND ENFORCED HERE. proxy.ts returns early for /api/*, so nothing
+ * STAFF-ONLY, AND ENFORCED HERE. proxy.ts returns early for /api/*, so nothing
  * under it is behind the page gate — every route authenticates itself or it is
- * public, which is the rule /api/health is the worked example of. `requireAdmin`
- * is that check, and it is the same one the admin screens use: role plus
- * `profileStatus === "ready"`, so an unreadable profile is never treated as an
- * admin. Hiding the button would not have been a control; a rep who knows the
- * URL gets 403 from this line whatever the UI shows them.
+ * public, which is the rule /api/health is the worked example of. `requireStaff`
+ * is that check, and it is the same one Call Activity's and Institute-Wise
+ * Activity's export routes already use: role plus `profileStatus === "ready"`,
+ * so an unreadable profile is never treated as staff. Hiding the button would
+ * not have been a control; a rep who knows the URL gets 403 from this line
+ * whatever the UI shows them.
  *
- * Underneath it, RLS is still what decides which rows the queries return. The
- * export runs as the signed-in admin, not with any elevated key — so the gate
- * failing open would still not hand a rep the team's numbers, it would hand
- * them their own. Two locks on one door, as everywhere else in this app.
+ * Underneath it, RLS is still what decides which rows the queries return —
+ * `buildActivityExport()` reads `visits`/`daily_plans`/`profiles`, all
+ * `supervises()`-scoped since migration 0042. The export runs as the signed-in
+ * caller, not with any elevated key — so the gate failing open would still
+ * not hand a rep the team's numbers, it would hand them their own, and a team
+ * lead already gets exactly their own reps rather than the whole company.
+ * Two locks on one door, as everywhere else in this app.
  *
  * A GET RATHER THAN A SERVER ACTION, because a download wants a URL: the
  * browser navigates to it, the file lands in Downloads, and nothing has to
- * marshal bytes back through React. It also means an admin can bookmark a
+ * marshal bytes back through React. It also means a caller can bookmark a
  * range. Nothing here writes, so a GET is honest about what it does.
  */
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     // 403 rather than a redirect: this is an API, and a signed-out caller
     // following a stale bookmark should see why rather than get an HTML login
