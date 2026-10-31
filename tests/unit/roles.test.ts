@@ -351,10 +351,18 @@ describe("H1 is behaviour-neutral, and the migration says so at source level", (
     }
   });
 
-  it("gates the restored Pipeline by rep report to admins", () => {
+  /**
+   * ⚠ WIDENED FROM requireAdmin TO requireStaff for the team-lead-dashboard
+   * work. `institutes_select` is `supervises(registered_by)` since 0042 and
+   * `getInstituteStatusModel()` has no role check of its own, so a lead
+   * reaches the proxy-level `STAFF_PATTERNS` entry nav.ts already carved out
+   * for this route and now gets exactly their own reps' institutes rather
+   * than a 403 behind a door the proxy had already opened.
+   */
+  it("gates the restored Pipeline by rep report to staff (admin or team lead)", () => {
     const page = tsCode("src/app/(app)/institutes/report/page.tsx");
-    expect(page).toContain("requireAdmin");
-    expect(page).not.toContain("requireStaff");
+    expect(page).toContain("requireStaff");
+    expect(page).not.toContain("requireAdmin");
     expect(page).not.toContain("redirect(");
     expect(page).toContain("getInstituteStatusModel");
     expect(page).toContain("CustomisableGrid");
