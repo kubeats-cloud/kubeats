@@ -6,11 +6,15 @@ import {
   SEED_STATUS_CATALOGUE,
   isOpenStatus,
   statusCategory,
+  type StatusCatalogue,
+  type StatusTone,
 } from "@/lib/validation/institute";
 import { followUpRequired } from "@/lib/validation/visit";
 import { visitMinutes, visitStatusOf } from "@/lib/validation/checkin";
 import { istDayAfter, istDayStart } from "@/lib/dates";
 import { followUpItemsFor, type DueTaskRow } from "@/lib/notifications";
+import { pipelineOf } from "@/lib/team-hub";
+import type { Institute } from "@/lib/institutes";
 
 /**
  * The rules that live in Postgres.
@@ -7036,6 +7040,228 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       });
       expect(error, error?.message).toBeNull();
       expect(data.rows).toEqual([]);
+    });
+  });
+
+  /**
+   * PART 5 of campus-wise statuses: reports and counts have to read the SAME
+   * campus-scoped catalogue (0065/0066) the forms do, and the one hand-rolled
+   * "status the catalogue did not describe" fallback in this codebase —
+   * `pipelineOf()` in team-hub.ts, Part 4's finding — must not actually need
+   * to fire for a team lead looking at a supervised rep's work, because
+   * 0065's fourth clause ("a campus holding a rep I supervise") exists
+   * exactly to prevent that.
+   *
+   * CROSS-CAMPUS ON PURPOSE: the lead lives on one campus, the rep on a
+   * DIFFERENT one, linked by `profiles.team_lead_id` alone — 0061 dropped the
+   * same-campus requirement for exactly this shape, and it is the shape most
+   * likely to expose a scoping gap if one existed. A same-campus lead would
+   * also pass through `campus_id = my_campus()` and prove nothing extra.
+   *
+   * THREE READERS, ONE STATUS: `institute_statuses` directly (what
+   * `listStatusCatalogue()`/`pipelineOf()` run on), `audit_institute_activity()`
+   * (0060, the institute-wise activity report), and `call_activity_report()`
+   * (0064). All three join or select from `institute_statuses` under RLS: if
+   * the lead could not see this status there, each would show it with the
+   * wrong (or no) category while the raw visit/call counts kept it — exactly
+   * the "total does not reconcile" failure mode Part 5 asks to rule out.
+   */
+  describe("campus-wise statuses — reports and counts (Part 5)", () => {
+    let leadCampus: string;
+    let repCampus: string;
+    let lead: Member;
+    let rep: Member;
+    let instituteId: string;
+    const scopedStatus = `${TAG} part5 scoped status`;
+
+    beforeAll(async () => {
+      const [leadCampusRow, repCampusRow] = await Promise.all([
+        admin
+          .from("campuses")
+          .insert({ name: `${TAG} part5 lead campus`, city: "Pune", active: true })
+          .select("id")
+          .single(),
+        admin
+          .from("campuses")
+          .insert({ name: `${TAG} part5 rep campus`, city: "Nashik", active: true })
+          .select("id")
+          .single(),
+      ]);
+      if (leadCampusRow.error) throw new Error(`lead campus: ${leadCampusRow.error.message}`);
+      if (repCampusRow.error) throw new Error(`rep campus: ${repCampusRow.error.message}`);
+      leadCampus = leadCampusRow.data!.id as string;
+      repCampus = repCampusRow.data!.id as string;
+
+      lead = await makeMember("team_lead", "part5-lead", leadCampus);
+      rep = await makeMember("rep", "part5-rep", repCampus);
+
+      const { error: linkError } = await admin
+        .from("profiles")
+        .update({ team_lead_id: lead.id })
+        .eq("id", rep.id);
+      if (linkError) throw new Error(`team_lead_id: ${linkError.message}`);
+
+      const { error: statusError } = await admin.from("institute_statuses").insert({
+        status: scopedStatus,
+        category: "open",
+        tone: "warning",
+        campus_id: repCampus,
+      });
+      if (statusError) throw new Error(`status: ${statusError.message}`);
+
+      const { data: inst, error: instError } = await admin
+        .from("institutes")
+        .insert({
+          name: `${TAG} part5 institute`,
+          type: "school",
+          boards: BOARDS,
+          registered_by: rep.id,
+          campus_id: repCampus,
+          status: scopedStatus,
+        })
+        .select("id")
+        .single();
+      if (instError) throw new Error(`institute: ${instError.message}`);
+      instituteId = inst!.id as string;
+
+      // FO009: a visit needs a check-in behind it, even inserted directly.
+      await ensureArrival(rep.id, instituteId, iso());
+
+      const { error: visitError } = await admin.from("visits").insert(
+        visitRow({
+          member: rep.id,
+          institute_id: instituteId,
+          status_set_to: scopedStatus,
+          date: iso(),
+          // The status is OPEN (FO016/enforce_follow_up_when_open), so a
+          // follow_up_date is mandatory — the status itself was the point of
+          // this fixture, not the follow-up, so just satisfy the trigger.
+          follow_up_date: iso(7),
+        }),
+      );
+      if (visitError) throw new Error(`visit: ${visitError.message}`);
+
+      const { error: callError } = await admin.from("follow_up_tasks").insert({
+        member: rep.id,
+        institute_id: instituteId,
+        kind: "call",
+        status_set_to: scopedStatus,
+        reported_at: new Date().toISOString(),
+      });
+      if (callError) throw new Error(`call: ${callError.message}`);
+    });
+
+    afterAll(async () => {
+      await admin.from("visits").delete().eq("institute_id", instituteId);
+      await admin.from("daily_plans").delete().eq("institute_id", instituteId);
+      await admin.from("follow_up_tasks").delete().eq("institute_id", instituteId);
+      await admin.from("institute_status_history").delete().eq("institute_id", instituteId);
+      if (instituteId) await admin.from("institutes").delete().eq("id", instituteId);
+      await admin.from("institute_statuses").delete().eq("status", scopedStatus);
+      if (rep) await admin.from("profiles").update({ team_lead_id: null }).eq("id", rep.id);
+      // Members (and their auth users) are cleaned by the suite's own
+      // afterAll via createdMembers; campuses are this describe's to clean,
+      // same as the H3 suite's farCampus — nothing else does it for them.
+      if (leadCampus) await admin.from("campuses").delete().eq("id", leadCampus);
+      if (repCampus) await admin.from("campuses").delete().eq("id", repCampus);
+    });
+
+    it("the team lead's own catalogue read includes the cross-campus status with its real category", async () => {
+      const { data, error } = await lead.db
+        .from("institute_statuses")
+        .select("status, category, tone")
+        .eq("status", scopedStatus);
+      expect(error, error?.message).toBeNull();
+      expect(data).toEqual([{ status: scopedStatus, category: "open", tone: "warning" }]);
+    });
+
+    it("pipelineOf() renders it with its real category and totals reconcile — the null-category fallback does not fire", async () => {
+      const { data: catalogueRows } = await lead.db
+        .from("institute_statuses")
+        .select(
+          "status, category, tone, sort_order, is_active, asks_expected_date, asks_session_detail, asks_head_count",
+        )
+        .order("sort_order")
+        .order("status");
+      const catalogue: StatusCatalogue = (catalogueRows ?? []).map((r) => ({
+        status: r.status as string,
+        category: r.category as StatusCatalogue[number]["category"],
+        tone: (r.tone ?? "neutral") as StatusTone,
+        sortOrder: r.sort_order ?? 100,
+        isActive: r.is_active ?? true,
+        asksExpectedDate: r.asks_expected_date ?? false,
+        asksSessionDetail: r.asks_session_detail ?? false,
+        asksHeadCount: r.asks_head_count ?? false,
+      }));
+
+      const institute = { id: instituteId, status: scopedStatus } as Institute;
+      const pipeline = pipelineOf([institute], catalogue);
+
+      expect(
+        pipeline.unknown,
+        "the status must be found in the lead's own catalogue, not fall into the unknown bucket",
+      ).toBe(0);
+      expect(pipeline.open).toBe(1);
+      expect(pipeline.closed).toBe(0);
+      expect(
+        pipeline.open + pipeline.closed + pipeline.unset + pipeline.unknown,
+        "open + closed + unset + unknown must reconcile with the total",
+      ).toBe(pipeline.total);
+
+      const row = pipeline.rows.find((r) => r.status === scopedStatus);
+      expect(row?.category).toBe("open");
+      expect(row?.tone).toBe("warning");
+    });
+
+    it("audit_institute_activity() carries the status as a real column, and its aggregate total matches the row's own count", async () => {
+      const { data, error } = await lead.db.rpc("audit_institute_activity", {
+        p_member: rep.id,
+        p_page: 1,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const statuses = data.statuses as { status: string; category: string }[];
+      const columnEntry = statuses.find((s) => s.status === scopedStatus);
+      expect(
+        columnEntry?.category,
+        "the scoped status must have a real column, not be missing from the list",
+      ).toBe("open");
+
+      const row = data.rows.find((r: { id: string }) => r.id === instituteId);
+      expect(row?.byStatus?.[scopedStatus]).toBe(1);
+
+      /*
+       * `totals.byStatus` is built by LEFT JOINing institute_statuses onto the
+       * raw visit counts (0060) — exactly the join that would silently drop
+       * this status from the aggregate, while the row above still carried it,
+       * had the lead been unable to see it under RLS. Equal here is the proof
+       * that did not happen.
+       */
+      expect(data.totals.byStatus?.[scopedStatus]).toBe(row?.byStatus?.[scopedStatus]);
+    });
+
+    it("call_activity_report() splits the call into openTotal, and open+closed reconciles with the row's own total", async () => {
+      const { data, error } = await lead.db.rpc("call_activity_report", {
+        p_member: rep.id,
+        p_page: 1,
+      });
+      expect(error, error?.message).toBeNull();
+
+      const statuses = data.statuses as { status: string; category: string }[];
+      expect(statuses.find((s) => s.status === scopedStatus)?.category).toBe("open");
+
+      const row = data.rows.find((r: { id: string }) => r.id === rep.id);
+      expect(row?.statuses?.[scopedStatus]).toBe(1);
+
+      /*
+       * `openTotal`/`closedTotal` on this very row are each a SUM gated by a
+       * LEFT JOIN onto institute_statuses (0064's `per_rep` CTE). Had that
+       * join missed this status under RLS, neither total would count it and
+       * this row's own two halves would come up short of its own total.
+       */
+      expect(row?.openTotal).toBe(1);
+      expect(row?.closedTotal).toBe(0);
+      expect(row?.openTotal + row?.closedTotal).toBe(row?.total);
     });
   });
 

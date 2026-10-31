@@ -117,6 +117,15 @@ export interface Pipeline {
   closed: number;
   /** Registered, never visited — or visited under "No change" before 0027. */
   unset: number;
+  /**
+   * HAS a status, but the catalogue could not describe it — see the loop
+   * below for how this is reached. Kept OUT of `open`/`closed` because
+   * guessing a category would be printing data nobody has; kept IN the
+   * reconciling total, unlike before Part 5, because the one thing worse
+   * than an unfamiliar label on the card is a card that visibly does not add
+   * up to its own total underneath it.
+   */
+  unknown: number;
 }
 
 /** How a retired status is marked, the same suffix the export uses. */
@@ -193,11 +202,31 @@ export function pipelineOf(
    * Impossible by construction — `institutes.status` is a foreign key into
    * `institute_statuses` since 0026 — UNLESS `listStatusCatalogue()` fell back
    * to the seeded nine because its read failed, in which case every status an
-   * admin has added since would land here. Printed rather than dropped: a
-   * pipeline whose rows do not add up to its own total is worse than one with
-   * an unfamiliar label in it, and this is the only way the reader finds out.
+   * admin has added since would land here.
+   *
+   * SINCE 0065 THIS HAS A SECOND, NARROWER DOOR: `listStatusCatalogue()` is
+   * campus-scoped, and this function's caller (`/team/[memberId]`) hands it
+   * the catalogue as seen by whoever is viewing the hub — an admin or a team
+   * lead, per `requireStaff()`. For a team lead the RLS clause that matters is
+   * "a campus holding a rep I supervise" (0065's fourth clause), which is
+   * exactly the campus every rep on `theirInstitutes` lives on by definition
+   * of being viewable here at all — so a status scoped to THAT rep's campus
+   * is never actually missing from the team lead's own catalogue, and this
+   * branch should not fire for that reason in practice (proved live in
+   * tests/integration/rules.test.ts). It is kept as a safety net rather than
+   * removed, because "should not happen" is not "cannot happen", and a
+   * transient read failure reaches this exact branch the same way the
+   * pre-0065 fallback did.
+   *
+   * Printed rather than dropped either way: a pipeline whose rows do not add
+   * up to its own total is worse than one with an unfamiliar label in it, and
+   * this is the only way the reader finds out. Counted into `unknown` — not
+   * `open` or `closed`, which would be guessing — specifically so the total
+   * still reconciles on screen instead of silently coming up short.
    */
+  let unknown = 0;
   for (const [status, count] of counts) {
+    unknown += count;
     rows.push({
       status,
       label: status,
@@ -219,5 +248,5 @@ export function pipelineOf(
     });
   }
 
-  return { rows, total: institutes.length, open, closed, unset };
+  return { rows, total: institutes.length, open, closed, unset, unknown };
 }

@@ -80,7 +80,9 @@ describe("pipelineOf", () => {
     expect(pipeline.rows.reduce((sum, row) => sum + row.count, 0)).toBe(
       institutes.length,
     );
-    expect(pipeline.open + pipeline.closed + pipeline.unset).toBe(institutes.length);
+    expect(pipeline.open + pipeline.closed + pipeline.unset + pipeline.unknown).toBe(
+      institutes.length,
+    );
   });
 
   it("orders by the catalogue, not by count", () => {
@@ -138,12 +140,19 @@ describe("pipelineOf", () => {
 
   /**
    * Reachable only when `listStatusCatalogue()` has fallen back to the seeded
-   * nine because its read failed, taking every admin-added status with it.
-   * Printed rather than dropped: a pipeline whose rows do not add up to its own
-   * total is worse than one with an unfamiliar label in it, and this is the
-   * only way the reader finds out something is wrong.
+   * nine because its read failed, taking every admin-added status with it —
+   * or, since Part 5, a transient failure of the campus-scoped read for a
+   * team lead viewing a supervised rep (see pipelineOf's own comment for why
+   * the normal case is covered by RLS and should not land here).
+   *
+   * Printed rather than dropped: a pipeline whose rows do not add up to its
+   * own total is worse than one with an unfamiliar label in it. Counted into
+   * `unknown`, not guessed into `open` or `closed`, so the total still
+   * reconciles — this is Part 5's fix: before it, this exact case left
+   * `open + closed + unset` short of `total` with nothing on screen to
+   * explain why.
    */
-  it("still prints a status the catalogue does not describe", () => {
+  it("still prints a status the catalogue does not describe, and counts it so totals reconcile", () => {
     const pipeline = pipelineOf([inst("a", "Added last week")], catalogue);
 
     expect(pipeline.rows).toHaveLength(1);
@@ -153,6 +162,10 @@ describe("pipelineOf", () => {
     // Category unknown, so it is counted in neither half rather than guessed.
     expect(pipeline.open).toBe(0);
     expect(pipeline.closed).toBe(0);
+    expect(pipeline.unknown).toBe(1);
+    expect(pipeline.open + pipeline.closed + pipeline.unset + pipeline.unknown).toBe(
+      pipeline.total,
+    );
   });
 
   it("answers an empty registry without rows", () => {
@@ -164,6 +177,7 @@ describe("pipelineOf", () => {
       open: 0,
       closed: 0,
       unset: 0,
+      unknown: 0,
     });
   });
 });

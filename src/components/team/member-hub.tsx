@@ -156,6 +156,18 @@ export function PipelineCard({
             not yet reached
           </>
         )}
+        {/* Only reachable via a degraded catalogue read (see pipelineOf's own
+            comment) - shown rather than silently dropped, so "open + closed +
+            not yet reached" never falls short of the total underneath it. */}
+        {pipeline.unknown > 0 && (
+          <>
+            {" · "}
+            <span className="text-foreground font-semibold tabular-nums">
+              {pipeline.unknown}
+            </span>{" "}
+            unclassified
+          </>
+        )}
         {" · "}
         {pipeline.total} institute{pipeline.total === 1 ? "" : "s"} in all
       </p>
