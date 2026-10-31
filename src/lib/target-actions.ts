@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, isStaff } from "@/lib/auth";
 import { logError, toFriendlyMessage } from "@/lib/errors";
 import { CHECK_NUMBERS } from "@/lib/visit-form-state";
 import type { FormState } from "@/lib/visit-form-state";
@@ -49,7 +49,7 @@ const MAX_WEEKS_AHEAD = 8;
 function mapLockError(error: { code?: string }, fallback: string): string {
   if (error.code === CHECK_VIOLATION) return LOCKED_MESSAGE;
   if (error.code === INSUFFICIENT_PRIVILEGE) {
-    return "Only an admin can do that.";
+    return "Only an admin or your team lead can do that.";
   }
   return toFriendlyMessage(error, fallback);
 }
@@ -159,12 +159,17 @@ export async function submitTargets(
 }
 
 /**
- * Rule 6's other half: an admin reopens a locked week so the rep can revise it.
+ * Rule 6's other half: an admin OR a team lead reopens a locked week so the
+ * rep can revise it.
  *
  * Checked here so a rep gets a sentence rather than a rejection, and checked
- * again by the trigger, which is what actually stops a rep who reaches the
- * action directly. reopened_by and reopened_at are stamped by the trigger from
- * auth.uid(), never sent from here.
+ * again by `enforce_target_lock()` (0042), which is what actually stops a rep
+ * — or a lead reopening outside their own team — who reaches the action
+ * directly: that trigger already asks `supervises(new.member)`, and
+ * `targets_update`'s RLS has already narrowed which rows a lead can reach, so
+ * this check only needs to turn away a plain rep. reopened_by and
+ * reopened_at are stamped by the trigger from auth.uid(), never sent from
+ * here.
  */
 export async function reopenWeek(
   _prev: FormState,
@@ -174,8 +179,11 @@ export async function reopenWeek(
   if (!user) {
     return { error: "Your session has expired. Please sign in again.", fieldErrors: {} };
   }
-  if (user.role !== "admin" || user.profileStatus !== "ready") {
-    return { error: "Only an admin can reopen a week.", fieldErrors: {} };
+  if (!isStaff(user)) {
+    return {
+      error: "Only an admin or your team lead can reopen a week.",
+      fieldErrors: {},
+    };
   }
 
   const parsed = reopenSchema.safeParse({

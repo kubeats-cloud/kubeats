@@ -10,7 +10,7 @@ import { ReopenButton } from "@/components/weekly/reopen-button";
 import { TargetsForm } from "@/components/weekly/targets-form";
 import { TargetStatusesPanel } from "@/components/weekly/target-statuses-panel";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getCurrentUser, isAdmin, isStaff } from "@/lib/auth";
 import { getWeekSummary, memberName } from "@/lib/week-summary";
 import { listTargetStatusRows, type TargetStatusRow } from "@/lib/target-statuses";
 import { listCampuses } from "@/lib/campuses";
@@ -47,27 +47,32 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
   const searchParams = await props.searchParams;
   const weekStart = normaliseWeekParam(first(searchParams.week));
 
-  // An admin may look at one rep's targets; everyone else only ever sees their
-  // own. Checked here as well as by RLS, so a rep hand-editing the URL simply
-  // lands back on their own numbers rather than on an error.
+  // Staff (admin or team lead) may look at one rep's targets; everyone else
+  // only ever sees their own. Checked here as well as by RLS — targets_select
+  // is supervises()-scoped since migration 0042 — so a rep hand-editing the
+  // URL simply lands back on their own numbers rather than on an error, and a
+  // lead asking for a rep outside their team gets the same courtesy.
   const requested = first(searchParams.member);
-  const viewingOther = isAdmin(user) && !!requested && requested !== user.id;
+  const viewingOther = isStaff(user) && !!requested && requested !== user.id;
   const memberId = viewingOther ? requested! : user.id;
 
   /*
-   * REP #2 — "Admin should have access to the complete Target tab."
+   * REP #2 — "Admin should have access to the complete Target tab." A team
+   * lead gets the same screen for the same reason.
    *
-   * An admin with no `?member=` used to fall through to `memberId = user.id`
-   * and render THEIR OWN weekly commitment form — the same bug `/report`'s
-   * own comment names for the identical reason: FO021 gives an admin no
-   * campus, so they log no visits and commit to no week. The Target tab had
-   * no meaning for them at all; what they actually have access to in it is
-   * Admin #8's "add a target status," so that is what renders here instead
-   * of a form answering a question that cannot have an answer.
+   * A staff member with no `?member=` used to fall through to
+   * `memberId = user.id` and render THEIR OWN weekly commitment form — the
+   * same bug `/report`'s own comment names for the identical reason: FO021
+   * gives neither an admin nor a team lead a campus, so neither logs visits
+   * or commits to a week. The Target tab had no meaning for them at all;
+   * what they actually have access to in it is their own team's roster, plus
+   * — for an admin only — Admin #8's "add a target status". That is what
+   * renders here instead of a form answering a question that cannot have an
+   * answer.
    */
-  const adminHome = isAdmin(user) && !viewingOther;
+  const staffHome = isStaff(user) && !viewingOther;
 
-  if (adminHome) {
+  if (staffHome) {
     const [statuses, campuses] = await Promise.all([
       listTargetStatusRows(),
       listCampuses(),
@@ -80,7 +85,11 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
         />
         <TargetStatusesPanel
           statuses={statuses.ok ? statuses.statuses : []}
-          canAdd
+          // Adding a target status is choosing shared vocabulary — no team
+          // dimension to scope to, so it stays admin-only even though the
+          // panel itself (and the roster below it) now also renders for a
+          // team lead.
+          canAdd={isAdmin(user)}
           campuses={campuses}
         />
         {!statuses.ok && <ErrorState message="Target statuses could not be loaded." />}
