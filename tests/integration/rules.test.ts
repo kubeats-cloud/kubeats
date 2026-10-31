@@ -5002,6 +5002,132 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(removed.profiles).toBe(1);
     });
 
+    /**
+     * Bug fix, migration 0068. call_report_edits (0063) is append-only, and
+     * its own trigger used to intercept BOTH halves of this: the NO ACTION
+     * FK on call_id (refusing the cascade with 23503 once a member's own
+     * follow_up_tasks row was in the way) and the ON DELETE SET NULL on
+     * edited_by (refusing with 42501, because the trigger could not tell
+     * that UPDATE apart from one typed by hand). Both are exercised here,
+     * each from the member who triggers it.
+     */
+    describe.skipIf(!has0063)("a member with call-report edit history (0068)", () => {
+      const fileCall = async (
+        caller: Member,
+        institute: string,
+        label: string,
+        status = "RSVP received",
+      ) => {
+        const { data: created, error: createErr } = await caller.db
+          .from("follow_up_tasks")
+          .insert({ member: caller.id, institute_id: institute, kind: "call" })
+          .select("id")
+          .single();
+        if (createErr) throw new Error(`task(${label}): ${createErr.message}`);
+        const { error } = await caller.db.rpc("log_call", {
+          p_task_id: created!.id,
+          p_status_set_to: status,
+          p_notes: `${TAG} ${label}`,
+        });
+        if (error) throw new Error(`log_call(${label}): ${error.message}`);
+        return created!.id as string;
+      };
+
+      it("removes the edit history of a call THIS member made, then deletes them", async () => {
+        const victim = await makeMember("rep", "call-maker", campusA);
+        const institute = await makeInstitute(victim.id, campusA, "call-maker school");
+        const taskId = await fileCall(victim, institute, "call-maker call");
+
+        const { error: editErr } = await boss.db.rpc("admin_update_call_report", {
+          p_task_id: taskId,
+          p_status_set_to: "RSVP received",
+          p_follow_up_date: null,
+          p_expected_date: null,
+          p_outcome: "rescheduled",
+          p_notes: `${TAG} edited before the deletion`,
+        });
+        expect(editErr, editErr?.message).toBeNull();
+
+        const { data: before } = await admin
+          .from("call_report_edits")
+          .select("id")
+          .eq("call_id", taskId);
+        expect(before?.length, "an edit row exists before the delete").toBeGreaterThan(0);
+
+        // THE BUG, pre-0068: this raised 23503 (call_report_edits_call_id_fkey)
+        // the moment deleting the profile cascaded into this member's own
+        // follow_up_tasks row.
+        const { data, error } = await boss.db.rpc("delete_member", {
+          p_member: victim.id,
+        });
+        expect(error, error?.message).toBeNull();
+        expect(
+          (data as Record<string, number>).call_report_edits,
+          "the receipt names what it removed, same as every other table",
+        ).toBeGreaterThan(0);
+
+        const { data: after } = await admin
+          .from("call_report_edits")
+          .select("id")
+          .eq("call_id", taskId);
+        expect(after ?? [], "the edit row went with the call it belonged to").toHaveLength(0);
+
+        const { data: task } = await admin
+          .from("follow_up_tasks")
+          .select("id")
+          .eq("id", taskId);
+        expect(task ?? [], "the call itself is gone too, same as any other visit").toHaveLength(0);
+      });
+
+      it("nulls the byline on an edit THIS member made as admin, and keeps the audit row", async () => {
+        const editor = await makeMember("admin", "call-editor");
+        const institute = await makeInstitute(repA.id, campusA, "edited-by-spare school");
+        const taskId = await fileCall(repA, institute, "edited-by-spare call");
+
+        const { error: editErr } = await editor.db.rpc("admin_update_call_report", {
+          p_task_id: taskId,
+          p_status_set_to: "RSVP received",
+          p_follow_up_date: null,
+          p_expected_date: null,
+          p_outcome: "rescheduled",
+          p_notes: `${TAG} edited by the admin about to be deleted`,
+        });
+        expect(editErr, editErr?.message).toBeNull();
+
+        const { data: before } = await admin
+          .from("call_report_edits")
+          .select("id, edited_by")
+          .eq("call_id", taskId)
+          .single();
+        expect(before?.edited_by).toBe(editor.id);
+
+        // THE BUG, pre-0068: this raised 42501 ("Call report edit history is
+        // append-only") the moment deleting the profile tried the FK's own
+        // ON DELETE SET NULL on edited_by, which the trigger intercepted.
+        const { error } = await boss.db.rpc("delete_member", { p_member: editor.id });
+        expect(error, error?.message).toBeNull();
+
+        const { data: after } = await admin
+          .from("call_report_edits")
+          .select("id, edited_by")
+          .eq("id", before!.id)
+          .single();
+        expect(after, "the audit row is still there — somebody else's call").not.toBeNull();
+        expect(after?.edited_by, "only the byline went, same as materials.uploaded_by").toBeNull();
+
+        // The call itself is untouched — it belongs to repA, not the deleted
+        // admin, and this member was never anything but its editor.
+        const { data: task } = await admin
+          .from("follow_up_tasks")
+          .select("id")
+          .eq("id", taskId);
+        expect(task ?? []).toHaveLength(1);
+
+        await admin.from("follow_up_tasks").delete().eq("id", taskId);
+        await admin.from("institutes").delete().eq("id", institute);
+      });
+    });
+
     it("refuses a rep outright — it is SECURITY DEFINER, so this is the whole gate", async () => {
       const { victim } = await makeVictim("not-admin");
 
@@ -7382,21 +7508,37 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
    */
   describe.skipIf(!has0064)("call_activity_report() export mode (Part 4)", () => {
     const openStatus = "First meeting done";
+    /*
+     * BUG FIX, verified live. Export mode (`p_page: 0`) has ALWAYS required
+     * both ends of a date range — "Choose a From and To date for the Excel
+     * export" is deliberate (0064's header: "31-day range required"),
+     * matching audit_institute_activity's (0060) identical export guard —
+     * so a call with neither end, as this test used to make, was refused by
+     * design, not by a faulty check. The 31-day arithmetic itself
+     * (`p_to - p_from + 1 > 31`) was verified directly against many boundary
+     * values (30, 31, 32 days; inverted; one-sided) and is correct. The real
+     * fix here is this range: a 31-day inclusive window, applied to BOTH
+     * calls below so export mode and the paged screen are compared over the
+     * identical window rather than export-with-a-range against paged-with-
+     * none.
+     */
+    const rangeFrom = iso(-30);
+    const rangeTo = iso();
 
     it("export mode's rows and totals equal a page-by-page sum for the same filters", async () => {
       const exportAll = await boss.db.rpc("call_activity_report", {
-        p_status: openStatus, p_page: 0,
+        p_status: openStatus, p_from: rangeFrom, p_to: rangeTo, p_page: 0,
       });
       expect(exportAll.error, exportAll.error?.message).toBeNull();
 
       const paged = await boss.db.rpc("call_activity_report", {
-        p_status: openStatus, p_page: 1,
+        p_status: openStatus, p_from: rangeFrom, p_to: rangeTo, p_page: 1,
       });
       expect(paged.error, paged.error?.message).toBeNull();
       let allRows = [...paged.data.rows];
       for (let p = 2; p <= paged.data.pages; p += 1) {
         const page = await boss.db.rpc("call_activity_report", {
-          p_status: openStatus, p_page: p,
+          p_status: openStatus, p_from: rangeFrom, p_to: rangeTo, p_page: p,
         });
         expect(page.error, page.error?.message).toBeNull();
         allRows = allRows.concat(page.data.rows);
@@ -7415,6 +7557,26 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
         p_from: "2026-01-01", p_to: "2026-03-01", p_page: 0,
       });
       expect(error?.code).toBe("22023");
+    });
+
+    /**
+     * The boundary itself, both sides of it. "31 days or fewer" means the
+     * INCLUSIVE day count: Jan 1 through Jan 31 is 31 days and must pass;
+     * Jan 1 through Feb 1 is 32 and must still refuse, one day later.
+     */
+    it("accepts a 31-day export and refuses a 32-day one, one day apart", async () => {
+      const ok = await boss.db.rpc("call_activity_report", {
+        p_from: "2026-01-01", p_to: "2026-01-31", p_page: 0,
+      });
+      expect(ok.error, ok.error?.message).toBeNull();
+
+      const tooLong = await boss.db.rpc("call_activity_report", {
+        p_from: "2026-01-01", p_to: "2026-02-01", p_page: 0,
+      });
+      expect(tooLong.error?.code).toBe("22023");
+      expect(tooLong.error?.message).toBe(
+        "Choose a date range of 31 days or fewer for the Excel export.",
+      );
     });
   });
 
