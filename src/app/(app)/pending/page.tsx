@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/states";
 import { FollowUpList } from "@/components/visits/follow-up-list";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getCurrentUser, isStaff } from "@/lib/auth";
 import {
   getOpenFollowUps,
   getTodayPlan,
@@ -78,7 +78,12 @@ export default async function PendingPage(props: PageProps<"/pending">) {
    */
   const dueFilter = first(searchParams.due) === "today" ? "today" : "all";
 
-  const admin = isAdmin(user);
+  // Admin OR team lead: `getOpenFollowUps()`, `getFollowUpCardModel()` and
+  // every other read below are `supervises()`-scoped since 0042, so a team
+  // lead already gets exactly their own reps — this only chooses the
+  // supervision-shaped VIEW over the rep's own-day view, same as `admin` used
+  // to before a third role existed.
+  const staff = isStaff(user);
   const catalogue = await listStatusCatalogue();
 
   // The category is the managed vocabulary's to decide, never a list in here.
@@ -88,19 +93,19 @@ export default async function PendingPage(props: PageProps<"/pending">) {
 
   const [result, unreported, purposes, tasks, plan, followUpCards] = await Promise.all([
     getOpenFollowUps(openStatuses, user.id, first(searchParams.page), {owner:first(searchParams.owner)}),
-    // An admin has no half-finished visits of their own: they do not log any.
-    admin ? Promise.resolve([]) : getUnreportedVisits(user.id),
+    // Staff have no half-finished visits of their own: neither role logs any.
+    staff ? Promise.resolve([]) : getUnreportedVisits(user.id),
     listPurposes(),
-    admin
+    staff
       ? Promise.resolve({ ok: true as const, tasks: [] })
       : listFollowUpTasks(user.id, todayISO()),
     /*
      * Phase A fix — MeetingPrompts' dedup needs today's real entries to know
      * which institutes are genuinely already planned (see meetingPromptsFor's
-     * own note on why "Completed" must not count). An admin logs no visits
-     * and has none of their own either.
+     * own note on why "Completed" must not count). Staff log no visits and
+     * have none of their own either.
      */
-    admin
+    staff
       ? Promise.resolve({ ok: true as const, entries: [] })
       : getTodayPlan(user.id),
     // Admin #4 / Rep #6 — one model, RLS-scoped, no filter of its own.
@@ -119,7 +124,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
       <PageHeader
         title="Pending"
         description={
-          admin
+          staff
             ? "Every institute across the team still waiting on a follow-up."
             : "Institutes you have left open. Tap one to go back."
         }
@@ -132,7 +137,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
         rows behind it cannot disagree.
       */}
       {followUpCards.ok ? (
-        admin ? (
+        staff ? (
           <AdminFollowUpCards counts={followUpCards.model.counts} />
         ) : (
           <RepFollowUpCards counts={followUpCards.model.counts} />
@@ -192,7 +197,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
         institutes are still open". A row can honestly be in both, and merging
         them would have to pick one framing and lose the other.
       */}
-      {!admin && dueCount > 0 && (
+      {!staff && dueCount > 0 && (
         <div className="mb-6">
           <SectionTitle>
             Due today
@@ -216,7 +221,7 @@ export default async function PendingPage(props: PageProps<"/pending">) {
         </div>
       )}
 
-      {!admin && dueFilter === "today" && dueCount === 0 && (
+      {!staff && dueFilter === "today" && dueCount === 0 && (
         <div className="mb-6">
           <SectionTitle>Due today</SectionTitle>
           <p className="text-muted-foreground mt-2 text-sm">
@@ -261,10 +266,10 @@ export default async function PendingPage(props: PageProps<"/pending">) {
           items={result.items}
           purposes={purposes}
           catalogue={catalogue}
-          // D10 — an admin has no campus and does not do field visits, so a
+          // D10 — staff have no campus and do not do field visits, so a
           // launch would put the visit on their own day. Read-only, and the
           // action refuses them too rather than trusting this prop.
-          readOnly={admin}
+          readOnly={staff}
         />
         </>
       ) : (

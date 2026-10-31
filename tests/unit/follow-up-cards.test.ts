@@ -84,11 +84,14 @@ describe("the cards are on Pending, and the lists read the same model", () => {
   const pending = () => read("pending/page.tsx");
   const lists = () => read("pending/follow-ups/page.tsx");
 
-  it("gives an admin the three cards at the top", () => {
+  it("gives staff (admin or team lead) the three cards at the top", () => {
     const page = pending();
     expect(page).toContain("AdminFollowUpCards");
-    // The admin branch is the one that renders it; a rep keeps the two cards.
-    expect(page).toMatch(/admin \? \(\s*<AdminFollowUpCards/);
+    // The staff branch is the one that renders it; a rep keeps the two cards.
+    // `follow_up_tasks` is `supervises()`-scoped since 0042, so a team lead
+    // reaches the same branch as an admin and gets exactly their own reps.
+    expect(page).toContain("isStaff");
+    expect(page).toMatch(/staff \? \(\s*<AdminFollowUpCards/);
     expect(page).toContain("RepFollowUpCards");
   });
 

@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState, ErrorState } from "@/components/states";
 import { AdminFollowUpCards } from "@/components/visits/follow-up-cards";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getCurrentUser, isStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
 import {
   followUpCardItemsFor,
@@ -33,15 +33,18 @@ function isStatus(value: string | undefined): value is FollowUpCardStatus {
  * `/pending` and the rows behind it here cannot disagree. RLS alone decides
  * whose rows these are; nothing here re-filters by role.
  *
- * "Rep name" renders for an admin only — Admin #4 names it as a column,
- * Rep #6 does not, and it would only ever read the signed-in Rep's own name
- * back to them.
+ * "Rep name" renders for staff (admin or team lead) only — Admin #4 names it
+ * as a column, Rep #6 does not, and it would only ever read the signed-in
+ * Rep's own name back to them. A team lead gets it too: `follow_up_tasks`
+ * (via `getFollowUpCardModel()`) has been `supervises()`-scoped since 0042,
+ * so the rows behind the column are already narrowed to their own reps —
+ * the gate below only ever chose whether to SHOW whose row it is.
  */
 export default async function FollowUpsPage(props: PageProps<"/pending/follow-ups">) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const admin = isAdmin(user);
+  const staff = isStaff(user);
   const searchParams = await props.searchParams;
   const statusParam = Array.isArray(searchParams.status)
     ? searchParams.status[0]
@@ -54,7 +57,7 @@ export default async function FollowUpsPage(props: PageProps<"/pending/follow-up
     <>
       <PageHeader title={TITLES[status]} />
 
-      {admin && result.ok && <AdminFollowUpCards counts={result.model.counts} />}
+      {staff && result.ok && <AdminFollowUpCards counts={result.model.counts} />}
       <p className="text-muted-foreground mb-3 text-xs">Owned means unfinished tasks, including Missed; Missed means unfinished and overdue before today; Closed means completed. Missed history records days in the last 30 days, not currently overdue tasks.</p>
       {result.ok && <nav aria-label="Follow-up pages" className="my-3 flex flex-wrap items-center justify-between gap-3 text-sm">
         <p>{result.model.counts[status]} matching {result.model.counts[status] === 1 ? "task" : "tasks"} · page {result.page} of {result.pages}</p>
@@ -79,7 +82,7 @@ export default async function FollowUpsPage(props: PageProps<"/pending/follow-up
                   <table className="w-full text-sm">
                     <thead className="bg-secondary text-muted-foreground">
                       <tr>
-                        {admin && (
+                        {staff && (
                           <th scope="col" className="px-4 py-2.5 text-left font-medium">
                             Rep name
                           </th>
@@ -98,7 +101,7 @@ export default async function FollowUpsPage(props: PageProps<"/pending/follow-up
                     <tbody>
                       {items.map((item) => (
                         <tr key={item.id} className="border-border border-t">
-                          {admin && <td className="px-4 py-3">{item.repName}</td>}
+                          {staff && <td className="px-4 py-3">{item.repName}</td>}
                           <td className="px-4 py-3">{item.instituteName}</td>
                           <td className="px-4 py-3">{formatDate(item.dueDate)}</td>
                           <td className="px-4 py-3">{item.status}</td>
