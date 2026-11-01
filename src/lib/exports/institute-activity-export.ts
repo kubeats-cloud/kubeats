@@ -348,7 +348,7 @@ export async function buildInstituteActivityExport(
 
   const dataRows =
     query.view === "rep"
-      ? statusActivitySheetRows(result.model.statuses, result.model.visits)
+      ? repInstituteSheetRows(result.model.rows)
       : query.view === "presence"
         ? presenceSheetRows(result.model.rows)
         : instituteActivitySheetRows(

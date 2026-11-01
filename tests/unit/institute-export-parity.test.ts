@@ -132,7 +132,7 @@ describe('visit-level export shape and parity',() => {
     expect(result.ok).toBe(true);
     expect(exportMocks.model).toHaveBeenCalledWith(expect.objectContaining({allRows:true,page:undefined}));
   });
-  it('uses the identical visit-level grid for a rep export',async () => {
+  it('writes the rep export as one row per institute, not one per visit',async () => {
     exportMocks.model.mockResolvedValue({ok:true,model:{rows,statuses,visits,visitCount:2,
       range:{from:'2026-10-01',to:'2026-10-02'},rangeActive:true,
       sort:{key:'institute',dir:'asc'},totalInstitutes:1,reconciliationFailed:false,
@@ -141,7 +141,9 @@ describe('visit-level export shape and parity',() => {
     const result = await buildInstituteActivityExport({view:'rep',range:{from:'2026-10-01',to:'2026-10-02'}});
     expect(result.ok).toBe(true);
     const sheet = exportMocks.book.mock.calls[0][0] as {rows:unknown[][]};
-    expect(sheet.rows).toEqual(statusActivitySheetRows(statuses,visits));
+    expect(sheet.rows).toEqual(repInstituteSheetRows(rows));
+    // The model carries two visits for one institute; the file must not.
+    expect(sheet.rows).toHaveLength(rows.length+2);
   });
   it('preserves every filter in export URLs; page is not part of the file',() => {
     const href = instituteActivityExportHref({range:{from:'2026-10-01',to:'2026-10-23'},sortKey:'status:RSVP received',sortDir:'desc',search:'Synthetic',member:'rep-id',campus:'campus-id'});
