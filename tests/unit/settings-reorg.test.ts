@@ -139,9 +139,32 @@ describe("a Target Status write refreshes both screens that show it", () => {
   });
 });
 
-describe("Status Management (institute_statuses) is out of scope in this part", () => {
-  it("still folds its own details element, not the shared primitive", () => {
-    expect(statusesPanel).toContain("<details");
-    expect(statusesPanel).not.toContain("CollapsibleSection");
+describe("Status Management folds like Purposes and Locations", () => {
+  it("previews three statuses and folds the rest", () => {
+    expect(statusesPanel).toContain("const STATUSES_PREVIEW = 3");
+    expect(statusesPanel).toContain("statuses.slice(0, STATUSES_PREVIEW)");
+    expect(statusesPanel).toContain("statuses.slice(STATUSES_PREVIEW)");
+  });
+
+  it("uses the shared primitive for the list and for each row's dynamic fields", () => {
+    expect(statusesPanel).toContain(
+      'showLabel={`View all ${statuses.length} statuses`}',
+    );
+    expect(statusesPanel).toMatch(
+      /<CollapsibleSection[\s\S]*?defaultCollapsed[\s\S]*?showLabel=\{`Show dynamic fields \(\$\{statusFields\.length\}\)`\}/,
+    );
+    expect(statusesPanel).not.toContain("<details");
+  });
+
+  it("keeps every write reachable while folded", () => {
+    for (const marker of [
+      "actions.setActive(",
+      "actions.setCampus(",
+      "actions.addField(",
+      "actions.deleteField(",
+      "handleSubmit",
+    ]) {
+      expect(statusesPanel).toContain(marker);
+    }
   });
 });

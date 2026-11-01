@@ -120,8 +120,6 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
           </a>
         </Button>
       )}
-      <p className="text-muted-foreground mb-3 text-xs">Field Visit Report exports check-in records in range, including arrivals without a logged status. A blank Check-Out Time means still open or not recorded; no time is invented. Status-event counts below exclude logged visits with no recorded status and are not the field-visit row count.</p>
-
       {!result.ok ? (
         <ErrorState message={result.error} />
       ) : (
@@ -180,19 +178,6 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
               caption={`Activity by rep from ${start} to ${end}`}
             />
           </div>
-
-          {/* The first sentence described the six activity columns, which are
-              no longer on screen. The second is still what a reader needs.
-
-              The third is new and earns its place: the Export button is
-              directly above this, and the file it produces still carries the
-              six activity columns. An admin comparing the two would otherwise
-              have no way to know that is deliberate. */}
-          <p className="text-muted-foreground mt-3 text-xs">
-            Status columns are the vocabulary as it stands now, counted from
-            where each visit left the institute. The Excel export also includes
-            the six activity columns, which the Team and report screens show.
-          </p>
         </>
       )}
 
@@ -213,28 +198,11 @@ export default async function TeamReportPage(props: PageProps<"/team/report">) {
         </span>
       </SectionTitle>
 
-      <p className="text-muted-foreground mb-3 text-xs">
-        What each rep declared for themselves, one status per day
-        {gate.isAdmin
-          ? ", across the whole team."
-          : ", for the reps on your team."}{" "}
-        Recorded Total is the number of days that carry a status, not the number
-        of calendar days in the range.
-      </p>
-
       {!daily.ok ? (
         <ErrorState message={daily.error} />
       ) : (
         <>
           <DailyStatusReportTable report={daily.report} />
-
-          <p className="text-muted-foreground mt-2 text-xs">
-            Days with no entry are not recorded: they are not inferred from
-            check-ins, they appear in none of the three status counts, and they
-            are not in Recorded Total. A day that was recorded and later
-            changed keeps only its latest value — the table is not an edit
-            history.
-          </p>
 
           {daily.report.pages > 1 && (
             <nav

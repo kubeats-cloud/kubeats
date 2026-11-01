@@ -379,10 +379,6 @@ export default async function DashboardPage(props: PageProps<"/">) {
                 />
               )}
             </div>
-            <p className="text-muted-foreground mt-1 text-xs">
-              What each rep did over the period, open and closed by activity.
-              The individual statuses are in Columns.
-            </p>
 
             {repRangeError ? (
               <>

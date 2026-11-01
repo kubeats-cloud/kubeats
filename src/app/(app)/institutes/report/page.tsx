@@ -150,18 +150,6 @@ export default async function InstituteStatusReportPage(
               caption="Institutes by current status, per owning rep"
             />
           </div>
-
-          <p className="text-muted-foreground mt-3 text-xs">
-            One row per rep, counted by who <strong>registered</strong> each
-            institute — after migration 0028 that is the only rep who can see it
-            or act on it. Every non-zero count opens those institutes; the
-            Total column does not, because it spans several statuses at once.
-            &ldquo;Unassigned&rdquo; is an institute whose owner has been
-            removed and stays at the foot of the table whichever column you sort
-            by; &ldquo;No status yet&rdquo; is one nobody has reached. The
-            columns are the status vocabulary as it stands now, and a retired
-            status still appears while anything sits at it.
-          </p>
         </>
       )}
     </>

@@ -61,11 +61,6 @@ export default async function HierarchyPage() {
       </div>
 
       <SectionTitle>Teams</SectionTitle>
-      <p className="text-muted-foreground mb-3 text-xs">
-        Who supervises whom. <strong>This decides what people can see</strong> —
-        a team lead reads their own reps&rsquo; institutes, visits, follow-ups and
-        targets, and nobody else&rsquo;s.
-      </p>
       <TeamStructure members={members} canAssign={gate.isAdmin} />
     </>
   );

@@ -88,9 +88,9 @@ describe("the Activity page: fetches all four reports, defaults to Rep Activity"
     expect(activityPage).toContain("DEFAULT_ACTIVITY_TAB");
   });
 
-  it("gates admin-only, distinct from the four reports' own staff gate", () => {
-    expect(activityPage).toContain("const gate = await requireAdmin();");
-    expect(activityPage).not.toContain("await requireStaff()");
+  it("gates on staff, so a team lead gets the same four reports scoped by RLS", () => {
+    expect(activityPage).toContain("const gate = await requireStaff();");
+    expect(activityPage).not.toMatch(/requireAdmin/);
   });
 
   it("reuses the same model functions the four standalone screens use — no new counting", () => {

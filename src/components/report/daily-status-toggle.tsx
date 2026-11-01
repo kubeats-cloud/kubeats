@@ -100,10 +100,6 @@ export function DailyStatusToggle({
         </p>
       )}
 
-      <p className="text-muted-foreground mt-2 text-xs">
-        One status per day, for today only. Choosing again replaces today&apos;s
-        value — only the latest one is kept, not a history of changes.
-      </p>
     </section>
   );
 }

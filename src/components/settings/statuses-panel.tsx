@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
+import { CollapsibleSection } from "@/components/activity/collapsible-section";
 import {
   addCallStatus,
   addStatus,
@@ -53,6 +54,9 @@ import { CHECK_FIELDS, FormNotice } from "@/components/form-notice";
  * campus scoping existed.
  */
 const ALL_CAMPUSES = "__all__";
+
+/** How many rows stay open before the list folds, as on Purposes and Locations. */
+const STATUSES_PREVIEW = 3;
 
 /**
  * A status vocabulary, which an admin maintains from here.
@@ -239,6 +243,206 @@ export function StatusesPanel({
     setCampusId(ALL_CAMPUSES);
   }
 
+  const renderRow = (row: StatusAdminRow) => (
+    <li
+      key={row.status}
+      className="border-border space-y-2 rounded-md border px-3 py-2"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm">
+          {row.status}
+        </span>
+        <Badge variant={row.tone as StatusTone}>
+          {row.category === "open" ? "Open" : "Closed"}
+        </Badge>
+        {/* Which campus owns this status — "a column or label" so an
+            admin can tell at a glance, independent of the picker
+            below that changes it. Neutral tone: this is not an
+            outcome, just a scope. */}
+        <Badge variant="neutral">{campusLabelFor(row.campusId)}</Badge>
+        {!row.isActive && <Badge variant="neutral">Retired</Badge>}
+      </div>
+
+      <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {row.asksExpectedDate && <span>asks the date</span>}
+        {row.asksSessionDetail && <span>asks the session detail</span>}
+        {row.asksHeadCount && <span>asks the student count</span>}
+        {/* What decides whether this status can ever be renamed or
+            removed. Shown rather than left for an admin to discover
+            by being refused. */}
+        <span>
+          {row.usedBy === 0
+            ? "not used yet"
+            : `on ${row.usedBy} record${row.usedBy === 1 ? "" : "s"}`}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-9"
+          disabled={retiring}
+          onClick={() =>
+            startRetiring(async () => {
+              setRetireState(
+                await actions.setActive(row.status, !row.isActive),
+              );
+            })
+          }
+        >
+          {row.isActive ? (
+            "Retire"
+          ) : (
+            <>
+              <RotateCcwIcon className="size-4" aria-hidden />
+              Restore
+            </>
+          )}
+        </Button>
+
+        {/* Re-scope this one status — the edit half of Part 2. Changing
+            this does not touch category, tone or the asks_* flags: the
+            action updates campus_id alone. */}
+        <div className="flex items-center gap-1.5">
+          <Label htmlFor={`campus-${scope}-${row.status}`} className="text-muted-foreground text-xs">
+            Campus
+          </Label>
+          <Select
+            value={row.campusId ?? ALL_CAMPUSES}
+            disabled={campusEditing}
+            onValueChange={(value) => {
+              const nextCampusId = value === ALL_CAMPUSES ? null : value;
+              startCampusEditing(async () => {
+                const result = await actions.setCampus(row.status, nextCampusId);
+                setCampusEditState({ ...result, status: row.status });
+              });
+            }}
+          >
+            <SelectTrigger
+              id={`campus-${scope}-${row.status}`}
+              className="h-8 w-auto min-w-[9rem] text-xs"
+              aria-label={`Campus for ${row.status}`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_CAMPUSES}>All campuses</SelectItem>
+              {campuses.map((campus) => (
+                <SelectItem key={campus.id} value={campus.id}>
+                  {campusLabel(campus)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {campusEditState?.status === row.status && campusEditState.error && (
+        <FormNotice message={campusEditState.error} />
+      )}
+      {campusEditState?.status === row.status &&
+        campusEditState.ok &&
+        campusEditState.message && (
+          <p
+            role="status"
+            className="bg-success-subtle text-success-subtle-foreground rounded-md px-3 py-2 text-xs"
+          >
+            {campusEditState.message}
+          </p>
+        )}
+
+      {/* Status-specific dynamic fields, folded by default: the configured
+          list plus the add form is the biggest scroll source in this panel. */}
+      {(() => {
+        const statusFields = fields.filter((f) => f.status === row.status);
+        return (
+          <div className="mt-3 border-t pt-2">
+            <CollapsibleSection
+              label="dynamic fields"
+              defaultCollapsed
+              showLabel={`Show dynamic fields (${statusFields.length})`}
+              hideLabel="Hide dynamic fields"
+            >
+              <div className="space-y-2 text-xs">
+                {statusFields.length > 0 ? (
+                  <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
+                    {statusFields.map((field) => (
+                      <div
+                        key={field.id}
+                        className="flex items-center justify-between gap-2 border-b border-border/50 pb-1 last:border-0 last:pb-0"
+                      >
+                        <div className="space-x-1.5">
+                          <span className="font-medium text-foreground">{field.fieldName}</span>
+                          <span className="text-muted-foreground">
+                            (Dropdown: {field.options.join(", ")})
+                          </span>
+                          {field.isRequired && (
+                            <Badge variant="danger" className="text-[10px] px-1 py-0">
+                              Required
+                            </Badge>
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-danger hover:text-danger text-xs"
+                          onClick={() => handleDeleteField(field.id)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground italic">No status-specific fields configured yet.</p>
+                )}
+
+                {row.isActive && (
+                  <form
+                    onSubmit={(e) => handleAddField(e, row.status)}
+                    className="mt-2 space-y-2.5 rounded-md border p-2.5 bg-background"
+                  >
+                    <div className="space-y-1">
+                      <Label className="text-xs">Field Name</Label>
+                      <Input
+                        name="field_name"
+                        placeholder="e.g. Outcome"
+                        className="h-8 text-xs"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">
+                        Dropdown Options (comma or newline separated)
+                      </Label>
+                      <Input
+                        name="options"
+                        placeholder="e.g. Positive, Follow-up Needed, Rejected"
+                        className="h-8 text-xs"
+                        required
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Checkbox id={`req-${scope}-${row.status}`} name="is_required" />
+                      <Label htmlFor={`req-${scope}-${row.status}`} className="text-xs cursor-pointer">
+                        Mark as required field
+                      </Label>
+                    </div>
+                    <Button type="submit" size="sm" className="h-7 text-xs">
+                      Save dynamic field
+                    </Button>
+                  </form>
+                )}
+              </div>
+            </CollapsibleSection>
+          </div>
+        );
+      })()}
+    </li>
+  );
+
   return (
     <Card>
       <CardHeader>
@@ -248,206 +452,23 @@ export function StatusesPanel({
         {statuses.length === 0 ? (
           <EmptyState title="No statuses yet" description={actions.emptyHint} />
         ) : (
-          <ul className="space-y-2">
-            {statuses.map((row) => (
-              <li
-                key={row.status}
-                className="border-border space-y-2 rounded-md border px-3 py-2"
+          <div className="space-y-2">
+            <ul className="space-y-2">
+              {statuses.slice(0, STATUSES_PREVIEW).map(renderRow)}
+            </ul>
+            {statuses.length > STATUSES_PREVIEW && (
+              <CollapsibleSection
+                label="statuses"
+                defaultCollapsed
+                showLabel={`View all ${statuses.length} statuses`}
+                hideLabel="Show less"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {row.status}
-                  </span>
-                  <Badge variant={row.tone as StatusTone}>
-                    {row.category === "open" ? "Open" : "Closed"}
-                  </Badge>
-                  {/* Which campus owns this status — "a column or label" so an
-                      admin can tell at a glance, independent of the picker
-                      below that changes it. Neutral tone: this is not an
-                      outcome, just a scope. */}
-                  <Badge variant="neutral">{campusLabelFor(row.campusId)}</Badge>
-                  {!row.isActive && <Badge variant="neutral">Retired</Badge>}
-                </div>
-
-                <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                  {row.asksExpectedDate && <span>asks the date</span>}
-                  {row.asksSessionDetail && <span>asks the session detail</span>}
-                  {row.asksHeadCount && <span>asks the student count</span>}
-                  {/* What decides whether this status can ever be renamed or
-                      removed. Shown rather than left for an admin to discover
-                      by being refused. */}
-                  <span>
-                    {row.usedBy === 0
-                      ? "not used yet"
-                      : `on ${row.usedBy} record${row.usedBy === 1 ? "" : "s"}`}
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-9"
-                    disabled={retiring}
-                    onClick={() =>
-                      startRetiring(async () => {
-                        setRetireState(
-                          await actions.setActive(row.status, !row.isActive),
-                        );
-                      })
-                    }
-                  >
-                    {row.isActive ? (
-                      "Retire"
-                    ) : (
-                      <>
-                        <RotateCcwIcon className="size-4" aria-hidden />
-                        Restore
-                      </>
-                    )}
-                  </Button>
-
-                  {/* Re-scope this one status — the edit half of Part 2. Changing
-                      this does not touch category, tone or the asks_* flags: the
-                      action updates campus_id alone. */}
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor={`campus-${scope}-${row.status}`} className="text-muted-foreground text-xs">
-                      Campus
-                    </Label>
-                    <Select
-                      value={row.campusId ?? ALL_CAMPUSES}
-                      disabled={campusEditing}
-                      onValueChange={(value) => {
-                        const nextCampusId = value === ALL_CAMPUSES ? null : value;
-                        startCampusEditing(async () => {
-                          const result = await actions.setCampus(row.status, nextCampusId);
-                          setCampusEditState({ ...result, status: row.status });
-                        });
-                      }}
-                    >
-                      <SelectTrigger
-                        id={`campus-${scope}-${row.status}`}
-                        className="h-8 w-auto min-w-[9rem] text-xs"
-                        aria-label={`Campus for ${row.status}`}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={ALL_CAMPUSES}>All campuses</SelectItem>
-                        {campuses.map((campus) => (
-                          <SelectItem key={campus.id} value={campus.id}>
-                            {campusLabel(campus)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {campusEditState?.status === row.status && campusEditState.error && (
-                  <FormNotice message={campusEditState.error} />
-                )}
-                {campusEditState?.status === row.status &&
-                  campusEditState.ok &&
-                  campusEditState.message && (
-                    <p
-                      role="status"
-                      className="bg-success-subtle text-success-subtle-foreground rounded-md px-3 py-2 text-xs"
-                    >
-                      {campusEditState.message}
-                    </p>
-                  )}
-
-                {/* Status-specific dynamic fields */}
-                {(() => {
-                  const statusFields = fields.filter((f) => f.status === row.status);
-                  return (
-                    <div className="mt-3 space-y-2 border-t pt-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-foreground">Status-specific dynamic fields</span>
-                        <span className="text-muted-foreground">{statusFields.length} configured</span>
-                      </div>
-                      {statusFields.length > 0 ? (
-                        <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
-                          {statusFields.map((field) => (
-                            <div
-                              key={field.id}
-                              className="flex items-center justify-between gap-2 border-b border-border/50 pb-1 last:border-0 last:pb-0"
-                            >
-                              <div className="space-x-1.5">
-                                <span className="font-medium text-foreground">{field.fieldName}</span>
-                                <span className="text-muted-foreground">
-                                  (Dropdown: {field.options.join(", ")})
-                                </span>
-                                {field.isRequired && (
-                                  <Badge variant="danger" className="text-[10px] px-1 py-0">
-                                    Required
-                                  </Badge>
-                                )}
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-1.5 text-danger hover:text-danger text-xs"
-                                onClick={() => handleDeleteField(field.id)}
-                              >
-                                Remove
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-muted-foreground italic">No status-specific fields configured yet.</p>
-                      )}
-
-                      {row.isActive && (
-                        <details className="pt-1">
-                          <summary className="cursor-pointer font-medium text-primary hover:underline">
-                            + Add dynamic dropdown field
-                          </summary>
-                          <form
-                            onSubmit={(e) => handleAddField(e, row.status)}
-                            className="mt-2 space-y-2.5 rounded-md border p-2.5 bg-background"
-                          >
-                            <div className="space-y-1">
-                              <Label className="text-xs">Field Name</Label>
-                              <Input
-                                name="field_name"
-                                placeholder="e.g. Outcome"
-                                className="h-8 text-xs"
-                                required
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs">
-                                Dropdown Options (comma or newline separated)
-                              </Label>
-                              <Input
-                                name="options"
-                                placeholder="e.g. Positive, Follow-up Needed, Rejected"
-                                className="h-8 text-xs"
-                                required
-                              />
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Checkbox id={`req-${scope}-${row.status}`} name="is_required" />
-                              <Label htmlFor={`req-${scope}-${row.status}`} className="text-xs cursor-pointer">
-                                Mark as required field
-                              </Label>
-                            </div>
-                            <Button type="submit" size="sm" className="h-7 text-xs">
-                              Save dynamic field
-                            </Button>
-                          </form>
-                        </details>
-                      )}
-                    </div>
-                  );
-                })()}
-              </li>
-            ))}
-          </ul>
+                <ul className="space-y-2">
+                  {statuses.slice(STATUSES_PREVIEW).map(renderRow)}
+                </ul>
+              </CollapsibleSection>
+            )}
+          </div>
         )}
 
         {fieldMessage?.error && <FormNotice message={fieldMessage.error} />}
@@ -577,10 +598,6 @@ export function StatusesPanel({
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-muted-foreground text-xs">
-              A campus-specific status is visible only to that campus&rsquo;s
-              reps (and to an admin or a team lead who supervises one).
-            </p>
             {fieldError("campus_id")}
           </div>
 
@@ -588,10 +605,6 @@ export function StatusesPanel({
             <legend className="text-[13px] font-medium">
               What else should the report ask for?
             </legend>
-            <p className="text-muted-foreground text-xs">
-              A follow-up date is not here: an open status always requires one,
-              and the database enforces it.
-            </p>
             <input
               type="hidden"
               name="asks_expected_date"

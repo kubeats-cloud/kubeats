@@ -104,12 +104,13 @@ describe("navItemsFor", () => {
     expect(navItemsFor("team_lead").map((item) => item.href)).not.toContain("/slabs");
     // Shared by every role. Rep-only would bounce the admin off their queue.
     expect(isRepOnlyPath("/slabs")).toBe(false);
-    // Eight, not seven: the Activity tab (consolidated Rep/Call/Pipeline/
-    // Institute-Wise reports) is an explicit, admin-only addition on top of
-    // the existing seven.
+    // Eight for an admin: the Activity tab (consolidated Rep/Call/Pipeline/
+    // Institute-Wise reports) sits on top of the existing seven, and a team
+    // lead gets the same tab scoped by RLS.
     expect(ADMIN_NAV.length).toBeLessThanOrEqual(8);
     expect(ADMIN_NAV.map(item => item.href)).toContain('/targets');
     expect(ADMIN_NAV.map(item => item.href)).toContain('/activity');
+    expect(TEAM_LEAD_NAV.map(item => item.href)).toContain('/activity');
     expect(TEAM_LEAD_NAV.length).toBeLessThanOrEqual(6);
   });
 });
@@ -132,8 +133,8 @@ describe("the admin / staff path split", () => {
     }
   });
 
-  it("opens the three row-shaped workspaces to staff", () => {
-    for (const path of ["/review", "/assign", "/team"]) {
+  it("opens the four row-shaped workspaces to staff", () => {
+    for (const path of ["/review", "/assign", "/team", "/activity"]) {
       expect(isStaffOnlyPath(path), path).toBe(true);
       expect(isAdminOnlyPath(path), path).toBe(false);
     }

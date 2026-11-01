@@ -224,13 +224,6 @@ export function CheckInButton({
               value={reason}
               onChange={(event) => setReason(event.target.value)}
             />
-            {/* Said plainly, and said once. The fact is unchanged: this is
-                kept with the visit. The old wording ("your admin can see it")
-                put a watcher in the sentence, which is not what a rep typing
-                "no signal indoors" needs to read. */}
-            <p className="text-muted-foreground text-xs">
-              Saved with the visit, so nobody has to wonder why.
-            </p>
           </div>
 
           <Button

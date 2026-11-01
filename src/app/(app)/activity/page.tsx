@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/page-header";
 import { ErrorState } from "@/components/states";
-import { requireAdmin } from "@/lib/admin";
+import { requireStaff } from "@/lib/admin";
 import { listReps } from "@/lib/closing-report";
 import { listCallStatusCatalogue } from "@/lib/statuses";
 import { exportRangeSchema } from "@/lib/validation/export";
@@ -60,14 +60,14 @@ const first = (value: string | string[] | undefined) =>
  *   Institute-Wise        from / to / sort / dir / page / member / campus / q
  *                         (bare, unchanged — see institute-activity-box.tsx)
  *
- * Admin-only: this consolidated tab is a new admin-only surface, which is
- * why it gates with `requireAdmin()` rather than `requireStaff()` and is
- * added only to `ADMIN_NAV`. The reports that keep a standalone screen
- * (`/team/report`, `/institutes/report`, `/institutes?view=activity`) keep
- * their existing staff gate unchanged.
+ * Staff-reachable: an admin sees the whole company and a team lead sees their
+ * own team, because every model below reads under RLS. The gate is
+ * `requireStaff()`; it decides who may be on this screen at all, never which
+ * rows they get. `/activity` is in `STAFF_PATHS`, so a rep is turned away by
+ * the proxy before this page runs.
  */
 export default async function ActivityPage(props: PageProps<"/activity">) {
-  const gate = await requireAdmin();
+  const gate = await requireStaff();
   if (!gate.ok) {
     return (
       <>

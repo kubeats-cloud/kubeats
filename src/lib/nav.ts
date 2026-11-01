@@ -85,9 +85,9 @@ export const ADMIN_NAV: NavItem[] = [
   { href: "/institutes", label: "Institutes", icon: "institutes" },
   { href: "/settings", label: "Settings", icon: "settings" },
   // The consolidated Activity tab: Rep Activity, Call Activity, Pipeline by
-  // Rep and Institute-Wise Activity as switchable cards, admin-only (the
-  // four reports stay reachable from their own screens for a team lead,
-  // unchanged — see src/app/(app)/activity/page.tsx).
+  // Rep and Institute-Wise Activity as switchable cards. Reachable by an admin
+  // or a team lead; every query below it is narrowed by RLS (see
+  // src/app/(app)/activity/page.tsx).
   { href: "/activity", label: "Activity", icon: "report" },
 ];
 
@@ -96,7 +96,7 @@ export const ADMIN_NAV: NavItem[] = [
  * admin's approval queue and deciding a set is admin-only (FO037); a team lead
  * still reaches /slabs by URL and gets the rep's per-institute screen.
  *
- * FOUR, AND THE MISSING SETTINGS IS THE WHOLE DECISION. Settings holds the
+ * THE MISSING SETTINGS IS THE WHOLE DECISION. Settings holds the
  * status vocabulary, the purposes, the location tree and sign-in security —
  * all of which the WHOLE COMPANY shares. A status one team lead retires
  * disappears for every rep on every campus; a purpose they add becomes a metric
@@ -107,9 +107,9 @@ export const ADMIN_NAV: NavItem[] = [
  * team leads share.
  *
  * Everything a team lead DOES get is scoped by RLS rather than by this list:
- * Review, Assign (by URL), Team, Institutes and the Overview all return their own reps'
- * rows once 0042 lands, and return exactly what an admin sees until then,
- * because nobody is a team lead yet.
+ * Review, Assign (by URL), Team, Institutes, Activity and the Overview all
+ * return their own reps' rows because 0042's policies narrow them through
+ * `supervises()`.
  *
  * Adding reps to their own team hangs off /team, NOT off Settings — which is
  * what keeps the global panels behind one unchanged gate instead of behind a
@@ -120,6 +120,8 @@ export const TEAM_LEAD_NAV: NavItem[] = [
   { href: "/review", label: "Review", icon: "review" },
   { href: "/team", label: "Team", icon: "team" },
   { href: "/institutes", label: "Institutes", icon: "institutes" },
+  // The same four reports an admin gets, narrowed to this lead's team by RLS.
+  { href: "/activity", label: "Activity", icon: "report" },
 ];
 
 /**
@@ -210,7 +212,7 @@ export const REP_ONLY_PATHS = ["/log"] as const;
  * Nobody is a team lead yet, so this list behaves exactly as it did while it
  * was part of ADMIN_ONLY_PATHS: a rep is turned away, an admin is let through.
  */
-export const STAFF_PATHS = ["/review", "/assign", "/team"] as const;
+export const STAFF_PATHS = ["/review", "/assign", "/team", "/activity"] as const;
 
 /**
  * The mirror: routes only an ADMIN may reach — not a rep, and not a team lead.

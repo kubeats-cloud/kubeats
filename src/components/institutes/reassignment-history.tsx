@@ -21,7 +21,6 @@ export async function ReassignmentHistory({instituteId,page}: {instituteId:strin
   const href = (n:number) => `/institutes/${instituteId}?historyPage=${n}`;
   return <section className="mt-6 space-y-3" aria-labelledby="reassign-history-title">
     <h2 id="reassign-history-title" className="font-semibold">Reassign history</h2>
-    <p className="text-muted-foreground text-xs">Future ownership changes only; earlier events are not invented. Existing logged visits retain the original rep&apos;s credit.</p>
     <p className="text-sm">{total} changes · page {window.page} of {window.pages}</p>
     {rows.length ? <ul className="divide-y rounded-lg border">{rows.map(row => <li key={row.id} className="p-3 text-sm">
       {rep(row.from_rep)} → {rep(row.to_rep)}<p className="text-muted-foreground text-xs">By {rep(row.changed_by)} · {formatDateTime(row.changed_at)}</p>

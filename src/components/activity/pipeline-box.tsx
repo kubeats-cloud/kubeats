@@ -123,11 +123,6 @@ export function PipelineBox({
               caption="Institutes by current status, per owning rep"
             />
           </CollapsibleSection>
-
-          <p className="text-muted-foreground mt-3 text-xs">
-            One row per rep, counted by who registered each institute. Every
-            non-zero count opens those institutes.
-          </p>
         </>
       )}
     </div>
