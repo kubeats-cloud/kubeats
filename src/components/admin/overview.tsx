@@ -259,9 +259,6 @@ export function AdminOverview({
                   label={`Open the ${data.openLoops} loop${data.openLoops === 1 ? "" : "s"} the team has not closed`}
                 />
               </p>
-              <p className="text-muted-foreground mt-1 text-xs">
-                Sessions and campus visits the team has set but not yet closed.
-              </p>
             </Card>
           </div>
 
