@@ -73,19 +73,6 @@ export function OverviewPipeline({
         <Figure label="Open" value={totals.open} />
         <Figure label="Closed" value={totals.closed} />
       </dl>
-      <p className="text-muted-foreground mt-2 text-xs">
-        {totals.noStatus === null ? (
-          <>
-            Overall = Open + Closed. &ldquo;No status yet&rdquo; is not
-            counted while a range is set: those institutes have never had a
-            status, so no date range can include them.
-          </>
-        ) : (
-          <>
-            Overall = Open + Closed + No status yet ({totals.noStatus}).
-          </>
-        )}
-      </p>
 
       <div className="mt-3">
         <CustomisableGrid

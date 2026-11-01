@@ -260,15 +260,6 @@ export default async function MissedPage(props: PageProps<"/missed">) {
         </Card>
       )}
 
-      <p className="text-muted-foreground mt-6 text-xs">
-        A day is counted when the 7:00 PM check found follow-ups still open.
-        Closing them afterwards does not remove the day — the record is of what
-        happened, not of what is outstanding now. What is still owed is on{" "}
-        <Link href="/pending" className="underline underline-offset-4">
-          Pending
-        </Link>
-        .
-      </p>
     </>
   );
 }

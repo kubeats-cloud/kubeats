@@ -218,9 +218,6 @@ export default async function PendingPage(props: PageProps<"/pending">) {
             */}
             <MeetingPrompts tasks={dueTasks} entries={entries} purposes={purposes} />
           </div>
-          <p className="text-muted-foreground mt-2 text-xs">
-            The same list your dashboard shows — one row, two places to see it.
-          </p>
         </div>
       )}
 

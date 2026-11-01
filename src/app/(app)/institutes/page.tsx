@@ -285,28 +285,6 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
                 caption="One row per institute, one column per active status"
                 extraParams={activityExtraParams}
               />
-              <p className="text-muted-foreground mt-2 text-xs">
-                Counts are logged visit rows in the chosen range. Status columns
-                come from the status table — one per active status, in the
-                app&apos;s order — and count the status recorded on the visit; a
-                status with no visits still shows a 0 column. Follow-ups owned
-                and pending come from <code>follow_up_tasks</code> (owned: not
-                done; pending: not done and due on or before today). Meetings
-                completed is <code>daily_plans.meetings_actual = 1</code>. Total
-                visits counts every logged visit row. The totals row covers every
-                matching institute, not only this page. In the Excel, one row is
-                one visit; Meeting purpose is{' '}
-                <code>daily_plans.purpose</code>, Next action is{' '}
-                <code>visits.next_action</code>, Duration is check-out minus
-                check-in and is blank unless both times are recorded; Follow-up
-                Date and Time come from{' '}
-                <code>visits.follow_up_date</code> and{' '}
-                <code>visits.follow_up_time</code>, Follow-up Created is whether
-                a <code>follow_up_tasks</code> row names the visit in{' '}
-                <code>from_visit_id</code>, times are IST, missing times are
-                blank, and the Total row sums the status and Follow-up Created
-                columns.
-              </p>
             </>
           )}
         </>
