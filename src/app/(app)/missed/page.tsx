@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CountLink } from "@/components/ui/count-link";
+import { TableFrame } from "@/components/ui/table-frame";
 import { EmptyState, ErrorState } from "@/components/states";
 import { getCurrentUser, isAdmin, isStaff } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -182,9 +183,9 @@ export default async function MissedPage(props: PageProps<"/missed">) {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <TableFrame tone="secondary" framed={false}>
               <table className="w-full text-sm">
-                <thead className="bg-secondary text-muted-foreground">
+                <thead className="text-muted-foreground">
                   <tr>
                     <th scope="col" className="px-4 py-2.5 text-left font-medium">Rep</th>
                     <th scope="col" className="px-4 py-2.5 text-right font-medium">Days missed</th>
@@ -222,7 +223,7 @@ export default async function MissedPage(props: PageProps<"/missed">) {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableFrame>
           </CardContent>
         </Card>
       ) : (

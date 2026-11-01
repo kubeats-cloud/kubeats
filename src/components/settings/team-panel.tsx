@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TableFrame } from "@/components/ui/table-frame";
 import {
   Select,
   SelectContent,
@@ -355,11 +356,11 @@ export function TeamPanel({
           ))}
         </ul>
 
-        <div className="border-border hidden overflow-hidden rounded-md border md:block">
+        <TableFrame tone="secondary-soft" className="hidden rounded-md md:block">
           <table className="w-full border-collapse text-sm">
             <caption className="sr-only">Everyone with an account</caption>
             <thead>
-              <tr className="border-border bg-secondary/50 text-muted-foreground border-b text-left">
+              <tr className="border-border text-muted-foreground border-b text-left">
                 <th scope="col" className="px-4 py-2 text-xs font-medium">
                   Name
                 </th>
@@ -405,7 +406,7 @@ export function TeamPanel({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableFrame>
 
         {shown.canToggle && (
           <PreviewToggle

@@ -7,6 +7,7 @@ import { Building2Icon, ChevronRightIcon, SearchIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TableFrame } from "@/components/ui/table-frame";
 import {
   Select,
   SelectContent,
@@ -567,13 +568,13 @@ export function InstitutesBrowser({
 
           {/* Desktop: the registry as a register — scannable down a column. */}
           <Card className="hidden gap-0 overflow-hidden p-0 shadow-xs md:block">
-            <div className="overflow-x-auto">
+            <TableFrame tone="secondary-soft" framed={false}>
               <table className="w-full border-collapse text-sm">
                 <caption className="sr-only">
                   Registered institutes matching the current filters
                 </caption>
                 <thead>
-                  <tr className="border-border bg-secondary/40 text-muted-foreground border-b text-left">
+                  <tr className="border-border text-muted-foreground border-b text-left">
                     <th scope="col" className="px-5 py-2.5 text-xs font-medium">
                       Institute
                     </th>
@@ -687,7 +688,7 @@ export function InstitutesBrowser({
                   })}
                 </tbody>
               </table>
-            </div>
+            </TableFrame>
           </Card>
         </>
       )}

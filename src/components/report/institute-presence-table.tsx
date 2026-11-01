@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TableFrame } from "@/components/ui/table-frame";
 import { formatArea } from "@/lib/location-display";
 import { formatDateTime } from "@/lib/dates";
 import {
@@ -40,7 +41,7 @@ function DateTime({ at }: { at: string | null }) {
 }
 
 const HEAD_CLASS =
-  "bg-muted/60 text-muted-foreground sticky top-0 px-3 py-2 text-right text-xs font-medium whitespace-nowrap";
+  "text-muted-foreground px-3 py-2 text-right text-xs font-medium whitespace-nowrap";
 
 export function InstitutePresenceTable({
   rows,
@@ -50,7 +51,7 @@ export function InstitutePresenceTable({
   totals: InstituteActivityTotals;
 }) {
   return (
-    <div className="border-border overflow-x-auto rounded-lg border">
+    <TableFrame tone="muted" stickyFirstColumn>
       <table className="w-max min-w-full border-collapse text-sm">
         <caption className="sr-only">
           Institutes reached this period, with the latest check-in and
@@ -65,13 +66,13 @@ export function InstitutePresenceTable({
             */}
             <th
               scope="col"
-              className="bg-muted/60 text-muted-foreground sticky top-0 left-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+              className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
             >
               Institute Name
             </th>
             <th className={HEAD_CLASS}>Check-In Date and Time</th>
             <th className={HEAD_CLASS}>Check-Out Date and Time</th>
-            <th className="bg-muted/60 text-muted-foreground sticky top-0 px-3 py-2 text-left text-xs font-medium whitespace-nowrap">
+            <th className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap">
               Location
             </th>
             <th className={HEAD_CLASS}>Number of Open Status activities</th>
@@ -152,6 +153,6 @@ export function InstitutePresenceTable({
           </tfoot>
         )}
       </table>
-    </div>
+    </TableFrame>
   );
 }

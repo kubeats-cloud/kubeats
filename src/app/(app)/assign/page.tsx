@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CalendarClockIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { TableFrame } from "@/components/ui/table-frame";
 import { PageHeader } from "@/components/page-header";
 import { SectionTitle } from "@/components/section-title";
 import { EmptyState, ErrorState } from "@/components/states";
@@ -74,13 +75,13 @@ export default async function AssignPage() {
             />
           ) : (
             <Card className="gap-0 overflow-hidden p-0 shadow-xs">
-              <div className="overflow-x-auto">
+              <TableFrame tone="secondary-soft" framed={false}>
                 <table className="w-full border-collapse text-sm">
                   <caption className="sr-only">
                     Visits assigned to reps, from today onwards
                   </caption>
                   <thead>
-                    <tr className="border-border bg-secondary/40 text-muted-foreground border-b text-left">
+                    <tr className="border-border text-muted-foreground border-b text-left">
                       <th scope="col" className="px-5 py-2.5 text-xs font-medium">
                         Date
                       </th>
@@ -135,7 +136,7 @@ export default async function AssignPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableFrame>
             </Card>
           )}
         </div>

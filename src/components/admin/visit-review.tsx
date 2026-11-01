@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TableFrame } from "@/components/ui/table-frame";
 import {
   Select,
   SelectContent,
@@ -563,7 +564,7 @@ export function VisitReview({
 
           {/* Desktop: the register --------------------------------------- */}
           <Card className="hidden gap-0 overflow-hidden p-0 shadow-xs md:block">
-            <div className="overflow-x-auto">
+            <TableFrame tone="secondary-soft" framed={false}>
               <table className="w-full border-collapse text-sm">
                 <caption className="sr-only">
                   Every report the team has submitted, newest first. Status is
@@ -572,7 +573,7 @@ export function VisitReview({
                   across a school&rsquo;s visits.
                 </caption>
                 <thead>
-                  <tr className="border-border bg-secondary/40 text-muted-foreground border-b text-left">
+                  <tr className="border-border text-muted-foreground border-b text-left">
                     <Th className="w-20">Photo</Th>
                     {view.shows("date") && <Th>Date</Th>}
                     {view.shows("rep") && <Th>Rep</Th>}
@@ -775,7 +776,7 @@ export function VisitReview({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </TableFrame>
           </Card>
         </>
       )}

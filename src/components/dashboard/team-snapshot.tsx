@@ -4,6 +4,7 @@ import { ChevronRightIcon, UsersIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { TableFrame } from "@/components/ui/table-frame";
 import { EmptyState } from "@/components/states";
 import {
   TONE_BAR,
@@ -191,7 +192,7 @@ export function TeamSnapshot({
 
       {/* Desktop: a table, because a whole team at once is the point. */}
       <Card className="hidden p-0 md:block">
-        <div className="overflow-x-auto">
+        <TableFrame tone="card" framed={false}>
           <table className="w-full border-collapse text-sm">
             <caption className="sr-only">
               Each team member&rsquo;s progress against their commitment this week
@@ -283,7 +284,7 @@ export function TeamSnapshot({
               ))}
             </tbody>
           </table>
-        </div>
+        </TableFrame>
       </Card>
     </>
   );

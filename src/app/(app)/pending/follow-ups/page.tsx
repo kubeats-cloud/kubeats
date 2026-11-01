@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { auditHref } from '@/lib/audit-pagination';
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
+import { TableFrame } from "@/components/ui/table-frame";
 import { EmptyState, ErrorState } from "@/components/states";
 import { AdminFollowUpCards } from "@/components/visits/follow-up-cards";
 import { getCurrentUser, isStaff } from "@/lib/auth";
@@ -78,9 +79,9 @@ export default async function FollowUpsPage(props: PageProps<"/pending/follow-up
           ) : (
             <Card>
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
+                <TableFrame tone="secondary" framed={false}>
                   <table className="w-full text-sm">
-                    <thead className="bg-secondary text-muted-foreground">
+                    <thead className="text-muted-foreground">
                       <tr>
                         {staff && (
                           <th scope="col" className="px-4 py-2.5 text-left font-medium">
@@ -109,7 +110,7 @@ export default async function FollowUpsPage(props: PageProps<"/pending/follow-up
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </TableFrame>
               </CardContent>
             </Card>
           );

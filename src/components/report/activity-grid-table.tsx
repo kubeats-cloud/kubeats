@@ -6,6 +6,7 @@ import {
   type GridInput,
 } from "@/lib/exports/activity-grid";
 import { COUNT_LINK_CLASS, COUNT_ZERO_CLASS } from "@/components/ui/count-link";
+import { TableFrame } from "@/components/ui/table-frame";
 import { cn } from "@/lib/utils";
 
 /** Which column a grid is sorted by, and which way. */
@@ -155,16 +156,16 @@ export function ActivityGridTable({
   }
 
   return (
-    <div
-      className={cn(
-        "border-border bg-card max-w-full overflow-x-auto rounded-lg border",
-        compact && "max-h-[22rem] overflow-y-auto",
-      )}
+    <TableFrame
+      tone="secondary"
+      stickyFirstColumn
+      maxHeight={compact ? "22rem" : undefined}
+      className="bg-card"
     >
       <table className="w-full border-collapse text-left">
         <caption className="sr-only">{caption}</caption>
         <thead>
-          <tr className="bg-secondary text-muted-foreground border-border border-b">
+          <tr className="table-head-row-1 text-muted-foreground border-border border-b">
             {groupRow.map((value, index) => {
               // A cell covered by a merge to its left renders no <th> at all.
               if (value === null && !spans.has(index)) return null;
@@ -182,7 +183,6 @@ export function ActivityGridTable({
                     headCell,
                     "font-semibold tracking-wide uppercase",
                     index > 0 && "border-border border-l text-center",
-                    index === 0 && cn(sticky, "bg-secondary"),
                   )}
                 >
                   {index === 0
@@ -192,7 +192,7 @@ export function ActivityGridTable({
               );
             })}
           </tr>
-          <tr className="bg-secondary text-muted-foreground border-border border-b">
+          <tr className="table-head-row-2 text-muted-foreground border-border border-b">
             {/* Column A is covered by the rowSpan above, so it is skipped —
                 which is why every index here is offset by one. */}
             {labelRow.slice(1).map((value, index) => {
@@ -332,6 +332,6 @@ export function ActivityGridTable({
           </tfoot>
         )}
       </table>
-    </div>
+    </TableFrame>
   );
 }

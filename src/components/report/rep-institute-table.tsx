@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
 import { COUNT_ZERO_CLASS } from "@/components/ui/count-link";
+import { TableFrame } from "@/components/ui/table-frame";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
 import {
   openClosedTotals,
@@ -72,7 +73,7 @@ function SortHeader({
       aria-sort={
         active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
       }
-      className="bg-muted/60 text-muted-foreground sticky top-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+      className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
     >
       <Link
         href={href}
@@ -118,7 +119,7 @@ export function RepInstituteTable({
   catalogue: StatusCatalogue;
 }) {
   return (
-    <div className="border-border overflow-x-auto rounded-lg border">
+    <TableFrame tone="muted" stickyFirstColumn>
       <table className="w-max min-w-full border-collapse text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead>
@@ -133,19 +134,19 @@ export function RepInstituteTable({
             />
             <th
               scope="col"
-              className="bg-muted/60 text-muted-foreground sticky top-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+              className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
             >
               Type
             </th>
             <th
               scope="col"
-              className="bg-muted/60 text-muted-foreground sticky top-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+              className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
             >
               Location
             </th>
             <th
               scope="col"
-              className="bg-muted/60 text-muted-foreground sticky top-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+              className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
             >
               Status
             </th>
@@ -242,6 +243,6 @@ export function RepInstituteTable({
           )}
         </tbody>
       </table>
-    </div>
+    </TableFrame>
   );
 }

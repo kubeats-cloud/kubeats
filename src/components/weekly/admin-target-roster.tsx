@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { METRICS,type MetricCounts } from '@/lib/validation/weekly';
 import { WeekNavigator } from '@/components/weekly/week-navigator';
+import { TableFrame } from '@/components/ui/table-frame';
 import { auditHref,auditWindow } from '@/lib/audit-pagination';
 
 export async function AdminTargetRoster({week,page}: {week:string;page?:string}) {
@@ -20,14 +21,14 @@ export async function AdminTargetRoster({week,page}: {week:string;page?:string})
   return <section className="mt-6 space-y-3" aria-label="Per-rep weekly targets">
     <h2 className="font-semibold">Per-rep weekly targets</h2>
     <WeekNavigator weekStart={week} />
-    <div className="overflow-x-auto rounded-lg border"><table className="w-max min-w-full text-sm">
+    <TableFrame tone="card" stickyFirstColumn><table className="w-max min-w-full text-sm">
       <thead><tr><th className="p-3 text-left">Rep</th><th className="p-3 text-left">Submission</th>{METRICS.map(metric => <th key={metric.key} className="p-3 text-right">{metric.label}</th>)}</tr></thead>
       <tbody>{(reps.data ?? []).map(rep => {const record = records.get(rep.id);return <tr key={rep.id} className="border-t">
         <th className="bg-card sticky left-0 p-3 text-left"><Link prefetch={false} className="inline-flex min-h-11 items-center underline" href={`/targets?member=${rep.id}&week=${week}`}>{rep.name ?? 'Unnamed rep'}</Link></th>
         <td className="p-3">{record ? record.locked ? 'Locked' : 'Draft' : 'Not set'}</td>
         {METRICS.map(metric => <td key={metric.key} className="p-3 text-right tabular-nums">{record?.[metric.key] ?? '—'}</td>)}
       </tr>;})}</tbody>
-    </table></div>
+    </table></TableFrame>
     {!ids.length && <p>No reps found.</p>}
     <nav aria-label="Target roster pages" className="flex flex-wrap items-center justify-between gap-3 text-sm">
       <p>{count.count ?? 0} reps · page {window.page} of {window.pages}</p>

@@ -1,7 +1,8 @@
+import { TableFrame } from "@/components/ui/table-frame";
 import type { DailyStatusReport } from "@/lib/validation/rep-daily-status";
 
 const HEAD_CLASS =
-  "bg-muted/60 text-muted-foreground sticky top-0 px-3 py-2 text-right text-xs font-medium whitespace-nowrap";
+  "text-muted-foreground px-3 py-2 text-right text-xs font-medium whitespace-nowrap";
 
 /**
  * Daily status by rep, over the range the staff page is showing.
@@ -27,7 +28,7 @@ export function DailyStatusReportTable({
   report: DailyStatusReport;
 }) {
   return (
-    <div className="border-border overflow-x-auto rounded-lg border">
+    <TableFrame tone="muted" stickyFirstColumn>
       <table className="w-max min-w-full border-collapse text-sm">
         <caption className="sr-only">
           Daily status by rep from {report.start} to {report.end}. Recorded
@@ -38,7 +39,7 @@ export function DailyStatusReportTable({
           <tr>
             <th
               scope="col"
-              className="bg-muted/60 text-muted-foreground sticky top-0 left-0 z-10 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+              className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
             >
               Rep
             </th>
@@ -108,6 +109,6 @@ export function DailyStatusReportTable({
           </tfoot>
         )}
       </table>
-    </div>
+    </TableFrame>
   );
 }

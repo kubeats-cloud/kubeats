@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from "lucide-react";
+import { TableFrame } from "@/components/ui/table-frame";
 import {
   inactiveStatusCount,
   type StatusColumn,
@@ -68,7 +69,7 @@ function SortHeader({
       aria-sort={
         active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
       }
-      className="bg-muted/60 text-muted-foreground sticky top-0 z-20 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+      className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
     >
       <Link
         prefetch={false}
@@ -110,7 +111,7 @@ export function InstituteStatusActivityTable({
 }) {
   const columnCount = 3 + statuses.length + 3;
   return (
-    <div className="border-border overflow-x-auto rounded-lg border">
+    <TableFrame tone="muted" stickyFirstColumn>
       <table className="w-max min-w-full border-collapse text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead>
@@ -144,7 +145,7 @@ export function InstituteStatusActivityTable({
             ))}
             <th
               scope="col"
-              className="bg-muted/60 text-muted-foreground sticky top-0 z-20 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+              className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
             >
               {OTHER_INACTIVE_STATUS_LABEL}
             </th>
@@ -255,6 +256,6 @@ export function InstituteStatusActivityTable({
           </tr>
         </tfoot>
       </table>
-    </div>
+    </TableFrame>
   );
 }

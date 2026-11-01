@@ -1,4 +1,5 @@
 import { SectionTitle } from "@/components/section-title";
+import { TableFrame } from "@/components/ui/table-frame";
 import { formatDate } from "@/lib/dates";
 import {
   DAILY_STATUS_LABELS,
@@ -42,7 +43,7 @@ export function DailyStatusHistory({
         {row.recorded === 1 ? "day" : "days"}
       </p>
 
-      <div className="border-border mt-3 overflow-x-auto rounded-lg border">
+      <TableFrame tone="muted" className="mt-3">
         <table className="w-max min-w-full border-collapse text-sm">
           <caption className="sr-only">
             Days you recorded a status, from {report.start} to {report.end}
@@ -51,13 +52,13 @@ export function DailyStatusHistory({
             <tr>
               <th
                 scope="col"
-                className="bg-muted/60 text-muted-foreground sticky top-0 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+                className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
               >
                 Date
               </th>
               <th
                 scope="col"
-                className="bg-muted/60 text-muted-foreground sticky top-0 px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
+                className="text-muted-foreground px-3 py-2 text-left text-xs font-medium whitespace-nowrap"
               >
                 Status
               </th>
@@ -87,7 +88,7 @@ export function DailyStatusHistory({
             )}
           </tbody>
         </table>
-      </div>
+      </TableFrame>
 
       {/* The exclusion, stated where the numbers are. "Recorded" is the only
           total this screen prints, and it counts stored days — a day with no

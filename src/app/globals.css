@@ -224,6 +224,92 @@
       var(--brand-to)
     );
   }
+
+  /*
+   * THE STICKY TABLE HEADER, ONCE. Every table in the app renders inside
+   * `.table-frame` (components/ui/table-frame.tsx), which is a bounded scroll
+   * box: without a cap its `overflow-x: auto` would also compute the vertical
+   * axis to `auto` and become the scrollport, so a header sticking to it would
+   * scroll away with the page. A capped height makes the box itself scroll.
+   *
+   * The whole z ladder lives here so the values cannot drift again:
+   *   body's sticky first column   10
+   *   second (sub-column) header   16
+   *   first (band) header          17
+   *   corner cell (both axes)      18
+   *   Activity toolbar             20  (outside the frame; see activity-toolbar)
+   *   top bar                      30  (outside the frame; see top-bar)
+   *
+   * A header must stay below the toolbar, or the toolbar would be painted under
+   * it when the page scrolls the box up the screen.
+   */
+  .table-frame {
+    --tf-col-z: 10;
+    --tf-head-row-2-z: 16;
+    --tf-head-row-1-z: 17;
+    --tf-corner-z: 18;
+    /* Row 1's height, pinned so row 2's sticky offset is exact rather than a
+     * guess. `ActivityGridTable` marks its two rows with `table-head-row-1/2`.
+     * `+ 0.5px` is the half of the collapsed border that a row owns when it
+     * shares a 1px rule with the row below it. */
+    --tf-head-row-1-h: 2rem;
+    --tf-head-row-2-top: calc(var(--tf-head-row-1-h) + 0.5px);
+
+    /* The old header tints were translucent, which lets scrolled rows show
+     * through. Mixing each tint against the card keeps the look and makes it
+     * opaque. */
+    --tf-head-bg: color-mix(in oklab, var(--muted) 60%, var(--card));
+
+    position: relative;
+    /* 70vh on a tall screen; otherwise leave room for the top bar, page heading,
+     * filters and the Activity toolbar so the box never parks under them. The
+     * floor keeps a usable table on a short laptop rather than a three-row slit. */
+    max-height: max(18rem, min(70vh, calc(100dvh - 18rem)));
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .table-frame[data-tone="secondary"] {
+    --tf-head-bg: var(--secondary);
+  }
+  .table-frame[data-tone="secondary-soft"] {
+    --tf-head-bg: color-mix(in oklab, var(--secondary) 40%, var(--card));
+  }
+  .table-frame[data-tone="card"] {
+    --tf-head-bg: var(--card);
+  }
+
+  .table-frame thead th {
+    position: sticky;
+    top: 0;
+    z-index: var(--tf-head-row-1-z);
+    background-color: var(--tf-head-bg);
+  }
+
+  /* Grouped (two-row) headers: the band row is pinned first, the sub-column row
+   * directly beneath it. The bands never wrap — a wrapped label would make row
+   * 1 taller than the offset below assumes, and the report already scrolls
+   * sideways rather than dropping a column. */
+  .table-frame thead tr.table-head-row-1 > th {
+    height: var(--tf-head-row-1-h);
+    white-space: nowrap;
+  }
+  .table-frame thead tr.table-head-row-2 th {
+    top: var(--tf-head-row-2-top);
+    z-index: var(--tf-head-row-2-z);
+  }
+
+  /* The intersection of the sticky header and the sticky first column. */
+  .table-frame[data-sticky-first-column] thead tr:first-child > th:first-child {
+    left: 0;
+    z-index: var(--tf-corner-z);
+  }
+
+  /* Existing body/tfoot sticky cells keep their own `sticky left-0` position;
+   * this only puts them on the shared ladder, below every header row. */
+  .table-frame :is(tbody, tfoot) tr > :first-child {
+    z-index: var(--tf-col-z);
+  }
 }
 
 @layer base {
