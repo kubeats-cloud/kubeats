@@ -104,4 +104,11 @@ describe("Activity → Call Activity is the summary's new home", () => {
     expect(filters).toMatch(/set\("callFrom", next\.from\)/);
     expect(filters).toMatch(/set\("callTo", next\.to\)/);
   });
+
+  it("submits the same draft filters on Enter, not only on a click", () => {
+    expect(filters).toContain("<form");
+    expect(filters).toContain("onSubmit=");
+    expect(filters).toMatch(/event\.preventDefault\(\);\s*apply\(\);/);
+    expect(filters).toContain('type="submit"');
+  });
 });

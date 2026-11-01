@@ -31,16 +31,20 @@ interface StatusOption {
  * The Call Activity Report's own filter bar (Part 3) — From, To,
  * Representative, Institute, Call Status, with Apply and Clear.
  *
- * ⚠ APPLY ON A BUTTON, NOT ON CHANGE — unlike `VisitReview`'s filter card
- * above it on this same page, which pushes a new URL the instant a Select
- * changes. The client asked for Apply/Clear specifically, so five fields
- * are drafted in local state and only pushed as one navigation when Apply
- * is pressed — a reader picking a date range one field at a time does not
- * refetch the table on every keystroke or every Select.
+ * ⚠ APPLY ON A BUTTON, NOT ON CHANGE — unlike `VisitReview`'s own filter
+ * card, which pushes a new URL the instant a Select changes. The client
+ * asked for Apply/Clear specifically, so five fields are drafted in local
+ * state and only pushed as one navigation when Apply is pressed — a reader
+ * picking a date range one field at a time does not refetch the table on
+ * every keystroke or every Select.
+ *
+ * ENTER IS THE SAME APPLY. The fields sit in a real `<form>`; Enter in any
+ * of them submits it and runs the identical handler, so the keyboard and
+ * the button cannot drift apart.
  *
  * SERVER-SIDE, STILL. Pressing Apply is a `router.push()` to a new URL;
  * nothing here filters a row that already arrived in the browser. The
- * server component above (`review/page.tsx`) re-reads these same params
+ * server component above (`activity/page.tsx`) re-reads these same params
  * and calls `call_activity_report()` again — that round trip is the whole
  * point, and is what keeps the worker from ever holding more than one
  * rep's institute pool in memory to filter client-side.
@@ -156,91 +160,100 @@ export function CallActivityFilters({
 
   return (
     <Card className="mb-4 p-4 md:p-5">
-      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
-        <Field label="From">
-          <Input
-            type="date"
-            className="h-10"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            aria-label="From date"
-          />
-        </Field>
-
-        <Field label="To">
-          <Input
-            type="date"
-            className="h-10"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            aria-label="To date"
-          />
-        </Field>
-
-        <Field label="Representative">
-          <Select value={member || ALL} onValueChange={(v) => setMember(v === ALL ? "" : v)}>
-            <SelectTrigger className="h-10 w-full" aria-label="Representative">
-              <SelectValue placeholder="Everyone" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Everyone</SelectItem>
-              {reps.map((rep) => (
-                <SelectItem key={rep.id} value={rep.id}>
-                  {rep.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-
-        <Field label="Institute">
-          <Input
-            className="h-10"
-            placeholder="Name contains…"
-            value={institute}
-            onChange={(e) => setInstitute(e.target.value)}
-            aria-label="Institute name contains"
-          />
-        </Field>
-
-        <Field label="Call Status">
-          <Select value={status || ALL} onValueChange={(v) => setStatus(v === ALL ? "" : v)}>
-            <SelectTrigger className="h-10 w-full" aria-label="Call Status">
-              <SelectValue placeholder="Any status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>Any status</SelectItem>
-              {statuses.map((entry) => (
-                <SelectItem key={entry.status} value={entry.status}>
-                  {entry.status}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      </div>
-
-      <div
-        className={cn(
-          "mt-4 flex flex-wrap items-center gap-2",
-          actions ? "justify-between" : "justify-end",
-        )}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          apply();
+        }}
       >
-        <div className="flex flex-wrap items-center gap-2">
-          {activeCount > 0 && (
-            <Button type="button" variant="ghost" className="h-9" onClick={clear}>
-              Clear {activeCount} filter{activeCount === 1 ? "" : "s"}
-            </Button>
-          )}
-          <Button type="button" className="h-9" onClick={apply}>
-            Apply
-          </Button>
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
+          <Field label="From">
+            <Input
+              type="date"
+              className="h-10"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              aria-label="From date"
+            />
+          </Field>
+
+          <Field label="To">
+            <Input
+              type="date"
+              className="h-10"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              aria-label="To date"
+            />
+          </Field>
+
+          <Field label="Representative">
+            <Select value={member || ALL} onValueChange={(v) => setMember(v === ALL ? "" : v)}>
+              <SelectTrigger className="h-10 w-full" aria-label="Representative">
+                <SelectValue placeholder="Everyone" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Everyone</SelectItem>
+                {reps.map((rep) => (
+                  <SelectItem key={rep.id} value={rep.id}>
+                    {rep.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+
+          <Field label="Institute">
+            <Input
+              className="h-10"
+              placeholder="Name contains…"
+              value={institute}
+              onChange={(e) => setInstitute(e.target.value)}
+              aria-label="Institute name contains"
+            />
+          </Field>
+
+          <Field label="Call Status">
+            <Select value={status || ALL} onValueChange={(v) => setStatus(v === ALL ? "" : v)}>
+              <SelectTrigger className="h-10 w-full" aria-label="Call Status">
+                <SelectValue placeholder="Any status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any status</SelectItem>
+                {statuses.map((entry) => (
+                  <SelectItem key={entry.status} value={entry.status}>
+                    {entry.status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
         </div>
-        {/* Wrapped rather than rendered bare: a JSX element passed in as a
-            prop and placed beside a static sibling is an array child to
-            React's dev validator, which then asks it for a key. */}
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
-      </div>
+
+        <div
+          className={cn(
+            "mt-4 flex flex-wrap items-center gap-2",
+            actions ? "justify-between" : "justify-end",
+          )}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            {activeCount > 0 && (
+              <Button type="button" variant="ghost" className="h-9" onClick={clear}>
+                Clear {activeCount} filter{activeCount === 1 ? "" : "s"}
+              </Button>
+            )}
+            {/* Submit, not onClick: Enter in any field runs this same
+                handler, so the keyboard and the button are one path. */}
+            <Button type="submit" className="h-9">
+              Apply
+            </Button>
+          </div>
+          {/* Wrapped rather than rendered bare: a JSX element passed in as a
+              prop and placed beside a static sibling is an array child to
+              React's dev validator, which then asks it for a key. */}
+          {actions && <div className="flex items-center gap-2">{actions}</div>}
+        </div>
+      </form>
     </Card>
   );
 }
