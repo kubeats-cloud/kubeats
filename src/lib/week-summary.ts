@@ -239,15 +239,25 @@ interface RepProfileRow {
  */
 async function fetchAllReps(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  campus?: string,
 ): Promise<{ data: RepProfileRow[] | null; error: { message: string } | null }> {
   const rows: RepProfileRow[] = [];
   for (let offset = 0; ; ) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("profiles")
       .select("id, name, role")
       .eq("role", "rep")
       .order("name")
       .range(offset, offset + 999);
+    /*
+     * The campus filter, applied to the ROSTER rather than to each week's
+     * numbers. Rows in `targets`/`daily_plans`/`visits` belonging to somebody
+     * outside it are still read — they are aggregated per member, and no member
+     * outside the roster has a row on this screen — so nothing leaks into a
+     * total. Narrowing the roster is what makes a campus's week its own.
+     */
+    if (campus) query = query.eq("campus_id", campus);
+    const { data, error } = await query;
 
     if (error) return { data: null, error };
 
@@ -267,6 +277,8 @@ async function fetchAllReps(
  */
 export async function getTeamWeek(
   weekStart: string,
+  /** One campus, already resolved against the reader's permitted list. */
+  campus?: string,
 ): Promise<{ ok: true; members: TeamMemberWeek[] } | { ok: false }> {
   const supabase = await createClient();
   const { start, end } = periodRange("weekly", weekStart);
@@ -285,7 +297,7 @@ export async function getTeamWeek(
        * activity — and the hierarchy still groups by them, because "which
        * admin created this account" is exactly what admins are there for.
        */
-      fetchAllReps(supabase),
+      fetchAllReps(supabase, campus),
       supabase
         .from("targets")
         .select(ROW_COLUMNS)

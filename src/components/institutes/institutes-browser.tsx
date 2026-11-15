@@ -16,11 +16,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
+import { CampusFilter } from "@/components/campus-filter";
 import { useTableView } from "@/lib/table-view";
 import { ViewPicker } from "@/components/ui/view-picker";
 import { InstituteStatusBadge } from "@/components/institutes/status-badge";
 import type { StatusCatalogue } from "@/lib/validation/institute";
 import type { Institute } from "@/lib/institutes";
+import type { Campus } from "@/lib/campus-display";
 import {
   class12Total,
   streamCount,
@@ -53,6 +55,13 @@ export interface InstituteFilters {
   area?: string;
   type?: string;
   board?: string;
+  /**
+   * The campus the institute belongs to. Resolved by the page against the
+   * reader's permitted list before it is seeded here; the browser carries it in
+   * the URL and NEVER filters rows by it in memory, because the registry query
+   * is what narrows.
+   */
+  campus?: string;
 }
 
 /**
@@ -103,6 +112,7 @@ export function InstitutesBrowser({
   institutes,
   catalogue,
   showOwner = false,
+  campuses = [],
   initial = {},
   serverFacets,
   total,
@@ -121,6 +131,12 @@ export function InstitutesBrowser({
    */
   showOwner?: boolean;
   /**
+   * The campuses this reader may choose between. One entry (the team lead's
+   * own campus) hides the control — `CampusFilter` owns that rule, shared with
+   * every other screen that has one.
+   */
+  campuses?: Campus[];
+  /**
    * The filters as they arrived in the URL. SEED ONLY — read on the first
    * render and never again, which is what lets typing stay instant.
    */
@@ -137,6 +153,14 @@ export function InstitutesBrowser({
   const [area, setArea] = useState(initial.area ?? ALL);
   const [type, setType] = useState(initial.type ?? ALL);
   const [boards, setBoards] = useState<string[]>(initial.board?.split('|').filter(Boolean) ?? []);
+  /*
+   * Seed only, like everything above. The value narrows the SERVER query when
+   * the control changes (a router.replace, which re-runs the page), so it is
+   * carried here to survive every other control's URL rewrite — not to filter
+   * the array in memory.
+   */
+  const [campus, setCampus] = useState(initial.campus ?? "");
+  const showCampus = campuses.length > 1;
   /*
    * OWNER IS IGNORED FOR A REP, even when it is in the URL.
    *
@@ -204,6 +228,8 @@ export function InstitutesBrowser({
     put('board',next.board);
     // Never written for a rep: they have no control to clear it with.
     if (showOwner) put("owner", next.owner);
+    // Also never written for a one-campus reader — same reason as the owner.
+    if (showCampus) put("campus", next.campus);
     const query = params.toString();
     return query ? `/institutes?${query}` : "/institutes";
   }
@@ -219,6 +245,7 @@ export function InstitutesBrowser({
       type,
       owner,
       board: boards.join('|'),
+      campus,
       ...patch,
     });
     if (viaRouter) router.replace(url, { scroll: false });
@@ -367,12 +394,29 @@ export function InstitutesBrowser({
           aria-label="Search institutes"
         />
         {serverFacets && <>
-          {Object.entries({status,state,city,area,type,owner:showOwner ? owner : undefined,board:boards.join('|')})
+          {Object.entries({status,state,city,area,type,owner:showOwner ? owner : undefined,board:boards.join('|'),campus:showCampus ? campus : undefined})
             .filter(([,value]) => value && value !== ALL)
             .map(([key,value]) => <input key={key} type="hidden" name={key} value={value} />)}
           <button className="bg-primary text-primary-foreground min-h-11 w-full rounded-md px-4 min-[480px]:w-auto">Apply</button>
         </>}
       </form>
+
+      {/*
+        THE OUTER BOUNDARY, on its own line above the property filters — the
+        same arrangement /review uses. Changing it is a SERVER round trip
+        (`pick` → router.replace), unlike the tree below, because the registry
+        is paged: narrowing the rows already sent would show a filtered slice
+        of page one and call it the campus.
+      */}
+      {showCampus && (
+        <div className="max-w-xs">
+          <CampusFilter
+            campuses={campuses}
+            value={campus}
+            onChange={(next) => pick("campus", next, setCampus)}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 md:max-w-4xl md:grid-cols-3">
         <Select

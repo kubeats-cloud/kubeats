@@ -78,6 +78,7 @@ export function InstituteActivityBox({
           "tab",
           "start",
           "end",
+          "repCampus",
           "callFrom",
           "callTo",
           "callMember",
@@ -90,6 +91,7 @@ export function InstituteActivityBox({
           "pipeTo",
           "pipeSort",
           "pipeDir",
+          "pipeCampus",
         ]}
       />
       <ActivityToolbar>

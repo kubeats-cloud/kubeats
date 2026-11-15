@@ -13,11 +13,18 @@ import { addWeeks, formatWeekRange, weekLabel } from "@/lib/weeks";
 export function WeekNavigator({
   weekStart,
   member,
+  extraParams,
   basePath = "/targets",
 }: {
   weekStart: string;
   /** Carried through so an admin drilling into a rep stays on that rep. */
   member?: string;
+  /**
+   * Anything else the screen's own week view is filtered by — Team's campus
+   * filter is the reason this exists. Without it, stepping a week would drop
+   * the campus and silently widen the roster.
+   */
+  extraParams?: Record<string, string>;
   /**
    * The route the arrows stay on. Defaults to /targets because that is where
    * most of them live, but /team renders this too and reads ?week= itself —
@@ -28,6 +35,9 @@ export function WeekNavigator({
   const href = (week: string) => {
     const params = new URLSearchParams({ week });
     if (member) params.set("member", member);
+    for (const [key, value] of Object.entries(extraParams ?? {})) {
+      if (value) params.set(key, value);
+    }
     return `${basePath}?${params.toString()}`;
   };
 

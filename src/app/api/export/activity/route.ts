@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
     start: params.get("start") ?? undefined,
     end: params.get("end") ?? undefined,
     member: params.get("member") ?? undefined,
+    campus: params.get("campus") || undefined,
   });
 
   if (!parsed.success) {
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { start, end, member } = parsed.data;
+  const { start, end, member, campus } = parsed.data;
   const report = params.get("report");
   if (report !== null && report !== "field-visits") {
     return NextResponse.json({ error: "Unknown report." }, { status: 400 });
@@ -84,7 +85,11 @@ export async function GET(request: NextRequest) {
         { start, end },
         member ?? null,
         sort,
-        layout === "activity-status" ? { layout } : {},
+        {
+          ...(layout === "activity-status" ? { layout } : {}),
+          // The screen's campus filter, so the file is the table it came from.
+          campus,
+        },
       );
 
   if (!result.ok) {

@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { listReps } from '@/lib/closing-report';
-import { listCampuses } from '@/lib/campuses';
+import { getCurrentUser } from '@/lib/auth';
+import { permittedCampuses } from '@/lib/campuses';
+import { CampusFilter } from '@/components/campus-filter';
 
 export async function ActivityFilters({params,action='/',clearHref='/',preserve}: {
   params: Record<string,string>;
@@ -17,15 +19,26 @@ export async function ActivityFilters({params,action='/',clearHref='/',preserve}
    */
   preserve?: string[];
 }) {
-  const [reps,campuses] = await Promise.all([listReps(),listCampuses(true)]);
+  const user = await getCurrentUser();
+  const [reps,campuses] = await Promise.all([listReps(),permittedCampuses(user)]);
   const preserved = ['from','to','sort','dir','view',...(preserve ?? [])];
   return <form action={action} className="my-3 grid grid-cols-2 gap-3 rounded-lg border p-3 text-sm md:grid-cols-4">
     <label className="grid min-w-0 gap-1">Rep<select name="member" defaultValue={params.member ?? ''} className="bg-card min-h-11 w-full min-w-0 rounded-md border px-2">
       <option value="">All reps</option>{reps.map(rep => <option key={rep.id} value={rep.id}>{rep.name}</option>)}
     </select></label>
-    <label className="grid min-w-0 gap-1">Campus<select name="campus" defaultValue={params.campus ?? ''} className="bg-card min-h-11 w-full min-w-0 rounded-md border px-2">
-      <option value="">All campuses</option>{campuses.map(campus => <option key={campus.id} value={campus.id}>{campus.name}</option>)}
-    </select></label>
+    {/*
+      THE SHARED CONTROL, so this form and every client-side filter ask the same
+      question about the same list. A team lead's permitted list is their own
+      campus alone, which the component hides — no campus to choose is not a
+      filter, and their rows are already scoped by RLS.
+    */}
+    <CampusFilter
+      campuses={campuses}
+      name="campus"
+      value={params.campus ?? ''}
+      label="Campus"
+      className="grid min-w-0 gap-1"
+    />
     <label className="col-span-2 grid gap-1">Search<input name="q" defaultValue={params.q} maxLength={120} className="min-h-11 rounded-md border px-3" /></label>
     {preserved.filter(key => params[key]).map(key => <input key={key} type="hidden" name={key} value={params[key]} />)}
     <button className="bg-primary text-primary-foreground min-h-11 rounded-md px-4">Apply</button>

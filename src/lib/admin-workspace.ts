@@ -172,6 +172,20 @@ export interface VisitFilters {
    * Resolved to a status list before the query runs (see `listTeamVisits`).
    */
   statusCategory?: "open" | "closed";
+  /**
+   * THE CAMPUS THE INSTITUTE BELONGS TO, not the campus of the rep who logged
+   * the row.
+   *
+   * Already resolved against `permittedCampuses()` by the page before it gets
+   * here, so this is a display filter inside what RLS already allows — never a
+   * second permission check. It rides on the institute because that is what the
+   * reader is narrowing ("the IQ City institutes"), and the rep who visited one
+   * may since have moved campus.
+   *
+   * Applied through the `institutes` embed, which is why it shares the inner
+   * join with `instituteStatus` — see the note on the two select constants.
+   */
+  campus?: string;
 }
 
 /**
@@ -300,9 +314,10 @@ export async function listTeamVisits(
   }
 
   /*
-   * The inner-join variant ONLY when the status filter is on. See the note on
-   * the two constants: an unconditional inner join would change what this
-   * function returns for every other caller, and it would do it silently.
+   * The inner-join variant ONLY when a filter rides on the institute embed —
+   * its current status or its campus. See the note on the two constants: an
+   * unconditional inner join would change what this function returns for every
+   * other caller, and it would do it silently.
    */
   /*
    * The window, as a function of the page, so the two reads below cannot
@@ -337,11 +352,16 @@ export async function listTeamVisits(
   const build = (window: { from: number; to: number } | null) => {
     let query = supabase
       .from("visits")
-      .select(filters.instituteStatus ? VISIT_SELECT_STATUS : VISIT_SELECT, {
-        count: "exact",
-        // No window means "just tell me how many" — no rows cross the wire.
-        head: window === null,
-      })
+      .select(
+        filters.instituteStatus || filters.campus
+          ? VISIT_SELECT_STATUS
+          : VISIT_SELECT,
+        {
+          count: "exact",
+          // No window means "just tell me how many" — no rows cross the wire.
+          head: window === null,
+        },
+      )
       .order("date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -391,6 +411,11 @@ export async function listTeamVisits(
   // match — which is the trap the two constants exist to avoid.
   if (filters.instituteStatus) {
     query = query.eq("institutes.status", filters.instituteStatus);
+  }
+  // Same dotted path, same reason: it restricts the PARENT only because the
+  // embed above is inner when this is set.
+  if (filters.campus) {
+    query = query.eq("institutes.campus_id", filters.campus);
   }
 
     return query;

@@ -31,3 +31,26 @@ export function campusLabel(campus: Campus): string {
     ? campus.name
     : `${campus.name} · ${campus.city}`;
 }
+
+/**
+ * The campus a URL is allowed to filter by, or nothing at all.
+ *
+ * A DISPLAY FILTER AND NOT A PERMISSION CHECK — RLS already decided which rows
+ * exist. This answers the narrower question the control has to answer: is the
+ * value in the URL one this reader can see and clear? An admin gets any listed
+ * campus back; a team lead or rep has a one-entry list, so a link carrying a
+ * different campus resolves to "all" for them rather than to a filter they
+ * cannot see, cannot clear, and would read as an empty table.
+ *
+ * Pure and in this module so both the server pages and the client control use
+ * one rule. The list itself is `permittedCampuses()` in campuses.ts.
+ */
+export function resolveCampusFilter(
+  campuses: Campus[],
+  requested: string | undefined,
+): string | undefined {
+  if (!requested) return undefined;
+  return campuses.some((campus) => campus.id === requested)
+    ? requested
+    : undefined;
+}

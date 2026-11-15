@@ -7,9 +7,10 @@ import { ErrorState } from "@/components/states";
 import { AdminTeamWeek } from "@/components/dashboard/team-rep-search";
 import { TeamSnapshot } from "@/components/dashboard/team-snapshot";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
+import { CampusFilter } from "@/components/campus-filter";
 import { ExportExcel } from "@/components/report/export-excel";
 import { listTeamMembers, requireStaff, type TeamMember } from "@/lib/admin";
-import { listCampuses } from "@/lib/campuses";
+import { listCampuses, permittedCampuses, resolveCampusFilter } from "@/lib/campuses";
 import { settled } from "@/lib/errors";
 import type { Campus } from "@/lib/campus-display";
 import { defaultExportRange } from "@/lib/validation/export";
@@ -48,9 +49,17 @@ export default async function TeamPage(props: PageProps<"/team">) {
 
   const searchParams = await props.searchParams;
   const weekStart = normaliseWeekParam(first(searchParams.week));
+  /*
+   * The campus the table is narrowed to — resolved before the week is read, so
+   * the roster and the controls agree. A team lead's list is their own campus
+   * alone, which hides the control; an admin may step between sites, and the
+   * week arrows carry the choice (see `extraParams` below).
+   */
+  const filterCampuses = await permittedCampuses(gate.user);
+  const campus = resolveCampusFilter(filterCampuses, first(searchParams.campus));
 
-  const [team, editableMembers, campuses] = await Promise.all([
-    getTeamWeek(weekStart),
+  const [team, editableMembers, editableCampuses] = await Promise.all([
+    getTeamWeek(weekStart, campus),
     /*
      * The row editor's data, fetched only for an admin — the role that may
      * open it. `getTeamWeek` carries the week; this carries the account facts
@@ -67,7 +76,15 @@ export default async function TeamPage(props: PageProps<"/team">) {
 
   const controls = (
     <>
-      <WeekNavigator weekStart={weekStart} basePath="/team" />
+      <div className="mb-4 max-w-xs">
+        <CampusFilter campuses={filterCampuses} paramName="campus" />
+      </div>
+
+      <WeekNavigator
+        weekStart={weekStart}
+        basePath="/team"
+        extraParams={campus ? { campus } : undefined}
+      />
 
       {/* The export is a MONTH by default, not this week. It answers a
           different question from the screen above it — "what did the team do
@@ -116,7 +133,7 @@ export default async function TeamPage(props: PageProps<"/team">) {
           members={team.members}
           weekStart={weekStart}
           editableMembers={editableMembers}
-          campuses={campuses}
+          campuses={editableCampuses}
         >
           {controls}
         </AdminTeamWeek>

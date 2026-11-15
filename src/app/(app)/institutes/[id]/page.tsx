@@ -30,7 +30,7 @@ import { SlabsPanel } from "@/components/institutes/slabs-panel";
 import { listSlabSets, isEmpanelled } from "@/lib/slabs";
 import { activityLabel } from "@/lib/activities";
 import { listStatusCatalogue, listCallStatusCatalogue } from "@/lib/statuses";
-import { getCurrentUser, isAdmin } from "@/lib/auth";
+import { getCurrentUser, isAdmin, isStaff } from "@/lib/auth";
 import { getOpenFollowUps } from "@/lib/visits";
 import { instituteCounts, workedItBy } from "@/lib/institute-hub";
 import {
@@ -694,28 +694,32 @@ export default async function InstituteDetailPage(
                     )}
 
                     {/*
-                      ONE LINK, TWO DESTINATIONS — and it IS branched by role
-                      now, which reverses what stood here.
+                      ONE LINK, TWO DESTINATIONS — branched on STAFF, not admin.
 
-                      `/pending/[id]` works for both and always did: its
-                      ownership check ends `if (!mine && !isAdmin(user))
-                      notFound()`, so an admin was always meant to be able to
-                      open it. That is still true and is why the rep's half is
-                      unchanged.
+                      `/pending/[id]` is the rep's own reader, and its guard
+                      ends `if (!mine && !isAdmin(user)) notFound()`. A team
+                      lead is neither the owner nor an admin, so sending them
+                      there was the "Page not found" this button produced: the
+                      door existed, but only for the other two roles.
 
-                      What changed is that an admin has a BETTER page. Since
-                      `/pending` left `REP_ONLY_PATHS` this button worked for
-                      them, but it landed them in the rep-facing report reader —
-                      a screen built around "what do I still owe" — when the
-                      admin's own visit view at `/review/[id]` shows the same
-                      report with the photo, the presence record and the way
-                      back into the filtered register. Sending a supervisor to
-                      the worker's screen was a missed door, not a broken one.
+                      `/review/[id]` is where a supervisor belongs — it is
+                      `requireStaff()`-gated (admin OR team lead), RLS-scoped
+                      by `supervises()`, and shows the same report plus the
+                      photo, the presence record and the way back into the
+                      filtered register. So staff (admin and team lead alike)
+                      get `/review/[id]`; a rep keeps `/pending/[id]`.
+
+                      Nothing widens here: a team lead can already reach the
+                      institute this row lives on, and `getVisitReport()` only
+                      returns visits RLS lets them read. This is the same
+                      destination an admin lands on, with the same visit id.
                     */}
                     <Button asChild variant="outline" className="mt-1 h-9">
                       <Link
                         href={
-                          admin ? `/review/${visit.id}` : `/pending/${visit.id}`
+                          isStaff(user)
+                            ? `/review/${visit.id}`
+                            : `/pending/${visit.id}`
                         }
                       >
                         Open the full report

@@ -20,6 +20,17 @@ export async function getRegistryPage(params: Record<string,string>) {
     else if (params.status && params.status !== '__all__') q = q.eq('status',params.status);
     if (params.owner === '__unassigned__') q = q.is('registered_by',null);
     else if (params.owner && params.owner !== '__all__') q = q.eq('registered_by',params.owner);
+    /*
+     * The campus filter. `audit_registry` carries `campus_id` up front, so this
+     * is a plain column comparison on the same view the rows come from — no
+     * join, and the count query above is narrowed by the same line because
+     * both are built here.
+     *
+     * The page has already resolved this against `permittedCampuses()`, so for
+     * a team lead it can only ever be their own campus; a link naming another
+     * one never reaches this query.
+     */
+    if (params.campus) q = q.eq('campus_id',params.campus);
     if (params.board) q = q.overlaps('normalized_boards',params.board.split('|'));
     return q;
   };

@@ -12,6 +12,7 @@ import { RangeControls } from "@/components/report/range-controls";
 import { DownloadActivity } from "@/components/report/download-activity";
 import { DownloadButton } from "@/components/report/export-excel";
 import { getRegistryPage } from '@/lib/registry-page';
+import { permittedCampuses, resolveCampusFilter } from '@/lib/campuses';
 import { auditHref } from '@/lib/audit-pagination';
 import {
   instituteActivityExportHref,
@@ -68,9 +69,27 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
   const isRep = user?.role === "rep";
   const params = Object.fromEntries(Object.entries(searchParams).filter((entry): entry is [string,string] => typeof entry[1] === 'string'));
   const activityView = staff && first(searchParams.view) === 'activity';
+  /*
+   * THE CAMPUS, RESOLVED ONCE FOR EVERY VIEW ON THIS PAGE.
+   *
+   * The registry query and the Institute-Wise report both take it, and both
+   * must agree about which value counts. `resolveCampusFilter()` returns the id
+   * only when it is one this reader may choose between — so an admin's link
+   * filters, while a team lead with a single campus sees their own data whether
+   * or not the URL names something else.
+   *
+   * `registryParams` is a copy rather than a mutation: the raw `params` object
+   * still feeds the filters that render, and a campus they cannot choose must
+   * not reach the query as a value they cannot clear.
+   */
+  const campuses = await permittedCampuses(user);
+  const campus = resolveCampusFilter(campuses, first(searchParams.campus));
+  const registryParams = { ...params };
+  if (campus) registryParams.campus = campus;
+  else delete registryParams.campus;
   // The registry is not fetched for the activity view: it would be a page of
   // rows nothing on screen reads.
-  const result = !isRep && !activityView ? await getRegistryPage(params) : null;
+  const result = !isRep && !activityView ? await getRegistryPage(registryParams) : null;
 
   /*
    * "INSTITUTE ACTIVITY" IS THE ADMIN/TEAM-LEAD REPORT, BEHIND A BUTTON.
@@ -113,7 +132,7 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
           page: first(searchParams.page),
           search: first(searchParams.q),
           member: first(searchParams.member),
-          campus: first(searchParams.campus),
+          campus,
         })
       : null;
   const exportProblem = instituteActivityExportRangeProblem(activityRange);
@@ -135,6 +154,10 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
     area: first(searchParams.area),
     type: first(searchParams.type),
     board: first(searchParams.board),
+    // RESOLVED, not raw: a rep or a lead with one campus has no control to
+    // change or clear it, so the browser is seeded only with a value it can
+    // honestly show.
+    campus,
   };
 
   const repActivitySort = {
@@ -299,13 +322,14 @@ export default async function InstitutesPage(props: PageProps<"/institutes">) {
             // Admin-only: a rep sees only their own institutes, so an owner
             // column would repeat one name down the page.
             showOwner={admin}
+            campuses={campuses}
             serverFacets={result.facets}
             total={result.total}
           />
           <nav aria-label="Registry pages" className="my-4 flex items-center justify-between gap-3 text-sm">
             <p>Page {result.page} of {result.pages}</p>
-            {result.page > 1 && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/institutes',params,result.page-1)}>Previous</Link>}
-            {result.page < result.pages && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/institutes',params,result.page+1)}>Next</Link>}
+            {result.page > 1 && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/institutes',registryParams,result.page-1)}>Previous</Link>}
+            {result.page < result.pages && <Link prefetch={false} className="min-h-11 p-3 underline" href={auditHref('/institutes',registryParams,result.page+1)}>Next</Link>}
           </nav>
           </>
         ) : (

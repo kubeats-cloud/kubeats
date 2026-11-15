@@ -23,6 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/states";
+import { CampusFilter } from "@/components/campus-filter";
+import type { Campus } from "@/lib/campus-display";
 import { VisitPhotoThumb } from "@/components/visits/visit-photo";
 import { ACTIVITIES } from "@/lib/validation/visit";
 import type { ReviewRow } from "@/lib/review-feed";
@@ -94,6 +96,7 @@ export function VisitReview({
   institutes,
   statuses,
   callStatuses,
+  campuses,
   pageSize,
 }: {
   visits: ReviewRow[];
@@ -109,6 +112,8 @@ export function VisitReview({
   statuses: StatusOption[];
   /** The CALL vocabulary — a second list since 0070, not an alias. */
   callStatuses: StatusOption[];
+  /** The campuses this reader may choose between; one hides the control. */
+  campuses: Campus[];
   pageSize: number;
 }) {
   const router = useRouter();
@@ -189,6 +194,7 @@ export function VisitReview({
     "visitStatus",
     "callStatus",
     "lifecycle",
+    "campus",
   ].filter((k) => params.get(k)).length;
 
   return (
@@ -198,6 +204,19 @@ export function VisitReview({
         {/* Four across rather than six: seven fields over six columns leaves
             one stranded on a row of its own. */}
         <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+          {/*
+            THE CAMPUS FIRST, because it is the outer boundary: everything to
+            the right narrows WITHIN it. Hidden for a reader with one campus —
+            see CampusFilter — which is why nothing needs to special-case a
+            team lead here.
+          */}
+          <CampusFilter
+            campuses={campuses}
+            value={value("campus")}
+            onChange={(next) => apply("campus", next)}
+            className="space-y-1.5"
+          />
+
           <Field label="Rep">
             <Select value={value("member") || ALL} onValueChange={(v) => apply("member", v)}>
               <SelectTrigger className="h-10 w-full">

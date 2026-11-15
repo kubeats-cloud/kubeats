@@ -75,12 +75,18 @@ export const exportRangeSchema = z
     start: isoDate.optional(),
     end: isoDate.optional(),
     member: z.uuid("That is not a member id.").optional(),
+    /**
+     * The Activity screen's campus filter, carried into the file so the
+     * download matches the table. Optional everywhere else; "all campuses" is
+     * simply the parameter absent, never a sentinel.
+     */
+    campus: z.uuid("That is not a campus id.").optional(),
   })
   .transform((input) => {
     const today = todayISO();
     const start = input.start ?? monthStartOf(today);
     const end = input.end ?? monthEndOf(start);
-    return { start, end, member: input.member };
+    return { start, end, member: input.member, campus: input.campus };
   })
   .refine((value) => value.start <= value.end, {
     message: "The start date has to be on or before the end date.",

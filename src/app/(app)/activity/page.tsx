@@ -14,6 +14,7 @@ import { getInstituteStatusModel } from "@/lib/institute-status-report";
 import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
 import { getInstituteStatusActivityModel } from "@/lib/institute-activity-report";
 import { isStatusActivitySortKey } from "@/lib/institute-activity-counts";
+import { permittedCampuses, resolveCampusFilter } from "@/lib/campuses";
 import { ActivityTabs } from "@/components/activity/activity-tabs";
 import {
   DEFAULT_ACTIVITY_TAB,
@@ -89,6 +90,25 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
     ? rawTab
     : DEFAULT_ACTIVITY_TAB;
 
+  /*
+   * THE CAMPUS, ONCE PER REPORT.
+   *
+   * Each card keeps its own query key (see the header), so each gets its own
+   * resolved campus: `repCampus`, `pipeCampus`, and the bare `campus` the
+   * Institute-Wise report has always used. Resolving against `permittedCampuses`
+   * is what stops a team lead — whose list is their own campus alone — from
+   * holding a filter they cannot see or clear.
+   *
+   * CALL ACTIVITY IS DELIBERATELY ABSENT. Its page is produced by the
+   * `call_activity_report()` RPC (0073), which has no campus parameter; hiding
+   * rows after it returns would break its own paging and totals. That needs a
+   * database change, which this task is not.
+   */
+  const campuses = await permittedCampuses(gate.user);
+  const repCampus = resolveCampusFilter(campuses, first(searchParams.repCampus));
+  const pipeCampus = resolveCampusFilter(campuses, first(searchParams.pipeCampus));
+  const instituteCampus = resolveCampusFilter(campuses, first(searchParams.campus));
+
   /** Everything on the URL except the keys named, as a fresh object. */
   function without(...keys: string[]): Record<string, string> {
     const result: Record<string, string> = {};
@@ -156,7 +176,11 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
 
   const [repResult, callResult, pipelineResult, instituteResult] = await Promise.all([
     repParsed.success
-      ? getActivityReportModel({ start: repRange.start, end: repRange.end }, null)
+      ? getActivityReportModel(
+          { start: repRange.start, end: repRange.end },
+          null,
+          { campus: repCampus },
+        )
       : Promise.resolve({
           ok: false as const,
           error:
@@ -171,6 +195,7 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
             key: first(searchParams.pipeSort),
             dir: first(searchParams.pipeDir),
           },
+          campus: pipeCampus,
         })
       : Promise.resolve({
           ok: false as const,
@@ -185,7 +210,7 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
           page: first(searchParams.page),
           search: first(searchParams.q),
           member: first(searchParams.member),
-          campus: first(searchParams.campus),
+          campus: instituteCampus,
         })
       : Promise.resolve(null),
   ]);
@@ -203,6 +228,8 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
           <RepActivityBox
             start={repRange.start}
             end={repRange.end}
+            campuses={campuses}
+            campus={repCampus}
             extraParams={{ tab: "rep", ...without("start", "end", "tab") }}
             result={repResult}
           />
@@ -223,6 +250,8 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
         pipeline={
           <PipelineBox
             range={pipelineParsed.success ? pipelineParsed.data : {}}
+            campuses={campuses}
+            campus={pipeCampus}
             extraParams={{ tab: "pipeline", ...without("pipeFrom", "pipeTo", "tab") }}
             flat={flat}
             result={pipelineResult}
@@ -249,7 +278,7 @@ export default async function ActivityPage(props: PageProps<"/activity">) {
             }}
             search={first(searchParams.q)}
             member={first(searchParams.member)}
-            campus={first(searchParams.campus)}
+            campus={instituteCampus}
             result={instituteResult}
           />
         }

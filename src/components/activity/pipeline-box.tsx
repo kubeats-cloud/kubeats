@@ -5,7 +5,9 @@ import { DownloadButton } from "@/components/report/export-excel";
 import { CustomisableGrid } from "@/components/report/customisable-grid";
 import { ActivityToolbar } from "@/components/activity/activity-toolbar";
 import { CollapsibleSection } from "@/components/activity/collapsible-section";
+import { CampusFilter } from "@/components/campus-filter";
 import { SORT_BY_REP, SORT_BY_TOTAL } from "@/lib/exports/activity-grid";
+import type { Campus } from "@/lib/campus-display";
 import {
   nextSortDirection,
   type PipelineRange,
@@ -37,11 +39,17 @@ import type { InstituteStatusModel } from "@/lib/institute-status-report";
  */
 export function PipelineBox({
   range,
+  campuses,
+  campus,
   extraParams,
   flat,
   result,
 }: {
   range: PipelineRange;
+  /** The campuses this reader may choose between; one hides the control. */
+  campuses: Campus[];
+  /** The resolved `pipeCampus`, empty for every campus. */
+  campus?: string;
   /** `tab=pipeline` plus everything the other three reports currently have
    *  set (including this report's own `pipeSort`/`pipeDir`, which
    *  `RangeControls` does not write itself and so must be carried). */
@@ -93,9 +101,17 @@ export function PipelineBox({
             />
           </div>
 
+          <CampusFilter
+            campuses={campuses}
+            value={campus}
+            paramName="pipeCampus"
+            extraParams={{ tab: "pipeline" }}
+            className="w-full space-y-1.5 sm:w-52"
+          />
+
           {result.ok && (
             <DownloadButton
-              href={pipelineExportHref(range, result.model.sort)}
+              href={pipelineExportHref(range, result.model.sort, campus)}
               variant="outline"
               className="h-11"
             >
@@ -132,11 +148,14 @@ export function PipelineBox({
 function pipelineExportHref(
   range: PipelineRange,
   sort: { key: string; dir: "asc" | "desc" },
+  campus?: string,
 ): string {
   const params = new URLSearchParams();
   if (range.from) params.set("from", range.from);
   if (range.to) params.set("to", range.to);
   params.set("sort", sort.key);
   params.set("dir", sort.dir);
+  // Same rows as the table: the screen's campus rides along.
+  if (campus) params.set("campus", campus);
   return `/api/export/pipeline?${params.toString()}`;
 }
