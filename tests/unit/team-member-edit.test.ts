@@ -67,7 +67,12 @@ describe("the Team tab's rows open it", () => {
     expect(page).toContain("listTeamMembers()");
     expect(page).toContain("listCampuses()");
     expect(page).toContain("editableMembers={editableMembers}");
-    expect(page).toContain("campuses={campuses}");
+    // Named `editableCampuses` since the screen also got a FILTER list
+    // (`permittedCampuses`, every campus for an admin, one for a lead). The
+    // editor's list stays admin-only and active-only; the two must not be
+    // conflated.
+    expect(page).toContain("campuses={editableCampuses}");
+    expect(page).toContain("permittedCampuses(gate.user)");
     // Both reads are inside the admin branch, so a team lead requests neither.
     expect(page).toMatch(/gate\.isAdmin\s*\?\s*settled<TeamMember\[\]>/);
     expect(page).toMatch(/gate\.isAdmin\s*\?\s*settled<Campus\[\]>/);

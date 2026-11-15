@@ -138,6 +138,13 @@ export async function listInstitutes(
    * window to opt out of.
    */
   statusChanged?: StatusChangedRange,
+  /**
+   * NARROWS TO ONE CAMPUS, for the Pipeline and Activity reports' campus
+   * filter. A plain column on `institutes`, so nothing is joined and RLS is
+   * untouched; the caller has already resolved the id against the campuses
+   * that reader may choose between. Omitted leaves the query as it was.
+   */
+  campus?: string,
 ): Promise<{ ok: true; institutes: Institute[] } | { ok: false }> {
   const supabase = await createClient();
 
@@ -171,6 +178,7 @@ export async function listInstitutes(
   const to = istDayAfter(statusChanged?.to);
   if (from) query = query.gte("status_updated_at", from);
   if (to) query = query.lt("status_updated_at", to);
+  if (campus) query = query.eq("campus_id", campus);
 
   const { data, error } = await query;
 

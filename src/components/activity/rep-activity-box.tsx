@@ -5,7 +5,9 @@ import { DownloadButton } from "@/components/report/export-excel";
 import { CustomisableGrid } from "@/components/report/customisable-grid";
 import { ActivityToolbar } from "@/components/activity/activity-toolbar";
 import { CollapsibleSection } from "@/components/activity/collapsible-section";
+import { CampusFilter } from "@/components/campus-filter";
 import { formatDate } from "@/lib/dates";
+import type { Campus } from "@/lib/campus-display";
 import type { ActivityReportModel } from "@/lib/exports/activity-export";
 
 /**
@@ -18,16 +20,25 @@ import type { ActivityReportModel } from "@/lib/exports/activity-export";
 export function RepActivityBox({
   start,
   end,
+  campuses,
+  campus,
   extraParams,
   result,
 }: {
   start: string;
   end: string;
+  /** The campuses this reader may choose between; one hides the control. */
+  campuses: Campus[];
+  /** The resolved campus, empty for "all". */
+  campus?: string;
   /** `tab=rep` plus whatever the other three reports currently have set, so
    *  applying this range does not reset them. */
   extraParams: Record<string, string>;
   result: { ok: true; model: ActivityReportModel } | { ok: false; error: string };
 }) {
+  const exportParams = new URLSearchParams({ start, end });
+  if (campus) exportParams.set("campus", campus);
+
   return (
     <div>
       <ActivityToolbar>
@@ -45,9 +56,22 @@ export function RepActivityBox({
             />
           </div>
 
+          {/*
+            Its own URL key (`repCampus`), because this card shares the page
+            with three others and each keeps a separate filter namespace. The
+            navigate form preserves every other parameter and restates the tab.
+          */}
+          <CampusFilter
+            campuses={campuses}
+            value={campus}
+            paramName="repCampus"
+            extraParams={{ tab: "rep" }}
+            className="w-full space-y-1.5 sm:w-52"
+          />
+
           {result.ok && (
             <DownloadButton
-              href={`/api/export/activity?start=${start}&end=${end}`}
+              href={`/api/export/activity?${exportParams.toString()}`}
               variant="outline"
               className="h-11"
             >

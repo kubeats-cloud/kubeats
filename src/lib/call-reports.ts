@@ -44,6 +44,14 @@ export async function listCallReports(
     else if(filters.callStatus)query=query.eq("status_set_to",filters.callStatus);
     else if(categoryStatuses)query=query.in("status_set_to",categoryStatuses);
     if(filters.instituteStatus)query=query.eq("institutes.call_status",filters.instituteStatus);
+    /*
+     * The institute's campus — the embed is ALWAYS inner here, because a call
+     * without a readable institute is already excluded (`institutes!inner`).
+     * So the dotted filter restricts the parent exactly as it does on the visit
+     * register, and the caller has already resolved the value against the
+     * campuses they may see. No new join, no second permission check.
+     */
+    if(filters.campus)query=query.eq("institutes.campus_id",filters.campus);
     return query;
   };
   const counted=await build(true);

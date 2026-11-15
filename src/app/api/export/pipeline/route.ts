@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 import { requireStaff } from "@/lib/admin";
 import { buildPipelineExport } from "@/lib/exports/pipeline-export";
 import { pipelineRangeSchema } from "@/lib/validation/pipeline-report";
@@ -42,12 +43,24 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  /*
+   * The screen's campus filter, so the workbook is the table it came from.
+   * Validated here rather than in `pipelineRangeSchema`: that schema is the
+   * report's RANGE, shared with the Institute-Wise model, and campus has no
+   * place in a date range. Absent means every permitted campus.
+   */
+  const rawCampus = params.get("campus") || undefined;
+  if (rawCampus && !z.uuid().safeParse(rawCampus).success) {
+    return NextResponse.json({ error: "That is not a campus id." }, { status: 400 });
+  }
+
   const result = await buildPipelineExport({
     range: parsedRange.data,
     sort: {
       key: params.get("sort") ?? undefined,
       dir: params.get("dir") ?? undefined,
     },
+    campus: rawCampus,
   });
 
   if (!result.ok) {

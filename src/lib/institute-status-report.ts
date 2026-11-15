@@ -144,6 +144,16 @@ export interface InstituteStatusQuery {
   range?: PipelineRange;
   /** The raw `?sort=` / `?dir=`, resolved against this render's own columns. */
   sort?: { key?: string; dir?: string };
+  /**
+   * ONE CAMPUS, ALREADY RESOLVED against the reader's permitted list.
+   *
+   * Narrowing the institutes is not enough on its own: the rows of this report
+   * are REPS, so the rep list is narrowed too — otherwise a campus with four
+   * reps would draw a row of zeroes for every rep at the other sites and read
+   * as a team that did nothing. The denominator follows, which is what keeps
+   * "X of T" honest under the filter.
+   */
+  campus?: string;
 }
 
 export async function getInstituteStatusModel(
@@ -164,10 +174,15 @@ export async function getInstituteStatusModel(
    * definition, so the unfiltered report costs precisely what it costs today.
    */
   const [registry, catalogue, reps, unfilteredCount] = await Promise.all([
-    listInstitutes(rangeActive ? (range as StatusChangedRange) : undefined),
+    listInstitutes(
+      rangeActive ? (range as StatusChangedRange) : undefined,
+      query.campus,
+    ),
     listStatusCatalogue(),
-    listReps(),
-    rangeActive ? countAllInstitutes() : Promise.resolve(null),
+    listReps(query.campus),
+    rangeActive || query.campus
+      ? countAllInstitutes(query.campus)
+      : Promise.resolve(null),
   ]);
 
   if (!registry.ok) {
@@ -355,11 +370,13 @@ export async function getInstituteStatusModel(
  * denominator costs the header its "of T" clause, which is worth far less than
  * the report itself.
  */
-async function countAllInstitutes(): Promise<number | null> {
+async function countAllInstitutes(campus?: string): Promise<number | null> {
   const supabase = await createClient();
-  const { count, error } = await supabase
+  let query = supabase
     .from("institutes")
     .select("id", { count: "exact", head: true });
+  if (campus) query = query.eq("campus_id", campus);
+  const { count, error } = await query;
 
   if (error) {
     logError("pipeline:total-count", error);

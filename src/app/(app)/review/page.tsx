@@ -8,6 +8,7 @@ import { listStatusCatalogue, listCallStatusCatalogue } from "@/lib/statuses";
 import { listInstitutesForPicker } from "@/lib/visits";
 import { listCallReports } from "@/lib/call-reports";
 import { mergeReviewFeed, reviewKinds } from "@/lib/review-feed";
+import { permittedCampuses, resolveCampusFilter } from "@/lib/campuses";
 
 export const metadata = { title: "Review" };
 
@@ -34,6 +35,14 @@ export default async function ReviewPage(props: PageProps<"/review">) {
   }
 
   const searchParams = await props.searchParams;
+  /*
+   * THE CAMPUS LIST FIRST, because the filter it resolves is part of every
+   * query below. An admin gets every campus; a team lead gets their own, which
+   * is a list of one and hides the control. A URL naming a campus this reader
+   * cannot choose resolves to no filter at all rather than to a hidden,
+   * unclearable one — see `resolveCampusFilter()`.
+   */
+  const campuses = await permittedCampuses(gate.user);
   const filters = {
     member: first(searchParams.member),
     institute: first(searchParams.institute),
@@ -41,6 +50,7 @@ export default async function ReviewPage(props: PageProps<"/review">) {
     from: first(searchParams.from),
     to: first(searchParams.to),
     reported: first(searchParams.reported),
+    campus: resolveCampusFilter(campuses, first(searchParams.campus)),
     instituteStatus: first(searchParams.status),
     /*
      * THREE STATUS PARAMS, DELIBERATELY UNMERGED.
@@ -184,6 +194,7 @@ export default async function ReviewPage(props: PageProps<"/review">) {
           status: s.status,
           isActive: s.isActive,
         }))}
+        campuses={campuses}
         pageSize={feed.pageSize}
       />
 

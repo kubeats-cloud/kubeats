@@ -88,6 +88,7 @@ interface RepProfile {
 async function readRows(
   range: ExportRange,
   memberId: string | null,
+  campus?: string,
 ): Promise<
   | {
       ok: true;
@@ -111,6 +112,12 @@ async function readRows(
     .eq("role", "rep")
     .order("name");
   if (memberId) profileQuery = profileQuery.eq("id", memberId);
+  /*
+   * The campus filter narrows the ROWS, and the rows here are reps. A campus
+   * with no reps is an empty report and says so below rather than drawing every
+   * other rep at zero.
+   */
+  if (campus) profileQuery = profileQuery.eq("campus_id", campus);
 
   let plansQuery = supabase
     .from("daily_plans")
@@ -150,13 +157,29 @@ async function readRows(
       ok: false,
       error: memberId
         ? "That member is not a rep, or is not visible to you."
-        : "There are no reps to export yet.",
+        : campus
+          ? "There are no reps on that campus."
+          : "There are no reps to export yet.",
     };
   }
+
+  /*
+   * THE SAME CAMPUS FILTER, APPLIED TO THE COUNTS.
+   *
+   * Plans and visits are read for the whole range and then tallied per rep, so
+   * a row belonging to a rep outside `people` contributes to nothing — its
+   * member key is simply never read. The one place it would have leaked in is
+   * `statusesSeen`, which decides which status COLUMNS the report draws; a
+   * status only the other campus's visitors used would have earned an empty
+   * column here. Skipping those rows keeps the filter's promise: "this campus"
+   * means the same thing to the table, the columns and the totals.
+   */
+  const listed = new Set(people.map((person) => person.id));
 
   // Rule 7's first half: meetings held, per rep.
   const meetings = new Map<string, number>();
   for (const row of plans.data ?? []) {
+    if (!listed.has(row.member)) continue;
     meetings.set(row.member, (meetings.get(row.member) ?? 0) + 1);
   }
 
@@ -167,6 +190,7 @@ async function readRows(
   for (const row of (visits.data ?? []) as (CountableVisit & {
     member: string;
   })[]) {
+    if (!listed.has(row.member)) continue;
     const list = visitsByMember.get(row.member);
     if (list) list.push(row);
     else visitsByMember.set(row.member, [row]);
@@ -256,6 +280,12 @@ export interface ActivityReportOptions {
   catalogue?: StatusCatalogue;
   /** Overview only: group null and retired-status visits into one column. */
   groupInactiveStatuses?: boolean;
+  /**
+   * One campus, already resolved against the reader's permitted list. Narrowing
+   * the rep list is the whole of it — the activity columns then narrow with it,
+   * because they are counted per listed rep.
+   */
+  campus?: string;
 }
 
 export async function getActivityReportModel(
@@ -264,7 +294,7 @@ export async function getActivityReportModel(
   options: ActivityReportOptions = {},
 ): Promise<{ ok: true; model: ActivityReportModel } | { ok: false; error: string }> {
   const [data, catalogue] = await Promise.all([
-    readRows(range, memberId),
+    readRows(range, memberId, options.campus),
     options.catalogue ? Promise.resolve(options.catalogue) : listStatusCatalogue(),
   ]);
 
@@ -400,6 +430,12 @@ export interface ActivityExportOptions {
    * Neither layout reads the reader's picker; a preference is screen-only.
    */
   layout?: "status" | "activity-status";
+  /**
+   * The screen's campus filter, so the file carries the same rows as the table.
+   * Already resolved by the route against the caller's permitted list; the
+   * model narrows the rep list and therefore every count beneath it.
+   */
+  campus?: string;
 }
 
 export async function buildActivityExport(
@@ -411,6 +447,7 @@ export async function buildActivityExport(
   const result = await getActivityReportModel(range, memberId, {
     sort,
     groupInactiveStatuses: options.layout === "activity-status",
+    campus: options.campus,
   });
   if (!result.ok) return result;
 

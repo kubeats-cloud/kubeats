@@ -106,9 +106,9 @@ describe("the Activity page: fetches all four reports, defaults to Rep Activity"
     // from/to/sort/dir/page/member/campus/q. None of the four sets share a
     // key with another.
     const sets: Record<string, string[]> = {
-      rep: ["start", "end"],
+      rep: ["start", "end", "repCampus"],
       call: ["callFrom", "callTo", "callMember", "callInstitute", "callStatus", "callSort", "callDir", "callPage"],
-      pipeline: ["pipeFrom", "pipeTo", "pipeSort", "pipeDir"],
+      pipeline: ["pipeFrom", "pipeTo", "pipeSort", "pipeDir", "pipeCampus"],
       institute: ["from", "to", "sort", "dir", "page", "member", "campus", "q"],
     };
     for (const [name, keys] of Object.entries(sets)) {
@@ -125,17 +125,19 @@ describe("the Activity page: fetches all four reports, defaults to Rep Activity"
     }
   });
 
-  it("feeds each model its own applied range, never a shared one", () => {
+  it("feeds each model its own applied range and campus, never a shared one", () => {
     expect(activityPage).toMatch(
-      /getActivityReportModel\(\{\s*start: repRange\.start,\s*end: repRange\.end\s*\}/,
+      /getActivityReportModel\(\s*\{\s*start: repRange\.start,\s*end: repRange\.end\s*\},\s*null,\s*\{\s*campus: repCampus\s*\},?\s*\)/,
     );
     expect(activityPage).toContain("getCallActivityReport(callFilters, callSort, callPage)");
     expect(activityPage).toMatch(
       /getInstituteStatusModel\(\{\s*range: pipelineParsed\.data/,
     );
+    expect(activityPage).toContain("campus: pipeCampus");
     expect(activityPage).toMatch(
       /getInstituteStatusActivityModel\(\{\s*range: instituteRange/,
     );
+    expect(activityPage).toContain("campus: instituteCampus");
   });
 });
 

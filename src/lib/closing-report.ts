@@ -245,13 +245,21 @@ export async function getVisitReport(visitId: string): Promise<VisitReport | nul
  * to land. Filtering here is what keeps the picker and the report agreeing on
  * who exists.
  */
-export async function listReps(): Promise<{ id: string; name: string }[]> {
+export async function listReps(campus?: string): Promise<{ id: string; name: string }[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("profiles")
     .select("id, name")
     .eq("role", "rep")
     .order("name");
+  /*
+   * Optional, and only used where a report is narrowed to a campus (the
+   * Pipeline and Rep Activity filters). Every existing caller passes nothing
+   * and gets the same query it always has. A team lead's list is already
+   * `supervises()`-scoped by RLS; this is a display filter inside that.
+   */
+  if (campus) query = query.eq("campus_id", campus);
+  const { data, error } = await query;
 
   if (error) {
     logError("closing:reps", error);
