@@ -8,6 +8,7 @@ import { ErrorState } from "@/components/states";
 import { AlertBanner } from "@/components/dashboard/alert-banner";
 import { DailyPlan } from "@/components/dashboard/daily-plan";
 import { TodaySnapshot } from "@/components/dashboard/today-snapshot";
+import { countHeldVisits } from "@/lib/dashboard-metrics";
 import { DailyStatusToggle } from "@/components/report/daily-status-toggle";
 import { MetricList } from "@/components/weekly/metric-list";
 import { AdminOverview } from "@/components/admin/overview";
@@ -221,7 +222,7 @@ export default async function DashboardPage(props: PageProps<"/">) {
   ]);
 
   const entries = plan.ok ? plan.entries : [];
-  const held = entries.filter((entry) => entry.meetings_actual !== null).length;
+  const held = countHeldVisits(entries);
 
   const repActivitySort = activityReport?.ok
     ? parsePipelineSort(
