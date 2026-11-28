@@ -489,6 +489,15 @@ const has0066 = configured
       .then(({ error }) => !error)
   : false;
 
+/** 0075 adds the child table and atomic weekly-target RPC. */
+const has0075 = configured
+  ? await admin
+      .from("target_status_targets")
+      .select("target_id")
+      .limit(1)
+      .then(({ error }) => !error)
+  : false;
+
 /**
  * 0069 adds rep_daily_status and its three RPCs. Probed by table existence in
  * the same style as 0065/0066 — the service role has no auth.uid(), so calling
@@ -11658,4 +11667,181 @@ describe.skipIf(!configured)("the rules enforced in Postgres", () => {
       expect(data, "the row must still be there, under its new name").toHaveLength(1);
     });
   });
+
+  /* ---------------------------------------------------------------- */
+  /* 0075 — target statuses as rep-set numeric weekly targets          */
+  /*
+   * Integration-only by design: do not run this suite against hosted
+   * Supabase. It exercises authenticated RLS sessions and lock triggers.
+   */
+  /* ---------------------------------------------------------------- */
+
+  describe.skipIf(!has0075)(
+    "0075 target-status targets — atomic save, RLS and lock",
+    () => {
+      const week = mondayOf(iso(-84));
+      const hiddenWeek = mondayOf(iso(-98));
+      const statusName = `${TAG} numeric target`;
+      const hiddenStatusName = `${TAG} other-campus target`;
+      let targetId: string;
+      let lead: Member;
+      let otherCampusId: string;
+
+      const rpcPayload = (submit: boolean, value: number) => ({
+        p_week_start: week,
+        p_meetings: 2,
+        p_sessions_set: 3,
+        p_sessions_done: 1,
+        p_campus_visits_set: 4,
+        p_campus_visits_done: 2,
+        p_olympiad: 5,
+        p_application: 6,
+        p_admission: 1,
+        p_calls: 12,
+        p_status_targets: { [statusName]: value },
+        p_submit: submit,
+      });
+
+      beforeAll(async () => {
+        const { data: otherCampus, error: campusError } = await admin
+          .from("campuses")
+          .insert({ name: `${TAG} target campus B`, city: "Elsewhere", active: false })
+          .select("id")
+          .single();
+        expect(campusError, campusError?.message).toBeNull();
+        otherCampusId = otherCampus!.id as string;
+
+        const added = await boss.db
+          .from("target_statuses")
+          .insert([
+            { name: statusName, campus_id: campusA },
+            { name: hiddenStatusName, campus_id: otherCampusId },
+          ]);
+        expect(added.error, added.error?.message).toBeNull();
+
+        lead = await makeMember("team_lead", "status-target-lead", campusA);
+        const assigned = await boss.db
+          .from("profiles")
+          .update({ team_lead_id: lead.id })
+          .eq("id", repA.id);
+        expect(assigned.error, assigned.error?.message).toBeNull();
+      });
+
+      afterAll(async () => {
+        await boss.db.from("profiles").update({ team_lead_id: null }).eq("id", repA.id);
+        await admin.from("targets").delete().eq("member", repA.id).eq("period_start", week);
+        await admin
+          .from("target_statuses")
+          .delete()
+          .in("name", [statusName, `${statusName} renamed`, hiddenStatusName]);
+        await admin.from("campuses").delete().eq("id", otherCampusId);
+      });
+
+      it("refuses an invisible status and rolls back the new parent row", async () => {
+        const attempted = await repA.db.rpc("save_weekly_targets", {
+          ...rpcPayload(false, 4),
+          p_week_start: hiddenWeek,
+          p_status_targets: { [hiddenStatusName]: 4 },
+        });
+        expect(attempted.error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+
+        const { data: parent } = await admin
+          .from("targets")
+          .select("id")
+          .eq("member", repA.id)
+          .eq("period", "weekly")
+          .eq("period_start", hiddenWeek);
+        expect(parent, "the failed child write must roll back its parent").toEqual([]);
+      });
+
+      it("creates the parent and child atomically when no target row exists", async () => {
+        const saved = await repA.db.rpc("save_weekly_targets", rpcPayload(false, 7));
+        expect(saved.error, saved.error?.message).toBeNull();
+        targetId = saved.data as string;
+
+        const { data: parent } = await admin
+          .from("targets")
+          .select("meetings, calls, locked")
+          .eq("id", targetId)
+          .single();
+        const { data: child } = await admin
+          .from("target_status_targets")
+          .select("status_name, value")
+          .eq("target_id", targetId)
+          .single();
+
+        expect(parent).toMatchObject({ meetings: 2, calls: 12, locked: false });
+        expect(child).toEqual({ status_name: statusName, value: 7 });
+      });
+
+      it("hides the child from another rep but lets the supervising lead read it", async () => {
+        const outsider = await repB.db
+          .from("target_status_targets")
+          .select("value")
+          .eq("target_id", targetId);
+        expect(outsider.error, outsider.error?.message).toBeNull();
+        expect(outsider.data).toEqual([]);
+
+        const supervised = await lead.db
+          .from("target_status_targets")
+          .select("value")
+          .eq("target_id", targetId);
+        expect(supervised.error, supervised.error?.message).toBeNull();
+        expect(supervised.data).toEqual([{ value: 7 }]);
+      });
+
+      it("locks parent and child together, then permits edits only after a lead reopens", async () => {
+        const submitted = await repA.db.rpc("save_weekly_targets", rpcPayload(true, 8));
+        expect(submitted.error, submitted.error?.message).toBeNull();
+
+        const lockedEdit = await repA.db
+          .from("target_status_targets")
+          .update({ value: 9 })
+          .eq("target_id", targetId)
+          .select("value");
+        expect(lockedEdit.error, lockedEdit.error?.message).toBeNull();
+        expect(lockedEdit.data, "RLS must filter the locked child row").toEqual([]);
+
+        const reopened = await lead.db
+          .from("targets")
+          .update({ locked: false })
+          .eq("id", targetId);
+        expect(reopened.error, reopened.error?.message).toBeNull();
+
+        const revised = await repA.db
+          .from("target_status_targets")
+          .update({ value: 9 })
+          .eq("target_id", targetId);
+        expect(revised.error, revised.error?.message).toBeNull();
+      });
+
+      it("restricts deletion and preserves saved values across a status rename", async () => {
+        const resubmitted = await repA.db.rpc(
+          "save_weekly_targets",
+          rpcPayload(true, 9),
+        );
+        expect(resubmitted.error, resubmitted.error?.message).toBeNull();
+
+        const deleted = await admin
+          .from("target_statuses")
+          .delete()
+          .eq("name", statusName);
+        expect(deleted.error?.code).toBe(FOREIGN_KEY_VIOLATION);
+
+        const renamedName = `${statusName} renamed`;
+        const renamed = await boss.db
+          .from("target_statuses")
+          .update({ name: renamedName })
+          .eq("name", statusName);
+        expect(renamed.error, renamed.error?.message).toBeNull();
+
+        const { data: child } = await admin
+          .from("target_status_targets")
+          .select("status_name, value")
+          .eq("target_id", targetId)
+          .single();
+        expect(child).toEqual({ status_name: renamedName, value: 9 });
+      });
+    },
+  );
 });

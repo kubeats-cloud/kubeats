@@ -14,6 +14,7 @@ import {
   weeklyFieldErrors,
 } from "@/lib/validation/weekly";
 import { addWeeks, isFutureWeek } from "@/lib/weeks";
+import { parseVisibleStatusTargets } from "@/lib/validation/target-status-targets";
 
 /**
  * Rule 6 — the weekly target lock.
@@ -104,12 +105,38 @@ async function writeTargets(
     };
   }
 
+  // Re-read the vocabulary under this rep's session. RLS supplies exactly the
+  // global/own-campus rows they may set; crafted fields for another campus are
+  // never included in the parsed payload.
+  const { data: visibleStatuses, error: statusesError } = await supabase
+    .from("target_statuses")
+    .select("name")
+    .order("name", { ascending: true });
+  if (statusesError) {
+    logError("targets:visible-statuses", statusesError);
+    return {
+      error: "We could not load the available target statuses. Please try again.",
+      fieldErrors: {},
+    };
+  }
+
+  const parsedStatuses = parseVisibleStatusTargets(
+    formData,
+    (visibleStatuses ?? []).map((row) => row.name as string),
+  );
+  if (!parsedStatuses.success) {
+    return {
+      error: CHECK_NUMBERS,
+      fieldErrors: parsedStatuses.fieldErrors,
+    };
+  }
+
   const payload: Record<string, unknown> = {
-    member: user.id,
-    period: PERIOD,
-    period_start: input.week_start,
+    p_week_start: input.week_start,
+    p_status_targets: parsedStatuses.payload,
+    p_submit: submit,
   };
-  for (const key of METRIC_KEYS) payload[key] = input[key];
+  for (const key of METRIC_KEYS) payload[`p_${key}`] = input[key];
   /*
    * `calls` written BY NAME, outside the METRIC_KEYS loop, and that is the
    * point rather than an oversight: it is not a metric (see targetsSchema), so
@@ -119,12 +146,9 @@ async function writeTargets(
    * `null` is written as null, not coerced to 0 — the column is nullable in
    * 0040 exactly so "did not set a calls target" survives being stored.
    */
-  payload.calls = input.calls;
-  if (submit) payload.locked = true;
+  payload.p_calls = input.calls;
 
-  const { error } = await supabase
-    .from("targets")
-    .upsert(payload, { onConflict: "member,period,period_start" });
+  const { error } = await supabase.rpc("save_weekly_targets", payload);
 
   if (error) {
     logError(submit ? "targets:submit" : "targets:save", error);

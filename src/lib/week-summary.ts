@@ -10,6 +10,7 @@ import {
   type MetricCounts,
   type TallyableVisit,
 } from "@/lib/validation/weekly";
+import type { StatusTargetValue } from "@/lib/validation/target-status-targets";
 
 /**
  * A rep's week: what they committed to, and what they actually did.
@@ -58,6 +59,8 @@ export interface WeekTargets {
    * exhaustive. Folding it in would break both.
    */
   calls: number | null;
+  /** Extra rep-set commitments; intentionally no achieved counterpart. */
+  statusTargets: StatusTargetValue[];
 }
 
 export interface WeekSummary {
@@ -82,6 +85,7 @@ function emptyRecord(member: string, weekStart: string): WeekTargets {
     // Null, not 0: a week with no row is a week nobody committed to, which is
     // the same absence a blank field means. 0 would render a bar at 0%.
     calls: null,
+    statusTargets: [],
   };
 }
 
@@ -100,7 +104,10 @@ type RawRow = Record<string, unknown> & {
   reopened_at: string | null;
 };
 
-function toRecord(row: RawRow): WeekTargets {
+function toRecord(
+  row: RawRow,
+  statusTargets: StatusTargetValue[] = [],
+): WeekTargets {
   const targets = { ...ZERO_COUNTS };
   for (const key of METRIC_KEYS) {
     const value = row[key];
@@ -119,7 +126,18 @@ function toRecord(row: RawRow): WeekTargets {
     // degrades to what it showed before the column existed rather than
     // throwing. Same tolerance the schema gives a cached form post.
     calls: typeof row.calls === "number" ? row.calls : null,
+    statusTargets,
   };
+}
+
+interface RawStatusTargetRow {
+  target_id: string;
+  status_name: string;
+  value: number;
+}
+
+function toStatusTarget(row: RawStatusTargetRow): StatusTargetValue {
+  return { statusName: row.status_name, value: row.value };
 }
 
 /**
@@ -145,6 +163,7 @@ export function isQuietWeek(achieved: MetricCounts): boolean {
 export async function getWeekSummary(
   memberId: string,
   weekStart: string,
+  { includeStatusTargets = false }: { includeStatusTargets?: boolean } = {},
 ): Promise<{ ok: true; summary: WeekSummary } | { ok: false }> {
   const supabase = await createClient();
   const { start, end } = periodRange("weekly", weekStart);
@@ -186,13 +205,28 @@ export async function getWeekSummary(
     return { ok: false };
   }
 
+  let statusTargets: StatusTargetValue[] = [];
+  if (includeStatusTargets && targetsResult.data) {
+    const targetRow = targetsResult.data as unknown as RawRow;
+    const { data, error } = await supabase
+      .from("target_status_targets")
+      .select("target_id, status_name, value")
+      .eq("target_id", targetRow.id)
+      .order("status_name", { ascending: true });
+    if (error) {
+      logError("week-summary:status-targets", error);
+      return { ok: false };
+    }
+    statusTargets = ((data ?? []) as RawStatusTargetRow[]).map(toStatusTarget);
+  }
+
   return {
     ok: true,
     summary: {
       member: memberId,
       weekStart,
       record: targetsResult.data
-        ? toRecord(targetsResult.data as unknown as RawRow)
+        ? toRecord(targetsResult.data as unknown as RawRow, statusTargets)
         : emptyRecord(memberId, weekStart),
       achieved: achievedFrom(
         (visitsResult.data ?? []) as TallyableVisit[],

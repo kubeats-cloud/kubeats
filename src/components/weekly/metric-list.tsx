@@ -2,6 +2,7 @@ import { MetricRow } from "@/components/weekly/metric-row";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/states";
 import { METRICS, type MetricCounts } from "@/lib/validation/weekly";
+import type { StatusTargetValue } from "@/lib/validation/target-status-targets";
 
 /**
  * All eight metrics for a week, read-only: the rep's Dashboard summary and the
@@ -25,6 +26,7 @@ export function MetricList({
   title,
   targets,
   achieved,
+  statusTargets = [],
   description,
   emptyDescription = "Targets set for this week fill in as visits are logged.",
   emptyAction,
@@ -32,15 +34,19 @@ export function MetricList({
   title: string;
   targets: MetricCounts;
   achieved: MetricCounts;
+  /** Extra numeric commitments have no achieved/progress UI in this phase. */
+  statusTargets?: StatusTargetValue[];
   description?: string;
   /** Reworded when the reader is the person who can act on it. */
   emptyDescription?: string;
   /** Offered on the blank-week empty state, e.g. "Set this week's targets". */
   emptyAction?: React.ReactNode;
 }) {
-  const nothingAtAll = METRICS.every(
-    (metric) => targets[metric.key] === 0 && achieved[metric.key] === 0,
-  );
+  const nothingAtAll =
+    statusTargets.length === 0 &&
+    METRICS.every(
+      (metric) => targets[metric.key] === 0 && achieved[metric.key] === 0,
+    );
 
   return (
     <Card>
@@ -67,6 +73,24 @@ export function MetricList({
                 target={targets[metric.key]}
               />
             ))}
+            {statusTargets.length > 0 && (
+              <div className="mt-4 space-y-1 border-t pt-4">
+                <p className="text-muted-foreground mb-2 text-xs font-medium uppercase tracking-wide">
+                  Target status targets
+                </p>
+                {statusTargets.map((target) => (
+                  <div
+                    key={target.statusName}
+                    className="flex items-center justify-between gap-4 py-2"
+                  >
+                    <span className="text-sm">{target.statusName}</span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {target.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </CardContent>

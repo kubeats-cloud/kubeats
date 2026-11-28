@@ -185,7 +185,11 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
   ] = await Promise.all([
       settled(listStatusCatalogue(), SEED_STATUS_CATALOGUE, "team-hub:statuses"),
       settled(listCallStatusCatalogue(), SEED_STATUS_CATALOGUE, "team-hub:call-statuses"),
-      settled(getWeekSummary(memberId, weekStart), { ok: false as const }, "team-hub:week"),
+      settled(
+        getWeekSummary(memberId, weekStart, { includeStatusTargets: true }),
+        { ok: false as const },
+        "team-hub:week",
+      ),
       settled(
         getActivityReport(memberId, member.name, period, periodStart),
         { ok: false as const },
@@ -333,6 +337,7 @@ export default async function MemberHubPage(props: PageProps<"/team/[memberId]">
           title="Target vs achieved"
           targets={week.summary.record.targets}
           achieved={week.summary.achieved}
+          statusTargets={week.summary.record.statusTargets}
           emptyDescription="This rep has not set targets for this week. Their counts still appear here as they log visits."
         />
       ) : (

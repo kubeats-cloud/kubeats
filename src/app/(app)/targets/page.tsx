@@ -12,7 +12,7 @@ import { TargetStatusesPanel } from "@/components/weekly/target-statuses-panel";
 import { WeekNavigator } from "@/components/weekly/week-navigator";
 import { getCurrentUser, isAdmin, isStaff } from "@/lib/auth";
 import { getWeekSummary, memberName } from "@/lib/week-summary";
-import { listTargetStatusRows, type TargetStatusRow } from "@/lib/target-statuses";
+import { listTargetStatusRows } from "@/lib/target-statuses";
 import { listCampuses } from "@/lib/campuses";
 import { AdminTargetRoster } from '@/components/weekly/admin-target-roster';
 import { completionPercent } from "@/lib/validation/weekly";
@@ -98,18 +98,14 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
     );
   }
 
-  // Only the rep's own view renders the list below — see where it is used.
-  // Campuses are fetched alongside it too: campus names are readable by
-  // every signed-in user (campuses_select), and a status scoped to the
-  // rep's own campus should read as that campus's name, not "Unknown
-  // campus" for want of the lookup list.
-  const [result, name, statuses, repCampuses] = await Promise.all([
-    getWeekSummary(memberId, weekStart),
+  // The rep's own view needs the RLS-filtered vocabulary for editable numeric
+  // rows. Staff viewing a rep use the saved rows already loaded in the summary.
+  const [result, name, statuses] = await Promise.all([
+    getWeekSummary(memberId, weekStart, { includeStatusTargets: true }),
     viewingOther ? memberName(memberId) : Promise.resolve(user.name),
     viewingOther
-      ? Promise.resolve({ ok: true as const, statuses: [] as TargetStatusRow[] })
+      ? Promise.resolve({ ok: true as const, statuses: [] })
       : listTargetStatusRows(),
-    viewingOther ? Promise.resolve([]) : listCampuses(),
   ]);
 
   const displayName = name ?? "this member";
@@ -191,6 +187,7 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
             description={formatWeekRange(weekStart)}
             targets={record.targets}
             achieved={achieved}
+            statusTargets={record.statusTargets}
           />
 
           {record.locked ? (
@@ -213,21 +210,14 @@ export default async function TargetsPage(props: PageProps<"/targets">) {
             weekStart={weekStart}
             targets={record.targets}
             calls={record.calls}
+            statuses={statuses.ok ? statuses.statuses : []}
+            statusTargets={record.statusTargets}
             achieved={achieved}
             locked={record.locked}
             submittedAt={record.submitted_at}
             reopenedAt={record.reopened_at}
           />
 
-          {/* Rep #2 — "the newly added status ... displayed consistently
-              wherever target statuses are used" and "available to the
-              appropriate Reps." Read-only here: adding one is Admin #8's
-              control, on the admin's own view of this same tab above. */}
-          <TargetStatusesPanel
-            statuses={statuses.ok ? statuses.statuses : []}
-            canAdd={false}
-            campuses={repCampuses}
-          />
         </div>
       )}
     </PageColumn>

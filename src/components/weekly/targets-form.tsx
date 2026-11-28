@@ -27,6 +27,13 @@ import {
   weeklyFieldErrors,
 } from "@/lib/validation/weekly";
 import { CHECK_NUMBERS, FormNotice } from "@/components/form-notice";
+import type { TargetStatusRow } from "@/lib/target-statuses";
+import {
+  mapStatusTargetFormValues,
+  parseVisibleStatusTargets,
+  statusTargetFieldName,
+  type StatusTargetValue,
+} from "@/lib/validation/target-status-targets";
 
 /**
  * The rep's commitment for one week.
@@ -43,6 +50,8 @@ export function TargetsForm({
   targets,
   achieved,
   calls,
+  statuses,
+  statusTargets,
   locked,
   submittedAt,
   reopenedAt,
@@ -52,6 +61,9 @@ export function TargetsForm({
   achieved: MetricCounts;
   /** The OPTIONAL calls commitment. `null` means the rep did not set one. */
   calls: number | null;
+  /** Vocabulary already filtered to this rep by target_statuses RLS. */
+  statuses: TargetStatusRow[];
+  statusTargets: StatusTargetValue[];
   locked: boolean;
   submittedAt: string | null;
   reopenedAt: string | null;
@@ -74,6 +86,12 @@ export function TargetsForm({
   const [callsValue, setCallsValue] = useState(
     calls === null ? "" : String(calls),
   );
+  const [statusValues, setStatusValues] = useState<Record<string, string>>(() =>
+    mapStatusTargetFormValues(
+      statuses.map((status) => status.name),
+      statusTargets,
+    ),
+  );
   const [confirming, setConfirming] = useState(false);
 
   const error = serverState.error ?? clientState.error;
@@ -90,6 +108,19 @@ export function TargetsForm({
       setClientState({
         error: CHECK_NUMBERS,
         fieldErrors: weeklyFieldErrors(parsed.error),
+      });
+      setConfirming(false);
+      return;
+    }
+    const parsedStatuses = parseVisibleStatusTargets(
+      new FormData(event.currentTarget),
+      statuses.map((status) => status.name),
+    );
+    if (!parsedStatuses.success) {
+      event.preventDefault();
+      setClientState({
+        error: CHECK_NUMBERS,
+        fieldErrors: parsedStatuses.fieldErrors,
       });
       setConfirming(false);
       return;
@@ -220,6 +251,48 @@ export function TargetsForm({
               <p className="text-danger text-xs">{fieldErrors.calls}</p>
             )}
           </div>
+
+          {statuses.length > 0 && (
+            <div className="space-y-4 border-t pt-5 sm:col-span-2">
+              <div>
+                <h3 className="text-sm font-medium">Target status targets</h3>
+                <p className="text-muted-foreground text-xs">
+                  Set a weekly number for each status available to your campus.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {statuses.map((status) => {
+                  const fieldName = statusTargetFieldName(status.name);
+                  const fieldError = fieldErrors[fieldName];
+                  return (
+                    <div key={status.name} className="space-y-2">
+                      <Label htmlFor={fieldName}>{status.name}</Label>
+                      <Input
+                        id={fieldName}
+                        name={fieldName}
+                        inputMode="numeric"
+                        className="h-11"
+                        disabled={locked}
+                        aria-invalid={fieldError ? true : undefined}
+                        value={statusValues[status.name] ?? "0"}
+                        onChange={(event) =>
+                          setStatusValues((previous) => ({
+                            ...previous,
+                            [status.name]: event.target.value
+                              .replace(/\D/g, "")
+                              .slice(0, 3),
+                          }))
+                        }
+                      />
+                      {fieldError && (
+                        <p className="text-danger text-xs">{fieldError}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

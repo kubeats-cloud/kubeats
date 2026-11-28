@@ -246,7 +246,7 @@ describe("the separation E1 rests on, at source level", () => {
   /** It is written by name, never through the loop that walks METRIC_KEYS. */
   it("writes calls outside the METRIC_KEYS loop", () => {
     const actions = read("src/lib/target-actions.ts");
-    expect(actions).toContain("payload.calls = input.calls");
+    expect(actions).toContain("payload.p_calls = input.calls");
   });
 
   /**
